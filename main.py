@@ -9,7 +9,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 from dotenv import load_dotenv
-
+from warehouse_ai import WarehouseAI
 
 load_dotenv()
 
@@ -43,8 +43,17 @@ async def start_handler(message: Message) -> None:
 
 @dp.message(F.text == "📊 Hisobot")
 async def report_handler(message: Message) -> None:
-    await message.answer("📊 Hisobot bo‘limi tez orada ishga tushadi.")
+    ai = WarehouseAI()
+    result = ai.analyze(
+    old_stock=100000,
+    new_products=50000,
+    expenses=20000,
+    computer_stock=125000,
+    old_margin=20,
+    new_margin=15,
+)
 
+    await message.answer(result)
 
 @dp.message(F.text == "🤖 AI Tahlil")
 async def analysis_handler(message: Message) -> None:

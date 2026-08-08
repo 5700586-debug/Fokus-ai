@@ -4,7 +4,9 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiogram.types import (
+    ErrorEvent,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -38,7 +40,10 @@ if not OPENAI_API_KEY:
 
 init_db()
 
-dp = Dispatcher(storage=SQLiteStorage())
+# events_isolation: bitta foydalanuvchining ketma-ket kelgan xabarlari
+# (masalan onboarding savol-javoblari) doim navbat bilan, bir-birini
+# bosmasdan qayta ishlansin.
+dp = Dispatcher(storage=SQLiteStorage(), events_isolation=SimpleEventIsolation())
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # AI Tahlil rejimiga kirgan foydalanuvchilar
@@ -293,6 +298,30 @@ async def ai_message_handler(message: Message) -> None:
             "❌ AI bilan bog‘lanishda xato yuz berdi.\n"
             "Terminaldagi xatoni tekshirish kerak."
         )
+
+
+@dp.errors()
+async def error_handler(event: ErrorEvent, bot: Bot) -> None:
+    print(f"Bot xatosi: {event.exception!r}")
+
+    update = event.update
+    user_id = None
+    if update.message and update.message.from_user:
+        user_id = update.message.from_user.id
+    elif update.callback_query and update.callback_query.from_user:
+        user_id = update.callback_query.from_user.id
+
+    if user_id is None:
+        return
+
+    try:
+        await bot.send_message(
+            user_id,
+            "⚠️ Kutilmagan xatolik yuz berdi. Iltimos, oxirgi xabaringizni "
+            "qayta yuboring yoki /start ni bosing.",
+        )
+    except Exception as notify_error:
+        print(f"Foydalanuvchiga xato haqida xabar berib bo'lmadi: {notify_error!r}")
 
 
 async def main() -> None:

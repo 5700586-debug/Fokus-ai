@@ -79,6 +79,9 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_FILE)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Boshqa ulanish faylni qisqa vaqt band qilib turgan bo'lsa ham darhol
+    # "database is locked" xatosi bilan yiqilmasdan, biroz kutib qayta urinsin.
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn
 

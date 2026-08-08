@@ -4,7 +4,6 @@ import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     KeyboardButton,
     Message,
@@ -14,11 +13,15 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+import approval
+import employees
+import invites
 import onboarding
 from warehouse_ai import WarehouseAI
 from config import FOUNDER_ID
-from employees import format_card, has_completed_onboarding
+from db import init_db
 from roles import ROLES, get_role, is_authorized, list_users, remove_user, role_name, set_role
+from storage import SQLiteStorage
 
 
 load_dotenv()
@@ -33,7 +36,9 @@ if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY .env faylida topilmadi")
 
 
-dp = Dispatcher(storage=MemoryStorage())
+init_db()
+
+dp = Dispatcher(storage=SQLiteStorage())
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # AI Tahlil rejimiga kirgan foydalanuvchilar
@@ -50,20 +55,6 @@ async def ensure_authorized(message: Message) -> bool:
     return False
 
 
-async def ensure_onboarded(message: Message) -> bool:
-    if not message.from_user:
-        return False
-
-    if message.from_user.id == FOUNDER_ID or has_completed_onboarding(message.from_user.id):
-        return True
-
-    await message.answer(
-        "Iltimos, avval ro‘yxatdan o‘tish jarayonini yakunlang. /start ni bosing.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    return False
-
-
 menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Hisobot")],
@@ -74,7 +65,8 @@ menu = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-onboarding.register(dp, menu)
+onboarding.register(dp)
+approval.register(dp)
 
 
 @dp.message(CommandStart())
@@ -84,11 +76,16 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
     ai_users.discard(message.from_user.id)
 
-    if not await ensure_authorized(message):
+    parts = (message.text or "").split(maxsplit=1)
+    invite_token = parts[1].strip() if len(parts) > 1 else None
+
+    # Onboarding FAQAT bir martalik invite havolasi orqali boshlanadi —
+    # oddiy /start bosgan begona/ruxsatsiz foydalanuvchi bu yerga kirmaydi.
+    if invite_token and not is_authorized(message.from_user.id):
+        await onboarding.start_onboarding_from_invite(message, state, invite_token)
         return
 
-    if message.from_user.id != FOUNDER_ID and not has_completed_onboarding(message.from_user.id):
-        await onboarding.start_onboarding(message, state)
+    if not await ensure_authorized(message):
         return
 
     if message.from_user.id == FOUNDER_ID:
@@ -103,8 +100,6 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 @dp.message(F.text == "📊 Hisobot")
 async def report_handler(message: Message) -> None:
     if not await ensure_authorized(message):
-        return
-    if not await ensure_onboarded(message):
         return
 
     ai = WarehouseAI()
@@ -125,8 +120,6 @@ async def report_handler(message: Message) -> None:
 async def analysis_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
-    if not await ensure_onboarded(message):
-        return
 
     if message.from_user:
         ai_users.add(message.from_user.id)
@@ -141,8 +134,6 @@ async def analysis_handler(message: Message) -> None:
 async def warehouse_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
-    if not await ensure_onboarded(message):
-        return
 
     if message.from_user:
         ai_users.discard(message.from_user.id)
@@ -154,13 +145,40 @@ async def warehouse_handler(message: Message) -> None:
 async def settings_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
-    if not await ensure_onboarded(message):
-        return
 
     if message.from_user:
         ai_users.discard(message.from_user.id)
 
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
+
+
+@dp.message(Command("invite"))
+async def invite_handler(message: Message) -> None:
+    if not message.from_user or message.from_user.id != FOUNDER_ID:
+        return
+
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) < 3:
+        role_list = "\n".join(f"• {key} — {name}" for key, name in ROLES.items() if key != "founder")
+        await message.answer(
+            "Foydalanish: /invite <role_key> <filial nomi>\n\nMavjud rollar:\n" + role_list
+        )
+        return
+
+    role_key, branch = parts[1].strip(), parts[2].strip()
+    if role_key not in ROLES or role_key == "founder":
+        await message.answer(f"❌ Noto‘g‘ri rol kaliti: {role_key}")
+        return
+
+    token = invites.create_invite(role_key, branch, created_by=FOUNDER_ID)
+    me = await message.bot.get_me()
+    link = f"https://t.me/{me.username}?start={token}"
+
+    await message.answer(
+        "✅ Taklif havolasi yaratildi (2 soat amal qiladi):\n"
+        f"{link}\n\n"
+        f"Rol: {role_name(role_key)}\nFilial: {branch}"
+    )
 
 
 @dp.message(Command("setrole"))
@@ -231,15 +249,12 @@ async def profile_handler(message: Message) -> None:
         return
 
     user_id = int(parts[1].strip())
-    card = format_card(user_id)
+    card = employees.format_founder_card(user_id)
     if card is None:
-        await message.answer(
-            f"ℹ️ {user_id} uchun profil topilmadi (onboarding tugallanmagan)."
-        )
+        await message.answer(f"ℹ️ {user_id} uchun anketa topilmadi.")
         return
 
-    role = role_name(get_role(user_id))
-    await message.answer(f"👤 Rol: {role}\n\n{card}")
+    await message.answer(card)
 
 
 @dp.message(F.text)
@@ -248,8 +263,6 @@ async def ai_message_handler(message: Message) -> None:
         return
 
     if not await ensure_authorized(message):
-        return
-    if not await ensure_onboarded(message):
         return
 
     user_text = message.text

@@ -3,7 +3,12 @@ import os
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import (
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -37,7 +42,7 @@ async def ensure_authorized(message: Message) -> bool:
     if message.from_user and is_authorized(message.from_user.id):
         return True
 
-    await message.answer(STRANGER_TEXT)
+    await message.answer(STRANGER_TEXT, reply_markup=ReplyKeyboardRemove())
     return False
 
 

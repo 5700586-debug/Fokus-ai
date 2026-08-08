@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from warehouse_ai import WarehouseAI
+from config import FOUNDER_ID
 
 
 load_dotenv()
@@ -38,18 +39,17 @@ menu = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
 )
-
-
 @dp.message(CommandStart())
 async def start_handler(message: Message) -> None:
     if message.from_user:
         ai_users.discard(message.from_user.id)
-
-    await message.answer(
-        "Assalomu alaykum!\n"
-        "Fokus AI botiga xush kelibsiz! 🚀",
-        reply_markup=menu,
-    )
+        
+        if message.from_user.id == FOUNDER_ID:
+            greeting = "Assalomu alaykum, Asoschi! 👑\nFokus AI botingiz tayyor!"
+        else:
+            greeting = "Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀"
+            
+        await message.answer(greeting, reply_markup=menu)
 
 
 @dp.message(F.text == "📊 Hisobot")

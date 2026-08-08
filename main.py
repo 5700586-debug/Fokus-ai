@@ -3,6 +3,8 @@ import os
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     KeyboardButton,
     Message,
@@ -12,8 +14,10 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+import onboarding
 from warehouse_ai import WarehouseAI
 from config import FOUNDER_ID
+from employees import format_card, has_completed_onboarding
 from roles import ROLES, get_role, is_authorized, list_users, remove_user, role_name, set_role
 
 
@@ -29,7 +33,7 @@ if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY .env faylida topilmadi")
 
 
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # AI Tahlil rejimiga kirgan foydalanuvchilar
@@ -46,6 +50,20 @@ async def ensure_authorized(message: Message) -> bool:
     return False
 
 
+async def ensure_onboarded(message: Message) -> bool:
+    if not message.from_user:
+        return False
+
+    if message.from_user.id == FOUNDER_ID or has_completed_onboarding(message.from_user.id):
+        return True
+
+    await message.answer(
+        "Iltimos, avval ro‘yxatdan o‘tish jarayonini yakunlang. /start ni bosing.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return False
+
+
 menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📊 Hisobot")],
@@ -55,14 +73,22 @@ menu = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
 )
+
+onboarding.register(dp, menu)
+
+
 @dp.message(CommandStart())
-async def start_handler(message: Message) -> None:
+async def start_handler(message: Message, state: FSMContext) -> None:
     if not message.from_user:
         return
 
     ai_users.discard(message.from_user.id)
 
     if not await ensure_authorized(message):
+        return
+
+    if message.from_user.id != FOUNDER_ID and not has_completed_onboarding(message.from_user.id):
+        await onboarding.start_onboarding(message, state)
         return
 
     if message.from_user.id == FOUNDER_ID:
@@ -77,6 +103,8 @@ async def start_handler(message: Message) -> None:
 @dp.message(F.text == "📊 Hisobot")
 async def report_handler(message: Message) -> None:
     if not await ensure_authorized(message):
+        return
+    if not await ensure_onboarded(message):
         return
 
     ai = WarehouseAI()
@@ -97,6 +125,8 @@ async def report_handler(message: Message) -> None:
 async def analysis_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
+    if not await ensure_onboarded(message):
+        return
 
     if message.from_user:
         ai_users.add(message.from_user.id)
@@ -111,6 +141,8 @@ async def analysis_handler(message: Message) -> None:
 async def warehouse_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
+    if not await ensure_onboarded(message):
+        return
 
     if message.from_user:
         ai_users.discard(message.from_user.id)
@@ -121,6 +153,8 @@ async def warehouse_handler(message: Message) -> None:
 @dp.message(F.text == "⚙️ Sozlamalar")
 async def settings_handler(message: Message) -> None:
     if not await ensure_authorized(message):
+        return
+    if not await ensure_onboarded(message):
         return
 
     if message.from_user:
@@ -186,12 +220,36 @@ async def list_users_handler(message: Message) -> None:
     await message.answer(f"Ruxsat etilgan foydalanuvchilar:\n{lines}")
 
 
+@dp.message(Command("profile"))
+async def profile_handler(message: Message) -> None:
+    if not message.from_user or message.from_user.id != FOUNDER_ID:
+        return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip().lstrip("-").isdigit():
+        await message.answer("Foydalanish: /profile <user_id>")
+        return
+
+    user_id = int(parts[1].strip())
+    card = format_card(user_id)
+    if card is None:
+        await message.answer(
+            f"ℹ️ {user_id} uchun profil topilmadi (onboarding tugallanmagan)."
+        )
+        return
+
+    role = role_name(get_role(user_id))
+    await message.answer(f"👤 Rol: {role}\n\n{card}")
+
+
 @dp.message(F.text)
 async def ai_message_handler(message: Message) -> None:
     if not message.from_user or message.from_user.id not in ai_users:
         return
 
     if not await ensure_authorized(message):
+        return
+    if not await ensure_onboarded(message):
         return
 
     user_text = message.text

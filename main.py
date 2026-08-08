@@ -2,13 +2,14 @@ import asyncio
 import os
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from warehouse_ai import WarehouseAI
 from config import FOUNDER_ID
+from roles import ROLES, get_role, is_authorized, list_users, remove_user, role_name, set_role
 
 
 load_dotenv()
@@ -29,6 +30,16 @@ openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # AI Tahlil rejimiga kirgan foydalanuvchilar
 ai_users: set[int] = set()
 
+STRANGER_TEXT = "Hmm… bu bot bilan qiziqib qoldingizmi? 🤨"
+
+
+async def ensure_authorized(message: Message) -> bool:
+    if message.from_user and is_authorized(message.from_user.id):
+        return True
+
+    await message.answer(STRANGER_TEXT)
+    return False
+
 
 menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -41,19 +52,28 @@ menu = ReplyKeyboardMarkup(
 )
 @dp.message(CommandStart())
 async def start_handler(message: Message) -> None:
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
-        
-        if message.from_user.id == FOUNDER_ID:
-            greeting = "Assalomu alaykum, Asoschi! 👑\nFokus AI botingiz tayyor!"
-        else:
-            greeting = "Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀"
-            
-        await message.answer(greeting, reply_markup=menu)
+    if not message.from_user:
+        return
+
+    ai_users.discard(message.from_user.id)
+
+    if not await ensure_authorized(message):
+        return
+
+    if message.from_user.id == FOUNDER_ID:
+        greeting = "Assalomu alaykum, Asoschi! 👑\nFokus AI botingiz tayyor!"
+    else:
+        role = role_name(get_role(message.from_user.id))
+        greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role}"
+
+    await message.answer(greeting, reply_markup=menu)
 
 
 @dp.message(F.text == "📊 Hisobot")
 async def report_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
     ai = WarehouseAI()
 
     result = ai.analyze(
@@ -70,6 +90,9 @@ async def report_handler(message: Message) -> None:
 
 @dp.message(F.text == "🤖 AI Tahlil")
 async def analysis_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
     if message.from_user:
         ai_users.add(message.from_user.id)
 
@@ -81,6 +104,9 @@ async def analysis_handler(message: Message) -> None:
 
 @dp.message(F.text == "📦 Ombor")
 async def warehouse_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
     if message.from_user:
         ai_users.discard(message.from_user.id)
 
@@ -89,15 +115,78 @@ async def warehouse_handler(message: Message) -> None:
 
 @dp.message(F.text == "⚙️ Sozlamalar")
 async def settings_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
     if message.from_user:
         ai_users.discard(message.from_user.id)
 
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
 
 
+@dp.message(Command("setrole"))
+async def set_role_handler(message: Message) -> None:
+    if not message.from_user or message.from_user.id != FOUNDER_ID:
+        return
+
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) < 3 or not parts[1].strip().lstrip("-").isdigit():
+        role_list = "\n".join(f"• {key} — {name}" for key, name in ROLES.items() if key != "founder")
+        await message.answer(
+            "Foydalanish: /setrole <user_id> <role_key>\n\nMavjud rollar:\n" + role_list
+        )
+        return
+
+    user_id = int(parts[1].strip())
+    role_key = parts[2].strip()
+
+    if set_role(user_id, role_key, set_by=message.from_user.id):
+        await message.answer(f"✅ {user_id} uchun rol o‘rnatildi: {role_name(role_key)}")
+    else:
+        await message.answer(f"❌ Noto‘g‘ri rol kaliti: {role_key}")
+
+
+@dp.message(Command("removeuser"))
+async def remove_user_handler(message: Message) -> None:
+    if not message.from_user or message.from_user.id != FOUNDER_ID:
+        return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip().lstrip("-").isdigit():
+        await message.answer("Foydalanish: /removeuser <user_id>")
+        return
+
+    user_id = int(parts[1].strip())
+    if remove_user(user_id):
+        await message.answer(f"✅ {user_id} ruxsat etilganlar ro‘yxatidan o‘chirildi.")
+    else:
+        await message.answer(f"ℹ️ {user_id} ro‘yxatda topilmadi.")
+
+
+@dp.message(Command("listusers"))
+async def list_users_handler(message: Message) -> None:
+    if not message.from_user or message.from_user.id != FOUNDER_ID:
+        return
+
+    users = list_users()
+    if not users:
+        await message.answer(
+            "Ro‘yxat bo‘sh — hozircha faqat asoschi (siz) kira oladi."
+        )
+        return
+
+    lines = "\n".join(
+        f"{user_id} — {role_name(info['role'])}" for user_id, info in sorted(users.items())
+    )
+    await message.answer(f"Ruxsat etilgan foydalanuvchilar:\n{lines}")
+
+
 @dp.message(F.text)
 async def ai_message_handler(message: Message) -> None:
     if not message.from_user or message.from_user.id not in ai_users:
+        return
+
+    if not await ensure_authorized(message):
         return
 
     user_text = message.text

@@ -1,4 +1,5 @@
 .env
+allowed_users.json
 __pycache__/
 *.py c
 .venv/

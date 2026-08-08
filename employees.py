@@ -194,7 +194,7 @@ def format_founder_card(user_id: int) -> str | None:
         contacts_lines,
         "",
         f"🏠 Manzil: {address}",
-        f"🏢 Filial: {profile.get('branch', '-')}",
+        f"🏢 Filial: {profile.get('branch') or 'Umumiy (barcha filiallar)'}",
         f"💼 Lavozim: {role_name(profile.get('role_key'))}",
         f"📅 Ish boshlagan sana: {profile.get('hire_date', '-')}",
         f"🕒 Ish grafigi: {profile.get('work_schedule', '-')}",

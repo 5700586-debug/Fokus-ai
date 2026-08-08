@@ -52,12 +52,24 @@ def register(dp: Dispatcher) -> None:
             return
 
         user_id = int(callback.data.split(":", 1)[1])
-        profile = employees.approve_profile(user_id, approved_by=FOUNDER_ID)
-        if profile is None:
-            await callback.answer("Profil topilmadi.", show_alert=True)
+        profile = employees.get_profile(user_id)
+        if profile is None or profile["status"] != "submitted":
+            await callback.answer("Profil topilmadi yoki allaqachon ko'rib chiqilgan.", show_alert=True)
             return
 
-        roles.set_role(user_id, profile["role_key"], set_by=FOUNDER_ID)
+        role_key = profile["role_key"]
+        if roles.is_single_slot_role(role_key):
+            existing = roles.find_user_by_role(role_key)
+            if existing is not None and existing != user_id:
+                await callback.answer(
+                    f"❌ {roles.role_name(role_key)} lavozimida allaqachon boshqa xodim bor "
+                    f"(user_id: {existing}). Avval uni bo'shating.",
+                    show_alert=True,
+                )
+                return
+
+        employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+        roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
 
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)

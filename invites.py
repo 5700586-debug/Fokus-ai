@@ -14,7 +14,10 @@ INVITE_TTL_HOURS = 2
 
 
 def create_invite(
-    role_key: str, branch: str, created_by: int, work_schedule: str | None = None
+    role_key: str,
+    branch: str | None,
+    created_by: int,
+    work_schedule: str | None = None,
 ) -> str:
     token = secrets.token_urlsafe(16)
     now = datetime.now(timezone.utc)
@@ -89,3 +92,17 @@ def mark_completed(token: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def has_pending_invite_for_role(role_key: str) -> bool:
+    """Shu rol uchun hali yakunlanmagan (active yoki claimed) taklif bormi."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM invites WHERE role_key = ? AND status IN ('active', 'claimed') LIMIT 1",
+            (role_key,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return row is not None

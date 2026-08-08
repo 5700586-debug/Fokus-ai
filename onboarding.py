@@ -185,7 +185,7 @@ def _build_summary(data: dict) -> str:
         "",
         f"💍 Oilaviy holat: {data.get('marital_status')}",
         f"🏠 Manzil: {address}",
-        f"🏢 Filial: {data.get('branch')}",
+        f"🏢 Filial: {data.get('branch') or 'Umumiy (barcha filiallar)'}",
         f"💼 Lavozim: {role_name(data.get('role_key'))}",
         f"📅 Ish boshlagan sana: {data.get('hire_date')}",
         f"🕒 Ish grafigi: {data.get('work_schedule')}",

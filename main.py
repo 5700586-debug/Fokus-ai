@@ -22,7 +22,18 @@ import onboarding
 from warehouse_ai import WarehouseAI
 from config import FOUNDER_ID
 from db import init_db
-from roles import ROLES, get_role, is_authorized, list_users, remove_user, role_name, set_role
+from roles import (
+    ROLES,
+    SINGLE_SLOT_ROLES,
+    find_user_by_role,
+    get_role,
+    is_authorized,
+    is_single_slot_role,
+    list_users,
+    remove_user,
+    role_name,
+    set_role,
+)
 from storage import SQLiteStorage
 
 
@@ -163,26 +174,55 @@ async def invite_handler(message: Message) -> None:
         return
 
     parts = (message.text or "").split(maxsplit=2)
-    if len(parts) < 3:
+    if len(parts) < 2:
         role_list = "\n".join(f"• {key} — {name}" for key, name in ROLES.items() if key != "founder")
+        single_slot_list = ", ".join(sorted(SINGLE_SLOT_ROLES))
         await message.answer(
-            "Foydalanish: /invite <role_key> <filial nomi>\n\nMavjud rollar:\n" + role_list
+            "Foydalanish:\n"
+            "/invite <role_key> <filial nomi> — filialga biriktirilgan rollar uchun\n"
+            f"/invite <role_key> — {single_slot_list} kabi umumiy rollar uchun "
+            "(filial so‘ralmaydi, faqat 1 kishi)\n\n"
+            "Mavjud rollar:\n" + role_list
         )
         return
 
-    role_key, branch = parts[1].strip(), parts[2].strip()
+    role_key = parts[1].strip()
     if role_key not in ROLES or role_key == "founder":
         await message.answer(f"❌ Noto‘g‘ri rol kaliti: {role_key}")
         return
 
+    if is_single_slot_role(role_key):
+        branch = None
+
+        existing_user = find_user_by_role(role_key)
+        if existing_user is not None:
+            await message.answer(
+                f"❌ {role_name(role_key)} lavozimida allaqachon xodim bor "
+                f"(user_id: {existing_user}). Bu rol uchun faqat 1 kishi bo‘lishi mumkin."
+            )
+            return
+
+        if invites.has_pending_invite_for_role(role_key):
+            await message.answer(
+                f"❌ {role_name(role_key)} uchun allaqachon faol taklif havolasi mavjud. "
+                "Avval uni yakunlang yoki muddati tugashini kuting."
+            )
+            return
+    else:
+        if len(parts) < 3 or not parts[2].strip():
+            await message.answer(f"Foydalanish: /invite {role_key} <filial nomi>")
+            return
+        branch = parts[2].strip()
+
     token = invites.create_invite(role_key, branch, created_by=FOUNDER_ID)
     me = await message.bot.get_me()
     link = f"https://t.me/{me.username}?start={token}"
+    branch_line = f"Filial: {branch}" if branch else "Filial: Umumiy (barcha filiallar)"
 
     await message.answer(
         "✅ Taklif havolasi yaratildi (2 soat amal qiladi):\n"
         f"{link}\n\n"
-        f"Rol: {role_name(role_key)}\nFilial: {branch}"
+        f"Rol: {role_name(role_key)}\n{branch_line}"
     )
 
 
@@ -202,10 +242,23 @@ async def set_role_handler(message: Message) -> None:
     user_id = int(parts[1].strip())
     role_key = parts[2].strip()
 
+    if role_key not in ROLES or role_key == "founder":
+        await message.answer(f"❌ Noto‘g‘ri rol kaliti: {role_key}")
+        return
+
+    if is_single_slot_role(role_key):
+        existing_user = find_user_by_role(role_key)
+        if existing_user is not None and existing_user != user_id:
+            await message.answer(
+                f"❌ {role_name(role_key)} lavozimida allaqachon xodim bor "
+                f"(user_id: {existing_user}). Bu rol uchun faqat 1 kishi bo‘lishi mumkin."
+            )
+            return
+
     if set_role(user_id, role_key, set_by=message.from_user.id):
         await message.answer(f"✅ {user_id} uchun rol o‘rnatildi: {role_name(role_key)}")
     else:
-        await message.answer(f"❌ Noto‘g‘ri rol kaliti: {role_key}")
+        await message.answer("❌ Rol o‘rnatib bo‘lmadi.")
 
 
 @dp.message(Command("removeuser"))

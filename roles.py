@@ -27,6 +27,10 @@ ROLES = {
     "haydovchi": "Haydovchi",
 }
 
+# Bu rollar filialga biriktirilmaydi — barcha filiallar uchun umumiy va
+# har birida faqat bitta xodim bo'lishi mumkin.
+SINGLE_SLOT_ROLES = {"nazoratchi", "haydovchi", "taminotchi", "moliyachi"}
+
 _ALLOWED_USERS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "allowed_users.json"
 )
@@ -65,9 +69,25 @@ def is_authorized(user_id: int) -> bool:
     return get_role(user_id) is not None
 
 
+def is_single_slot_role(role_key: str) -> bool:
+    return role_key in SINGLE_SLOT_ROLES
+
+
+def find_user_by_role(role_key: str) -> int | None:
+    for user_id, info in _USERS.items():
+        if info["role"] == role_key:
+            return user_id
+    return None
+
+
 def set_role(user_id: int, role_key: str, set_by: int) -> bool:
     if role_key not in ROLES or role_key == "founder":
         return False
+
+    if role_key in SINGLE_SLOT_ROLES:
+        existing = find_user_by_role(role_key)
+        if existing is not None and existing != user_id:
+            return False
 
     _USERS[user_id] = {
         "role": role_key,

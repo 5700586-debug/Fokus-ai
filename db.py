@@ -13,7 +13,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS invites (
     token TEXT PRIMARY KEY,
     role_key TEXT NOT NULL,
-    branch TEXT NOT NULL,
+    branch TEXT,
     work_schedule TEXT,
     created_by INTEGER NOT NULL,
     created_at TEXT NOT NULL,

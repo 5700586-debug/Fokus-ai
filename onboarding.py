@@ -8,6 +8,13 @@ berilgan bo'lsa so'ralmaydi.
 
 Barcha javoblar anketa yakunlangunga qadar FSM storage (storage.py,
 SQLite) orqali saqlanadi — bot qayta ishga tushsa ham yo'qolmaydi.
+
+Kontakt: xodimning o'z telefon raqamidan tashqari aniq 2 ta qo'shimcha
+ishonchli aloqa kontakti so'raladi (F.I.Sh., telefon, kim bo'lishi).
+Manzil: faqat 2 savol — shahar/tuman va mahalla+uy — mavjud
+``employees.tuman``/``employees.mahalla`` ustunlariga yoziladi (yangi
+ustun kerak emas). Oldingi ish joyidan tavsif so'rash — ixtiyoriy,
+roziliksiz eski ish beruvchiga murojaat qilinmaydi.
 """
 
 import re
@@ -25,13 +32,13 @@ import invites
 from roles import role_name
 
 MINOR_AGE_LIMIT = 18
-MIN_CONTACTS = 3
+EXTRA_CONTACTS_COUNT = 2
 
 _SKIP_TEXT = "➖ O'tkazib yuborish"
-_ADD_MORE_TEXT = "➕ Yana qo'shish"
-_CONTINUE_TEXT = "➡️ Davom etish"
 _CONFIRM_TEXT = "✅ Ma'lumotlar to'g'ri"
 _EDIT_TEXT = "✏️ Tahrirlash"
+_YES_TEXT = "Ha"
+_NO_TEXT = "Yo'q"
 
 _INVALID_INVITE_TEXT = (
     "Bu taklif havolasi yaroqli emas yoki muddati tugagan. "
@@ -57,19 +64,16 @@ class OnboardingStates(StatesGroup):
     contact_full_name = State()
     contact_phone = State()
     contact_relation = State()
-    contact_more = State()
     marital_status = State()
-    address_viloyat = State()
-    address_tuman = State()
-    address_mahalla = State()
-    address_kocha = State()
-    address_uy = State()
-    address_xonadon = State()
+    address_city = State()
+    address_mahalla_uy = State()
     hire_date = State()
     work_schedule = State()
     planned_duration = State()
     motivation = State()
     prior_experience = State()
+    prior_employer_consent = State()
+    prior_employer_contact = State()
     emergency_contact = State()
     photo = State()
     extra_note = State()
@@ -86,7 +90,7 @@ def _kb(*rows: list[str]) -> ReplyKeyboardMarkup:
 _JINSI_KB = _kb(["Erkak", "Ayol"])
 _MARITAL_KB = _kb(["Turmush qurmagan", "Turmush qurgan"], ["Ajrashgan", "Beva"], ["Boshqa"])
 _SKIP_KB = _kb([_SKIP_TEXT])
-_CONTACT_MORE_KB = _kb([_ADD_MORE_TEXT, _CONTINUE_TEXT])
+_YES_NO_KB = _kb([_YES_TEXT, _NO_TEXT])
 _PLANNED_DURATION_KB = _kb(
     ["3–6 oy", "6–12 oy"], ["1–2 yil", "2 yildan ko'p"], ["Aniq bilmayman"]
 )
@@ -144,6 +148,17 @@ async def start_onboarding_from_invite(message: Message, state: FSMContext, toke
     )
 
 
+async def _prompt_emergency_contact(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    contacts = data.get("contacts", [])
+    names_kb = _kb(*[[c["full_name"]] for c in contacts])
+    await state.set_state(OnboardingStates.emergency_contact)
+    await message.answer(
+        "Favqulodda vaziyatda birinchi kimga qo'ng'iroq qilamiz?",
+        reply_markup=names_kb,
+    )
+
+
 def _build_summary(data: dict) -> str:
     full_name = " ".join(
         part for part in (data.get("familiya"), data.get("ism"), data.get("otasining_ismi")) if part
@@ -172,6 +187,11 @@ def _build_summary(data: dict) -> str:
         else None
     )
 
+    prior_employer_consent = data.get("prior_employer_reference_consent")
+    prior_employer_line = "Ha" if prior_employer_consent else "Yo'q"
+    if prior_employer_consent and data.get("prior_employer_contact"):
+        prior_employer_line += f" ({data['prior_employer_contact']})"
+
     lines = [
         "📋 Anketangizni tekshiring:",
         "",
@@ -180,7 +200,7 @@ def _build_summary(data: dict) -> str:
         f"⚧ Jinsi: {data.get('jinsi')}",
         f"📞 Asosiy telefon: {data.get('phone')}",
         "",
-        "📇 Qo'shimcha kontaktlar:",
+        "📇 Qo'shimcha ishonchli kontaktlar:",
         contacts_lines,
         "",
         f"💍 Oilaviy holat: {data.get('marital_status')}",
@@ -192,6 +212,7 @@ def _build_summary(data: dict) -> str:
         f"⏳ Rejalashtirilgan muddat: {data.get('planned_duration')}",
         f"💬 Nega bu kompaniya: {data.get('motivation')}",
         f"📋 Oldingi tajriba: {data.get('prior_experience') or '-'}",
+        f"🔓 Avvalgi ish joyidan tavsif so'rash mumkinmi: {prior_employer_line}",
         f"🚨 Favqulodda kontakt: {emergency['full_name'] if emergency else '-'}",
         "📷 Rasm: yuborilgan" if data.get("photo_file_id") else "📷 Rasm: -",
     ]
@@ -276,8 +297,9 @@ def register(dp: Dispatcher) -> None:
         await state.update_data(phone=text, contacts=[])
         await state.set_state(OnboardingStates.contact_full_name)
         await message.answer(
-            "Endi kamida 3 ta qo'shimcha aloqa kontaktini kiritamiz "
-            "(o'zingizning raqamingiz bundan alohida saqlanadi).\n\n" + _contact_prompt(1)
+            f"Endi {EXTRA_CONTACTS_COUNT} ta qo'shimcha ishonchli aloqa kontaktini "
+            "kiritamiz (o'zingizning raqamingiz bundan alohida saqlanadi).\n\n"
+            + _contact_prompt(1)
         )
 
     @dp.message(StateFilter(OnboardingStates.contact_full_name))
@@ -301,7 +323,7 @@ def register(dp: Dispatcher) -> None:
         await state.update_data(_pending_contact_phone=text)
         await state.set_state(OnboardingStates.contact_relation)
         await message.answer(
-            "Bu odam sizga kim bo'ladi? (masalan: ota, ona, aka, opa, turmush o'rtog'i, qarindosh)"
+            "Bu odam xodimga kim bo'ladi? (masalan: ota, ona, aka, opa, turmush o'rtog'i, qarindosh)"
         )
 
     @dp.message(StateFilter(OnboardingStates.contact_relation))
@@ -324,35 +346,15 @@ def register(dp: Dispatcher) -> None:
             contacts=contacts, _pending_contact_name=None, _pending_contact_phone=None
         )
 
-        if len(contacts) < MIN_CONTACTS:
+        if len(contacts) < EXTRA_CONTACTS_COUNT:
             await state.set_state(OnboardingStates.contact_full_name)
             await message.answer(_contact_prompt(len(contacts) + 1))
             return
 
-        await state.set_state(OnboardingStates.contact_more)
-        await message.answer(
-            f"✅ {len(contacts)} ta kontakt qo'shildi. Yana qo'shasizmi?",
-            reply_markup=_CONTACT_MORE_KB,
-        )
-
-    @dp.message(StateFilter(OnboardingStates.contact_more))
-    async def handle_contact_more(message: Message, state: FSMContext) -> None:
-        text = (message.text or "").strip()
-
-        if text == _ADD_MORE_TEXT:
-            data = await state.get_data()
-            next_index = len(data.get("contacts", [])) + 1
-            await state.set_state(OnboardingStates.contact_full_name)
-            await message.answer(_contact_prompt(next_index), reply_markup=ReplyKeyboardRemove())
-            return
-
-        if text != _CONTINUE_TEXT:
-            await message.answer("Iltimos, tugmalardan birini tanlang.", reply_markup=_CONTACT_MORE_KB)
-            return
-
         await state.set_state(OnboardingStates.marital_status)
         await message.answer(
-            "Oilaviy holatingizni tanlang:", reply_markup=_MARITAL_KB
+            f"✅ {len(contacts)} ta kontakt qo'shildi.\n\nOilaviy holatingizni tanlang:",
+            reply_markup=_MARITAL_KB,
         )
 
     @dp.message(StateFilter(OnboardingStates.marital_status))
@@ -363,78 +365,37 @@ def register(dp: Dispatcher) -> None:
             return
 
         await state.update_data(marital_status=text)
-        await state.set_state(OnboardingStates.address_viloyat)
+        await state.set_state(OnboardingStates.address_city)
         await message.answer(
-            "Endi uy manzilingizni bosqichma-bosqich kiritamiz.\n\nViloyatni kiriting:",
+            "Qaysi shahar yoki tumanda yashaysiz?\nMasalan: Qo'qon",
             reply_markup=ReplyKeyboardRemove(),
         )
 
-    @dp.message(StateFilter(OnboardingStates.address_viloyat))
-    async def handle_address_viloyat(message: Message, state: FSMContext) -> None:
+    @dp.message(StateFilter(OnboardingStates.address_city))
+    async def handle_address_city(message: Message, state: FSMContext) -> None:
         text = (message.text or "").strip()
         if not text:
-            await message.answer("❌ Viloyatni kiriting.")
-            return
-
-        await state.update_data(viloyat=text)
-        await state.set_state(OnboardingStates.address_tuman)
-        await message.answer("Tuman/shaharni kiriting:")
-
-    @dp.message(StateFilter(OnboardingStates.address_tuman))
-    async def handle_address_tuman(message: Message, state: FSMContext) -> None:
-        text = (message.text or "").strip()
-        if not text:
-            await message.answer("❌ Tuman/shaharni kiriting.")
+            await message.answer("❌ Qaysi shahar yoki tumanda yashashingizni kiriting.")
             return
 
         await state.update_data(tuman=text)
-        await state.set_state(OnboardingStates.address_mahalla)
-        await message.answer("Mahallani kiriting:")
+        await state.set_state(OnboardingStates.address_mahalla_uy)
+        await message.answer(
+            "Mahallangiz va uy manzilingizni yozing.\nMasalan:\nMuhsiniy MFY, 74-uy\n"
+            "yoki kvartira bo'lsa:\n34-uy, 23-xonadon"
+        )
 
-    @dp.message(StateFilter(OnboardingStates.address_mahalla))
-    async def handle_address_mahalla(message: Message, state: FSMContext) -> None:
+    @dp.message(StateFilter(OnboardingStates.address_mahalla_uy))
+    async def handle_address_mahalla_uy(message: Message, state: FSMContext) -> None:
         text = (message.text or "").strip()
         if not text:
-            await message.answer("❌ Mahallani kiriting.")
+            await message.answer("❌ Mahalla va uy manzilingizni kiriting.")
             return
 
         await state.update_data(mahalla=text)
-        await state.set_state(OnboardingStates.address_kocha)
-        await message.answer("Ko'chani kiriting:")
-
-    @dp.message(StateFilter(OnboardingStates.address_kocha))
-    async def handle_address_kocha(message: Message, state: FSMContext) -> None:
-        text = (message.text or "").strip()
-        if not text:
-            await message.answer("❌ Ko'chani kiriting.")
-            return
-
-        await state.update_data(kocha=text)
-        await state.set_state(OnboardingStates.address_uy)
-        await message.answer("Uy raqamini kiriting:")
-
-    @dp.message(StateFilter(OnboardingStates.address_uy))
-    async def handle_address_uy(message: Message, state: FSMContext) -> None:
-        text = (message.text or "").strip()
-        if not text:
-            await message.answer("❌ Uy raqamini kiriting.")
-            return
-
-        await state.update_data(uy_raqami=text)
-        await state.set_state(OnboardingStates.address_xonadon)
-        await message.answer(
-            "Xonadon raqamini kiriting (agar mavjud bo'lmasa, o'tkazib yuboring):",
-            reply_markup=_SKIP_KB,
-        )
-
-    @dp.message(StateFilter(OnboardingStates.address_xonadon))
-    async def handle_address_xonadon(message: Message, state: FSMContext) -> None:
-        text = (message.text or "").strip()
-        await state.update_data(xonadon_raqami=None if text == _SKIP_TEXT else text)
         await state.set_state(OnboardingStates.hire_date)
         await message.answer(
-            "Ish boshlagan (yoki boshlaydigan) sanangizni kiriting (KK.OO.YYYY):",
-            reply_markup=ReplyKeyboardRemove(),
+            "Ish boshlagan (yoki boshlaydigan) sanangizni kiriting (KK.OO.YYYY):"
         )
 
     @dp.message(StateFilter(OnboardingStates.hire_date))
@@ -509,14 +470,40 @@ def register(dp: Dispatcher) -> None:
         text = (message.text or "").strip()
         await state.update_data(prior_experience=None if text == _SKIP_TEXT else text)
 
-        data = await state.get_data()
-        contacts = data.get("contacts", [])
-        names_kb = _kb(*[[c["full_name"]] for c in contacts])
-        await state.set_state(OnboardingStates.emergency_contact)
+        await state.set_state(OnboardingStates.prior_employer_consent)
         await message.answer(
-            "Favqulodda vaziyatda birinchi kimga qo'ng'iroq qilamiz?",
-            reply_markup=names_kb,
+            "Zarurat bo'lsa, avvalgi ish joyingizdan siz haqingizda tavsif "
+            "so'rashimiz mumkinmi?",
+            reply_markup=_YES_NO_KB,
         )
+
+    @dp.message(StateFilter(OnboardingStates.prior_employer_consent))
+    async def handle_prior_employer_consent(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if text not in (_YES_TEXT, _NO_TEXT):
+            await message.answer("Iltimos, tugmalardan birini tanlang.", reply_markup=_YES_NO_KB)
+            return
+
+        if text == _NO_TEXT:
+            await state.update_data(
+                prior_employer_reference_consent=False, prior_employer_contact=None
+            )
+            await _prompt_emergency_contact(message, state)
+            return
+
+        await state.update_data(prior_employer_reference_consent=True)
+        await state.set_state(OnboardingStates.prior_employer_contact)
+        await message.answer(
+            "Avvalgi ish joyingiz yoki rahbaringizning aloqa raqamini qoldirishingiz "
+            "mumkin. Bo'lmasa, o'tkazib yuboring:",
+            reply_markup=_SKIP_KB,
+        )
+
+    @dp.message(StateFilter(OnboardingStates.prior_employer_contact))
+    async def handle_prior_employer_contact(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        await state.update_data(prior_employer_contact=None if text == _SKIP_TEXT else text)
+        await _prompt_emergency_contact(message, state)
 
     @dp.message(StateFilter(OnboardingStates.emergency_contact))
     async def handle_emergency_contact(message: Message, state: FSMContext) -> None:

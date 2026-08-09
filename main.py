@@ -19,6 +19,7 @@ import approval
 import employees
 import invites
 import onboarding
+import performance_bot
 from warehouse_ai import WarehouseAI
 from config import FOUNDER_ID
 from db import init_db
@@ -83,6 +84,7 @@ menu = ReplyKeyboardMarkup(
 
 onboarding.register(dp)
 approval.register(dp)
+performance_bot.register(dp)
 
 
 @dp.message(CommandStart())

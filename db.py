@@ -2,77 +2,28 @@
 
 fokus.db shaxsiy xodim ma'lumotlarini saqlaydi, shuning uchun
 git repozitoriyaga kirmaydi (.gitignore).
+
+Sxema endi domen bo'yicha ``schema/`` paketida bo'lingan (qarang:
+``schema/__init__.py``). Bu yerda faqat ularni yig'ib bajarish va allaqachon
+mavjud jadvallarga qo'shilgan yangi ustunlarni (``CREATE TABLE IF NOT
+EXISTS`` productiondagi eski jadvalga ustun qo'shmaydi) xavfsiz qo'shib
+qo'yish (additive column migration) mantig'i bor.
 """
 
 import os
 import sqlite3
 
+from schema import SCHEMA_STATEMENTS
+
 _DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fokus.db")
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS invites (
-    token TEXT PRIMARY KEY,
-    role_key TEXT NOT NULL,
-    branch TEXT,
-    work_schedule TEXT,
-    created_by INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    claimed_by INTEGER,
-    claimed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS employees (
-    user_id INTEGER PRIMARY KEY,
-    invite_token TEXT REFERENCES invites(token),
-    telegram_username TEXT,
-    familiya TEXT,
-    ism TEXT,
-    otasining_ismi TEXT,
-    birth_date TEXT,
-    age INTEGER,
-    jinsi TEXT,
-    phone TEXT,
-    marital_status TEXT,
-    viloyat TEXT,
-    tuman TEXT,
-    mahalla TEXT,
-    kocha TEXT,
-    uy_raqami TEXT,
-    xonadon_raqami TEXT,
-    branch TEXT,
-    role_key TEXT,
-    hire_date TEXT,
-    work_schedule TEXT,
-    planned_duration TEXT,
-    motivation TEXT,
-    prior_experience TEXT,
-    emergency_contact_id INTEGER REFERENCES employee_contacts(id),
-    photo_file_id TEXT,
-    extra_note TEXT,
-    status TEXT NOT NULL DEFAULT 'draft',
-    submitted_at TEXT,
-    approved_at TEXT,
-    approved_by INTEGER,
-    rejected_at TEXT,
-    rejected_by INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS employee_contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES employees(user_id),
-    full_name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    relation TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS fsm_storage (
-    storage_key TEXT PRIMARY KEY,
-    state TEXT,
-    data TEXT
-);
-"""
+# (jadval, ustun, ustun_ta'rifi) — productionda allaqachon mavjud jadvalga
+# keyinchalik qo'shilgan ustunlar shu yerda ro'yxatlanadi va ``init_db()``
+# ularni yo'q bo'lsagina ``ALTER TABLE`` bilan qo'shadi.
+_ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    ("employees", "prior_employer_reference_consent", "INTEGER"),
+    ("employees", "prior_employer_contact", "TEXT"),
+]
 
 
 def get_connection() -> sqlite3.Connection:
@@ -86,10 +37,21 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_additive_columns(conn: sqlite3.Connection) -> None:
+    for table, column, coltype in _ADDITIVE_COLUMNS:
+        existing = {
+            row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
 def init_db() -> None:
     conn = get_connection()
     try:
-        conn.executescript(_SCHEMA)
+        for statement in SCHEMA_STATEMENTS:
+            conn.executescript(statement)
+        _ensure_additive_columns(conn)
         conn.commit()
     finally:
         conn.close()

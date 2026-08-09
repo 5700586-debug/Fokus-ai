@@ -37,6 +37,8 @@ _EMPLOYEE_FIELDS = [
     "prior_experience",
     "photo_file_id",
     "extra_note",
+    "prior_employer_reference_consent",
+    "prior_employer_contact",
 ]
 
 
@@ -185,6 +187,10 @@ def format_founder_card(user_id: int) -> str | None:
 
     username = f"@{profile['telegram_username']}" if profile.get("telegram_username") else "-"
 
+    prior_employer_line = "Ha" if profile.get("prior_employer_reference_consent") else "Yo'q"
+    if profile.get("prior_employer_reference_consent") and profile.get("prior_employer_contact"):
+        prior_employer_line += f" ({profile['prior_employer_contact']})"
+
     lines = [
         f"👤 {full_name}",
         f"🎂 {profile.get('birth_date', '-')} — {profile.get('age', '-')} yosh, {profile.get('jinsi', '-')}",
@@ -201,6 +207,7 @@ def format_founder_card(user_id: int) -> str | None:
         f"⏳ Rejalashtirilgan muddat: {profile.get('planned_duration', '-')}",
         f"💬 Nega bu kompaniya: {profile.get('motivation', '-')}",
         f"📋 Oldingi tajriba: {profile.get('prior_experience') or '-'}",
+        f"🔓 Avvalgi ish joyidan tavsif so'rash mumkinmi: {prior_employer_line}",
         f"🚨 Favqulodda kontakt: {emergency_line}",
         f"💍 Oilaviy holat: {profile.get('marital_status', '-')}",
         f"📱 Username: {username}",

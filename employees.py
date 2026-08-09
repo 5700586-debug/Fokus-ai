@@ -69,6 +69,14 @@ def submit_profile(user_id: int, data: dict) -> None:
             (user_id, *values.values(), "submitted", now),
         )
 
+        # Eski kontaktlarni o'chirishdan oldin emergency_contact_id ni
+        # bo'shatamiz — aks holda qayta topshirilganda (masalan rad
+        # etilgan xodim qayta taklif qilinsa) FOREIGN KEY xatosi chiqadi,
+        # chunki employees.emergency_contact_id hali eski qatorga ishora
+        # qilib turadi.
+        conn.execute(
+            "UPDATE employees SET emergency_contact_id = NULL WHERE user_id = ?", (user_id,)
+        )
         conn.execute("DELETE FROM employee_contacts WHERE user_id = ?", (user_id,))
 
         contact_ids = []

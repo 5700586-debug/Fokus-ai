@@ -32,7 +32,8 @@ ROLES = {
 SINGLE_SLOT_ROLES = {"nazoratchi", "haydovchi", "taminotchi", "moliyachi"}
 
 _ALLOWED_USERS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "allowed_users.json"
+    os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__)),
+    "allowed_users.json",
 )
 
 

@@ -3,6 +3,12 @@
 fokus.db shaxsiy xodim ma'lumotlarini saqlaydi, shuning uchun
 git repozitoriyaga kirmaydi (.gitignore).
 
+Render kabi platformalarda ilova papkasi konteyner qayta yaratilganda
+(deploy/restart) reset bo'ladigan ephemeral disk bo'lishi mumkin — shu
+sabab ``FOKUS_DATA_DIR`` muhit o'zgaruvchisi orqali fayl doimiy diskka
+(masalan Render Persistent Disk mount path) ko'chirilishi mumkin.
+O'rnatilmasa, xatti-harakat o'zgarmaydi (ilova papkasi ishlatiladi).
+
 Sxema endi domen bo'yicha ``schema/`` paketida bo'lingan (qarang:
 ``schema/__init__.py``). Bu yerda faqat ularni yig'ib bajarish va allaqachon
 mavjud jadvallarga qo'shilgan yangi ustunlarni (``CREATE TABLE IF NOT
@@ -15,7 +21,8 @@ import sqlite3
 
 from schema import SCHEMA_STATEMENTS
 
-_DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fokus.db")
+_DATA_DIR = os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
+_DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
 
 # (jadval, ustun, ustun_ta'rifi) — productionda allaqachon mavjud jadvalga
 # keyinchalik qo'shilgan ustunlar shu yerda ro'yxatlanadi va ``init_db()``

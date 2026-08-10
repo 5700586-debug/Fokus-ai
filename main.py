@@ -19,6 +19,7 @@ import approval
 import calibration_bot
 import cash_shift_bot
 import employees
+import health_server
 import inventory_bot
 import invites
 import onboarding
@@ -389,10 +390,15 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     scheduler = inventory_bot.start_scheduler(bot)
     calibration_scheduler = calibration_bot.start_scheduler(bot)
+    # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
+    # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
+    # garchi bot polling orqali to'liq ishlab tursa ham.
+    health_runner = await health_server.start()
 
     try:
         await dp.start_polling(bot)
     finally:
+        await health_runner.cleanup()
         scheduler.shutdown(wait=False)
         calibration_scheduler.shutdown(wait=False)
         await bot.session.close()

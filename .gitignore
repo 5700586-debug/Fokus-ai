@@ -7,3 +7,4 @@ fokus.db-shm
 __pycache__/
 *.py c
 .venv/
+.claude/settings.local.json

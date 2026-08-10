@@ -25,6 +25,8 @@ import os
 import sqlite3
 from urllib.parse import urlsplit
 
+import psycopg2
+
 from schema import SCHEMA_STATEMENTS
 
 _DATA_DIR = os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +39,14 @@ _DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
 # aks holda pastdagi ``if _DATABASE_URL`` tekshiruvlari bo'sh qatorni ham
 # "Postgres yoqilgan" deb noto'g'ri talqin qilib qo'yishi mumkin edi.
 _DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
+
+# Chaqiruvchi kod (masalan ``performance_bot.py``dagi UNIQUE constraint
+# bosilganda foydalanuvchiga tushunarli xabar berish) backend qaysi
+# ekanini bilmasdan shu bitta nomni ushlashi mumkin — sqlite3.IntegrityError
+# va psycopg2.IntegrityError bir-biriga umuman bog'liq bo'lmagan sinflar,
+# shuning uchun to'g'ridan-to'g'ri ``sqlite3.IntegrityError`` ushlash
+# Postgres rejimida hech qachon ishlamaydi.
+IntegrityError: type[Exception] = psycopg2.IntegrityError if _DATABASE_URL else sqlite3.IntegrityError
 
 
 def _redact_dsn(url: str) -> str:

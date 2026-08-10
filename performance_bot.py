@@ -9,7 +9,6 @@ har doim ruxsatli), sof Founder-only amallar (``/setrule``,
 to'g'ridan-to'g'ri ``FOUNDER_ID`` bilan tekshiriladi.
 """
 
-import sqlite3
 from datetime import date, datetime
 
 from aiogram import Dispatcher, F
@@ -19,6 +18,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from config import FOUNDER_ID
+from db import IntegrityError
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized
 from services import driver_checks, market_observation, permissions, star_engine, supervisor_scoring
@@ -215,7 +215,7 @@ def register(dp: Dispatcher) -> None:
 
         try:
             vehicle_id = vehicles_repo.create_vehicle(plate_number, model, driver_id)
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             await message.answer(f"❌ '{plate_number}' raqamli avtomobil allaqachon mavjud.")
             return
 

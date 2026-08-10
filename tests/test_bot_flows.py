@@ -189,6 +189,22 @@ async def test_drivercheck_full_flow(bot_dp):
     assert "saqlandi" in sent[-1].text
 
 
+async def test_addvehicle_duplicate_plate_gives_friendly_error(bot_dp):
+    """``/addvehicle`` xuddi bir davlat raqami bilan ikki marta chaqirilsa,
+    repository UNIQUE constraint bosadi (``db.IntegrityError`` — SQLite'da
+    ``sqlite3.IntegrityError``, Postgres'da ``psycopg2.IntegrityError``).
+    Handler buni ushlab tushunarli xabar berishi kerak, umumiy
+    "Kutilmagan xatolik" xabari emas (qarang: performance_bot.py).
+    """
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/addvehicle 01A777AA 333")
+    assert "qo'shildi" in sent[0].text
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/addvehicle 01A777AA 444")
+    assert "allaqachon mavjud" in sent[0].text
+
+
 async def test_full_onboarding_to_approval_flow(bot_dp):
     main, bot = bot_dp
     new_user_id = 55501

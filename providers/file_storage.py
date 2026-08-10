@@ -35,6 +35,8 @@ class TelegramFileStorageProvider:
     _RETENTION_DAYS: dict[str, int] = {
         "vehicle_daily_photo": 90,
         "market_observation_photo": 90,
+        "cash_shift_photo": 180,
+        "inventory_snapshot_photo": 180,
     }
 
     def register(self, file_id: str, owner_id: int, category: str) -> FileReference:

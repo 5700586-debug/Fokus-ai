@@ -8,6 +8,7 @@ allowed users ro'yxatiga (roles.py) qo'shiladi va ichki menyu ochiladi.
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+import calibration_bot
 import employees
 import roles
 from config import FOUNDER_ID
@@ -70,6 +71,14 @@ def register(dp: Dispatcher) -> None:
 
         employees.approve_profile(user_id, approved_by=FOUNDER_ID)
         roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+
+        try:
+            calibration_bot.on_employee_approved(user_id, role_key)
+        except Exception as error:
+            # Kalibratsiya sessiyasi yaratilmasa ham, asosiy approval oqimi
+            # (xodimga va Founderga tasdiqlash) hech qachon shu tufayli
+            # to'xtab qolmasligi kerak.
+            print(f"Kalibratsiya sessiyasini yaratishda xato (user_id={user_id}): {error!r}")
 
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)

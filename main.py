@@ -16,7 +16,10 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 import approval
+import calibration_bot
+import cash_shift_bot
 import employees
+import inventory_bot
 import invites
 import onboarding
 import performance_bot
@@ -85,6 +88,9 @@ menu = ReplyKeyboardMarkup(
 onboarding.register(dp)
 approval.register(dp)
 performance_bot.register(dp)
+cash_shift_bot.register(dp)
+inventory_bot.register(dp)
+calibration_bot.register(dp)
 
 
 @dp.message(CommandStart())
@@ -381,10 +387,14 @@ async def error_handler(event: ErrorEvent, bot: Bot) -> None:
 
 async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
+    scheduler = inventory_bot.start_scheduler(bot)
+    calibration_scheduler = calibration_bot.start_scheduler(bot)
 
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown(wait=False)
+        calibration_scheduler.shutdown(wait=False)
         await bot.session.close()
 
 

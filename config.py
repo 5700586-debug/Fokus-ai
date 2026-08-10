@@ -12,3 +12,13 @@ SMS_API_KEY = os.getenv("SMS_API_KEY")
 
 WEATHER_PROVIDER_ENABLED = os.getenv("WEATHER_PROVIDER_ENABLED", "false").lower() == "true"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+
+# Kassa/ombor rasmlaridan raqam o'qish (OCR/vision) hali ulanmagan —
+# NullVisionExtractionProvider ishlatiladi, bot doim qo'lda kiritishni
+# so'raydi (providers/vision_extraction_provider.py).
+VISION_EXTRACTION_ENABLED = os.getenv("VISION_EXTRACTION_ENABLED", "false").lower() == "true"
+VISION_EXTRACTION_API_KEY = os.getenv("VISION_EXTRACTION_API_KEY")
+
+# Scheduler'lar (masalan kunlik kalibratsiya savollari) shu vaqt zonasiga
+# nisbatan ishlaydi — hardcode qilinmaydi, .env orqali o'zgartiriladi.
+COMPANY_TIMEZONE = os.getenv("COMPANY_TIMEZONE", "Asia/Tashkent")

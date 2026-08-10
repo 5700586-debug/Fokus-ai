@@ -48,6 +48,41 @@ def get_oil_change_interval_km() -> int:
     return int(value) if value is not None else 5000
 
 
+def get_cash_shift_tolerance() -> int:
+    value = performance_repo.get_rule("cash_shift.tolerance")
+    return int(value) if value is not None else 20000
+
+
+def get_cash_shift_retry_limit() -> int:
+    value = performance_repo.get_rule("cash_shift.retry_limit")
+    return int(value) if value is not None else 3
+
+
+def get_expense_baseline_min_observations() -> int:
+    value = performance_repo.get_rule("cash_expense.baseline_min_observations")
+    return int(value) if value is not None else 7
+
+
+def get_expense_anomaly_multiplier() -> float:
+    value = performance_repo.get_rule("cash_expense.anomaly_multiplier")
+    return float(value) if value is not None else 1.5
+
+
+def get_inventory_variance_threshold() -> int:
+    value = performance_repo.get_rule("inventory.variance_threshold")
+    return int(value) if value is not None else 1_000_000
+
+
+def get_inventory_reminder_time() -> str:
+    value = performance_repo.get_rule("inventory.reminder_time")
+    return value if value is not None else "20:00"
+
+
+def get_calibration_daily_question_time() -> str:
+    value = performance_repo.get_rule("calibration.daily_question_time")
+    return value if value is not None else "10:00"
+
+
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
     performance_repo.set_rule(rule_key, rule_value, updated_by)
 

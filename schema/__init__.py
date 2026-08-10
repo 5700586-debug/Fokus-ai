@@ -14,9 +14,11 @@ jadvallari ``core.py`` da o'zgarishsiz saqlanadi.
 from . import (
     attendance,
     baselines,
+    cash_shifts,
     checklists,
     core,
     cross_check,
+    inventory,
     market,
     meal_plans,
     notifications,
@@ -37,4 +39,6 @@ SCHEMA_STATEMENTS: list[str] = [
     baselines.SCHEMA,
     notifications.SCHEMA,
     attendance.SCHEMA,
+    cash_shifts.SCHEMA,
+    inventory.SCHEMA,
 ]

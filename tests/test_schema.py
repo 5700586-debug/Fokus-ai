@@ -15,6 +15,15 @@ EXPECTED_TABLES = {
     "vehicle_service_history",
     "market_observations",
     "meal_plans",
+    "cash_shifts",
+    "cash_expenses",
+    "cash_difference_reviews",
+    "cash_shift_approvals",
+    "inventory_daily_snapshots",
+    "inventory_variance_explanations",
+    "inventory_variance_reviews",
+    "calibration_sessions",
+    "calibration_questions",
 }
 
 
@@ -43,3 +52,7 @@ def test_seed_rules_present():
     assert rules["star.max"] == "5"
     assert rules["bonus.stars.5"] == "500000"
     assert rules["vehicle.oil_change_interval_km"] == "5000"
+    assert rules["cash_shift.tolerance"] == "20000"
+    assert rules["cash_shift.retry_limit"] == "3"
+    assert rules["cash_expense.baseline_min_observations"] == "7"
+    assert rules["inventory.variance_threshold"] == "1000000"

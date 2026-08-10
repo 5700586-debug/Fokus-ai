@@ -19,14 +19,25 @@ ACTION_LOG_MARKET_OBSERVATION = "log_market_observation"
 ACTION_ENTER_MEAL_PLAN = "enter_meal_plan"
 ACTION_DRIVER_DAILY_CHECK = "driver_daily_check"
 
+ACTION_OPEN_CASH_SHIFT = "open_cash_shift"
+ACTION_CLOSE_CASH_SHIFT = "close_cash_shift"
+ACTION_LOG_CASH_EXPENSE = "log_cash_expense"
+ACTION_REVIEW_CASH_SHIFT = "review_cash_shift"
+ACTION_SUBMIT_INVENTORY_SNAPSHOT = "submit_inventory_snapshot"
+ACTION_REVIEW_INVENTORY_VARIANCE = "review_inventory_variance"
+ACTION_VIEW_CASH_SUMMARY = "view_cash_summary"
+ACTION_VIEW_INVENTORY_SUMMARY = "view_inventory_summary"
+
 # Founder-only amallar (masalan /setrule, /processmonth) shu ro'yxatga
 # kiritilmaydi — ularga faqat Founder ruxsatli, boshqa hech qanday rol
 # qo'shilmaydi.
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "nazoratchi": {ACTION_SCORE_EMPLOYEE},
+    "nazoratchi": {ACTION_SCORE_EMPLOYEE, ACTION_REVIEW_CASH_SHIFT, ACTION_REVIEW_INVENTORY_VARIANCE},
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION},
-    "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN},
+    "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT},
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
+    "kassir": {ACTION_OPEN_CASH_SHIFT, ACTION_CLOSE_CASH_SHIFT, ACTION_LOG_CASH_EXPENSE},
+    "moliyachi": {ACTION_VIEW_CASH_SUMMARY, ACTION_VIEW_INVENTORY_SUMMARY},
 }
 
 

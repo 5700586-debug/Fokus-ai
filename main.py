@@ -26,7 +26,16 @@ load_dotenv()
 
 from db import init_db  # noqa: E402
 
-init_db()
+try:
+    init_db()
+except Exception:
+    print(
+        "❌ init_db() muvaffaqiyatsiz tugadi — bot ishga tushmaydi. "
+        "DATABASE_URL to'g'ri ekanini (host/port/foydalanuvchi/parol, "
+        "bo'sh joy yoki qator ko'chirishsiz) va Supabase Session Pooler "
+        "manzili ishlayotganini tekshiring."
+    )
+    raise
 
 import approval  # noqa: E402
 import calibration_bot  # noqa: E402

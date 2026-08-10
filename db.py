@@ -23,12 +23,37 @@ qo'yish (additive column migration) mantig'i bor.
 
 import os
 import sqlite3
+from urllib.parse import urlsplit
 
 from schema import SCHEMA_STATEMENTS
 
 _DATA_DIR = os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
 _DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
-_DATABASE_URL = os.getenv("DATABASE_URL")
+# Render Environment UI'ga qo'lda joylashtirilganda (masalan brauzerdan
+# nusxa ko'chirilganda) DATABASE_URL oxiriga bilinmas bo'sh joy yoki
+# qator ko'chirish ilashib qolishi mumkin — psycopg2/libpq bunday DSN'ni
+# butunlay parslay olmaydi va ulanish sekundida (status 1 bilan) yiqiladi,
+# shuning uchun shu yerda tozalanadi. Bo'sh qiymat ham None'ga tenglanadi,
+# aks holda pastdagi ``if _DATABASE_URL`` tekshiruvlari bo'sh qatorni ham
+# "Postgres yoqilgan" deb noto'g'ri talqin qilib qo'yishi mumkin edi.
+_DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
+
+
+def _redact_dsn(url: str) -> str:
+    """Log/xato xabarlarida xavfsiz ko'rsatish uchun DSN'dan parolni olib
+    tashlaydi — faqat host/port/foydalanuvchi/baza nomi qoladi, shu orqali
+    Render loglarida haqiqiy parol hech qachon chiqmaydi.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or "?"
+        if parts.port:
+            host += f":{parts.port}"
+        user = f"{parts.username}@" if parts.username else ""
+        return f"{parts.scheme}://{user}{host}{parts.path}"
+    except Exception:
+        return "<DATABASE_URL parslab bo'lmadi>"
+
 
 # (jadval, ustun, ustun_ta'rifi) — productionda allaqachon mavjud jadvalga
 # keyinchalik qo'shilgan ustunlar shu yerda ro'yxatlanadi va ``init_db()``
@@ -43,7 +68,17 @@ def get_connection():
     if _DATABASE_URL:
         from db_postgres import PgConnection
 
-        return PgConnection(_DATABASE_URL)
+        try:
+            return PgConnection(_DATABASE_URL)
+        except Exception as error:
+            # Render loglarida qaysi host/port/foydalanuvchiga ulanishga
+            # urinilgani ko'rinsin (parolsiz) — aks holda psycopg2'ning
+            # xatosi bot ishga tushmagan sababini aniqlashni qiyinlashtiradi.
+            print(
+                "❌ Postgres'ga ulanib bo'lmadi "
+                f"({_redact_dsn(_DATABASE_URL)}): {error!r}"
+            )
+            raise
 
     conn = sqlite3.connect(_DB_FILE)
     conn.execute("PRAGMA journal_mode=WAL")

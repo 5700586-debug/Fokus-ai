@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 import db
 
 EXPECTED_TABLES = {
@@ -27,6 +31,7 @@ EXPECTED_TABLES = {
 }
 
 
+@pytest.mark.skipif(bool(os.getenv("DATABASE_URL")), reason="sqlite_master SQLite'ga xos")
 def test_init_db_creates_all_tables():
     conn = db.get_connection()
     try:

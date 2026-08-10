@@ -65,4 +65,16 @@ CREATE TABLE IF NOT EXISTS fsm_storage (
     state TEXT,
     data TEXT
 );
+
+-- ``roles.py``dagi ruxsat etilgan foydalanuvchilar (rol xaritasi).
+-- ``DATABASE_URL`` o'rnatilganda ``allowed_users.json`` o'rniga shu
+-- jadval ishlatiladi (qarang: ``roles.py``), chunki fayl ham
+-- ``fokus.db`` kabi Render'ning doimiy bo'lmagan diskida yo'qolib
+-- ketishi mumkin.
+CREATE TABLE IF NOT EXISTS allowed_users (
+    user_id INTEGER PRIMARY KEY,
+    role_key TEXT NOT NULL,
+    added_by INTEGER NOT NULL,
+    added_at TEXT NOT NULL
+);
 """

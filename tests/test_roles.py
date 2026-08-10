@@ -1,4 +1,7 @@
 import json
+import os
+
+import pytest
 
 import roles
 from config import FOUNDER_ID
@@ -56,6 +59,7 @@ def test_list_users():
     assert users[1]["role"] == "nazoratchi"
 
 
+@pytest.mark.skipif(bool(os.getenv("DATABASE_URL")), reason="DATABASE_URL rejimida allowed_users jadvali ishlatiladi")
 def test_role_persisted_to_file():
     roles.set_role(123, "nazoratchi", set_by=FOUNDER_ID)
 
@@ -63,6 +67,20 @@ def test_role_persisted_to_file():
         data = json.load(f)
 
     assert data["123"]["role"] == "nazoratchi"
+
+
+@pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="faqat DATABASE_URL rejimida tekshiriladi")
+def test_role_persisted_to_db_and_reloadable():
+    """Talab: Render kabi disksiz muhitda ham rol ma'lumoti restart'dan
+    omon qolishi kerak — buni ``roles._load_users()``ni qayta chaqirib
+    tekshiramiz (jarayon qayta ishga tushganda ``_USERS`` xuddi shu
+    funksiyadan qayta to'ldiriladi).
+    """
+    roles.set_role(123, "nazoratchi", set_by=FOUNDER_ID)
+
+    reloaded = roles._load_users()
+
+    assert reloaded[123]["role"] == "nazoratchi"
 
 
 def test_role_name_lookup():

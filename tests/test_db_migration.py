@@ -1,6 +1,17 @@
+import os
 import sqlite3
 
+import pytest
+
 import db
+
+# Bu fayl bevosita ``sqlite3.connect``/``PRAGMA table_info`` ishlatadi —
+# SQLite'ning additive-column migratsiya mexanizmini tekshiradi, Postgres
+# backend'ga tegishli emas (qarang: ``db_postgres.py``'da xuddi shu
+# mantiq ``information_schema.columns`` orqali qilinadi).
+pytestmark = pytest.mark.skipif(
+    bool(os.getenv("DATABASE_URL")), reason="SQLite-specific migration mexanizmi"
+)
 
 
 def _old_employees_table_sql() -> str:

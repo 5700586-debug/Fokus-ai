@@ -57,6 +57,13 @@ def get_status(user_id: int) -> str | None:
 def submit_profile(user_id: int, data: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
     values = {field: data.get(field) for field in _EMPLOYEE_FIELDS}
+    # ``prior_employer_reference_consent`` ustuni INTEGER (SQLite bool'ni
+    # 0/1 sifatida shaffof qabul qiladi, lekin Postgres'da ``bool`` alohida
+    # tur bo'lgani uchun aniq ``int()``ga o'tkazish kerak).
+    if values.get("prior_employer_reference_consent") is not None:
+        values["prior_employer_reference_consent"] = int(
+            values["prior_employer_reference_consent"]
+        )
     columns = ["user_id", *values.keys(), "status", "submitted_at"]
     placeholders = ", ".join("?" for _ in columns)
     update_clause = ", ".join(f"{col} = excluded.{col}" for col in columns if col != "user_id")

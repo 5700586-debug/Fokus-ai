@@ -15,19 +15,31 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-import approval
-import calibration_bot
-import cash_shift_bot
-import employees
-import health_server
-import inventory_bot
-import invites
-import onboarding
-import performance_bot
-from warehouse_ai import WarehouseAI
-from config import FOUNDER_ID
-from db import init_db
-from roles import (
+# ``load_dotenv()`` va ``init_db()`` boshqa har qanday loyiha modulidan
+# OLDIN ishga tushishi shart: ``db.py``, ``roles.py`` kabi modullar
+# ``DATABASE_URL``/``FOKUS_DATA_DIR``ni IMPORT vaqtida o'qiydi va (Postgres
+# rejimida) ``roles.py`` import vaqtidayoq ``allowed_users`` jadvalidan
+# o'qiydi — agar bu quyidagi ``import approval`` va h.k.dan keyin
+# chaqirilsa, ``.env``dagi qiymatlar e'tiborga olinmaydi va/yoki sxema
+# hali yaratilmagan jadvalga so'rov yuboriladi.
+load_dotenv()
+
+from db import init_db  # noqa: E402
+
+init_db()
+
+import approval  # noqa: E402
+import calibration_bot  # noqa: E402
+import cash_shift_bot  # noqa: E402
+import employees  # noqa: E402
+import health_server  # noqa: E402
+import inventory_bot  # noqa: E402
+import invites  # noqa: E402
+import onboarding  # noqa: E402
+import performance_bot  # noqa: E402
+from warehouse_ai import WarehouseAI  # noqa: E402
+from config import FOUNDER_ID  # noqa: E402
+from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
     find_user_by_role,
@@ -39,10 +51,7 @@ from roles import (
     role_name,
     set_role,
 )
-from storage import SQLiteStorage
-
-
-load_dotenv()
+from storage import SQLiteStorage  # noqa: E402
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -52,9 +61,6 @@ if not BOT_TOKEN:
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY .env faylida topilmadi")
-
-
-init_db()
 
 # events_isolation: bitta foydalanuvchining ketma-ket kelgan xabarlari
 # (masalan onboarding savol-javoblari) doim navbat bilan, bir-birini

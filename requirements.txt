@@ -3,3 +3,4 @@ python-dotenv
 openai
 APScheduler==3.11.3
 tzdata
+psycopg2-binary

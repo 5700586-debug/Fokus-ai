@@ -83,6 +83,16 @@ def get_calibration_daily_question_time() -> str:
     return value if value is not None else "10:00"
 
 
+def get_bos_day_close_deadline() -> str:
+    value = performance_repo.get_rule("bos.day_close_deadline")
+    return value if value is not None else "20:00"
+
+
+def get_bos_supervisor_late_penalty() -> int:
+    value = performance_repo.get_rule("bos.supervisor_late_penalty")
+    return int(value) if value is not None else 40
+
+
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
     performance_repo.set_rule(rule_key, rule_value, updated_by)
 

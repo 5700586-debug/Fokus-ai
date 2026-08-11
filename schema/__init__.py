@@ -18,6 +18,7 @@ from . import (
     checklists,
     core,
     cross_check,
+    discipline,
     inventory,
     market,
     meal_plans,
@@ -41,4 +42,5 @@ SCHEMA_STATEMENTS: list[str] = [
     attendance.SCHEMA,
     cash_shifts.SCHEMA,
     inventory.SCHEMA,
+    discipline.SCHEMA,
 ]

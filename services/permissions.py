@@ -28,11 +28,20 @@ ACTION_REVIEW_INVENTORY_VARIANCE = "review_inventory_variance"
 ACTION_VIEW_CASH_SUMMARY = "view_cash_summary"
 ACTION_VIEW_INVENTORY_SUMMARY = "view_inventory_summary"
 
+ACTION_EVALUATE_EMPLOYEE = "evaluate_employee"
+ACTION_CLOSE_DAY = "close_day"
+
 # Founder-only amallar (masalan /setrule, /processmonth) shu ro'yxatga
 # kiritilmaydi — ularga faqat Founder ruxsatli, boshqa hech qanday rol
 # qo'shilmaydi.
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "nazoratchi": {ACTION_SCORE_EMPLOYEE, ACTION_REVIEW_CASH_SHIFT, ACTION_REVIEW_INVENTORY_VARIANCE},
+    "nazoratchi": {
+        ACTION_SCORE_EMPLOYEE,
+        ACTION_REVIEW_CASH_SHIFT,
+        ACTION_REVIEW_INVENTORY_VARIANCE,
+        ACTION_EVALUATE_EMPLOYEE,
+        ACTION_CLOSE_DAY,
+    },
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION},
     "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT},
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},

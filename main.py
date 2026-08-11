@@ -40,6 +40,7 @@ except Exception:
 import approval  # noqa: E402
 import calibration_bot  # noqa: E402
 import cash_shift_bot  # noqa: E402
+import discipline_bot  # noqa: E402
 import employees  # noqa: E402
 import health_server  # noqa: E402
 import inventory_bot  # noqa: E402
@@ -107,6 +108,7 @@ performance_bot.register(dp)
 cash_shift_bot.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
+discipline_bot.register(dp, openai_client)
 
 
 @dp.message(CommandStart())
@@ -405,6 +407,7 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     scheduler = inventory_bot.start_scheduler(bot)
     calibration_scheduler = calibration_bot.start_scheduler(bot)
+    discipline_scheduler = discipline_bot.start_scheduler(bot)
     # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
@@ -416,6 +419,7 @@ async def main() -> None:
         await health_runner.cleanup()
         scheduler.shutdown(wait=False)
         calibration_scheduler.shutdown(wait=False)
+        discipline_scheduler.shutdown(wait=False)
         await bot.session.close()
 
 

@@ -1,5 +1,14 @@
 import os
 
+# Test va production muhitini ajratish. "test" bo'lsa main.py TEST_BOT_TOKEN
+# (BOT_TOKEN emas), db.py esa TEST_DATABASE_URL (DATABASE_URL emas) o'qiydi —
+# ikkalasi ham BUTUNLAY BOSHQA muhit o'zgaruvchi NOMI, shuning uchun ikkalasi
+# tasodifan bir joyga (masalan bitta .env'ga) yozilgan bo'lsa ham, bitta
+# jarayon ikkinchisining tokeni/bazasiga hech qachon tegmaydi.
+ENVIRONMENT = (os.getenv("ENVIRONMENT") or "production").strip().lower()
+if ENVIRONMENT not in ("production", "test"):
+    ENVIRONMENT = "production"
+
 # Asoschi (Founder) Telegram user_id. Kodga hardcode qilinmaydi — Founder
 # almashsa, kod o'zgarishi/qayta deploy shart bo'lmasin uchun .env/Render
 # environment orqali boshqariladi. Standart qiymat — bot yaratilgandan

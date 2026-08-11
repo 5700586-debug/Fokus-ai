@@ -1,9 +1,13 @@
 .env
 allowed_users.json
+allowed_users_test.json
 employees.json
 fokus.db
 fokus.db-wal
 fokus.db-shm
+fokus_test.db
+fokus_test.db-wal
+fokus_test.db-shm
 __pycache__/
 *.py c
 .venv/

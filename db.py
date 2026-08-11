@@ -27,10 +27,22 @@ from urllib.parse import urlsplit
 
 import psycopg2
 
+from config import ENVIRONMENT
 from schema import SCHEMA_STATEMENTS
 
 _DATA_DIR = os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
-_DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
+
+# Test muhitida (ENVIRONMENT=test) DATABASE_URL emas, TEST_DATABASE_URL
+# o'qiladi, va SQLite fayl nomi ham boshqa (``fokus_test.db``) — shu orqali
+# test jarayoni production bazasiga tasodifan hech qachon ulanmaydi, hatto
+# ikkalasi ham bir ``.env``da yoki bir diskda tursa ham.
+if ENVIRONMENT == "test":
+    _DB_FILE = os.path.join(_DATA_DIR, "fokus_test.db")
+    _RAW_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+else:
+    _DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
+    _RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+
 # Render Environment UI'ga qo'lda joylashtirilganda (masalan brauzerdan
 # nusxa ko'chirilganda) DATABASE_URL oxiriga bilinmas bo'sh joy yoki
 # qator ko'chirish ilashib qolishi mumkin — psycopg2/libpq bunday DSN'ni
@@ -38,7 +50,7 @@ _DB_FILE = os.path.join(_DATA_DIR, "fokus.db")
 # shuning uchun shu yerda tozalanadi. Bo'sh qiymat ham None'ga tenglanadi,
 # aks holda pastdagi ``if _DATABASE_URL`` tekshiruvlari bo'sh qatorni ham
 # "Postgres yoqilgan" deb noto'g'ri talqin qilib qo'yishi mumkin edi.
-_DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip() or None
+_DATABASE_URL = (_RAW_DATABASE_URL or "").strip() or None
 
 # Chaqiruvchi kod (masalan ``performance_bot.py``dagi UNIQUE constraint
 # bosilganda foydalanuvchiga tushunarli xabar berish) backend qaysi

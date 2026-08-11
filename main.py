@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import SimpleEventIsolation
@@ -47,7 +47,7 @@ import inventory_bot  # noqa: E402
 import invites  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
-from config import FOUNDER_ID  # noqa: E402
+from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -62,14 +62,29 @@ from roles import (  # noqa: E402
 )
 from storage import SQLiteStorage  # noqa: E402
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ENVIRONMENT=test bo'lsa TEST_BOT_TOKEN o'qiladi, BOT_TOKEN emas — bu ikki
+# BUTUNLAY BOSHQA nomli muhit o'zgaruvchi, shuning uchun ikkalasi bir xil
+# ``.env``da tursa ham, test jarayoni productionning tokenini hech qachon
+# ishlatib qo'ymaydi (va aksincha).
+_TOKEN_VAR_NAME = "TEST_BOT_TOKEN" if ENVIRONMENT == "test" else "BOT_TOKEN"
+BOT_TOKEN = os.getenv(_TOKEN_VAR_NAME)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN .env faylida topilmadi")
+    raise ValueError(
+        f"{_TOKEN_VAR_NAME} .env faylida topilmadi (ENVIRONMENT={ENVIRONMENT!r})"
+    )
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY .env faylida topilmadi")
+
+# Xavfsiz startup banneri: bot tokenining o'zi HECH QACHON to'liq
+# loglanmaydi — faqat ":" dan oldingi raqamli bot ID (bu Telegram
+# @username/link orqali ham ochiq, sir emas) va muhit nomi ko'rsatiladi.
+# Shu orqali operator loglarda "test" muhitga production tokeni yoki
+# aksincha noto'g'ri joylashtirilganini darhol ko'rishi mumkin.
+_bot_id_prefix = BOT_TOKEN.split(":", 1)[0] if ":" in BOT_TOKEN else "?"
+print(f"🚀 Fokus AI ishga tushmoqda — ENVIRONMENT={ENVIRONMENT}, bot_id={_bot_id_prefix}")
 
 # events_isolation: bitta foydalanuvchining ketma-ket kelgan xabarlari
 # (masalan onboarding savol-javoblari) doim navbat bilan, bir-birini
@@ -82,6 +97,47 @@ ai_users: set[int] = set()
 
 STRANGER_TEXT = "Hmm… bu bot bilan qiziqib qoldingizmi? 🤨"
 
+CANCEL_TEXT = "❌ Bekor qilish"
+BACK_TEXT = "🔙 Orqaga"
+
+
+class _ClearStaleStateMiddleware(BaseMiddleware):
+    """Foydalanuvchi biror ko'p-bosqichli oqimda (masalan jarima uchun
+    nizom raqami kutilayotgan holatda) "qotib qolgan" bo'lsa, keyingi
+    buyruq (``/...``) yoki Orqaga/Bekor qilish tugmasi HAR DOIM ishlashi
+    kerak — aks holda eski ``StateFilter``ga tayanadigan handler
+    (masalan "nizom raqamini kiriting" kutuvchisi) buyruqni "matn kiritish"
+    deb noto'g'ri yutib oladi.
+
+    ``dp.message.outer_middleware`` YETARLI EMAS: aiogram'da outer
+    middleware faqat filtrlar ALLAQACHON mos handlerni tanlagandan KEYIN
+    ishga tushadi (``TelegramEventObserver.trigger`` avval ``handler.check()``
+    bilan mos handlerni topadi, keyin uni middleware bilan o'raydi) — shu
+    payt esa allaqachon kech. Shuning uchun bu middleware ENG YUQORI
+    ``dp.update`` darajasida ro'yxatdan o'tadi — bu butun marshrutlashdan
+    OLDIN ishlaydi. ``StateFilter`` esa storage'ga qayta so'rov
+    yubormaydi, ``data["raw_state"]``dagi keshlangan qiymatga tayanadi —
+    shuning uchun holatni tozalagandan keyin ``data["raw_state"]``ni ham
+    ``None``ga o'rnatish SHART, aks holda kesh eski qiymatni ko'rsatib
+    qoladi.
+    """
+
+    async def __call__(self, handler, event, data: dict):
+        message: Message | None = getattr(event, "message", None)
+        text = getattr(message, "text", None) or ""
+        looks_like_escape = text.startswith("/") or text in (CANCEL_TEXT, BACK_TEXT)
+
+        if looks_like_escape:
+            state: FSMContext | None = data.get("state")
+            if state is not None and await state.get_state() is not None:
+                await state.clear()
+                data["raw_state"] = None
+
+        return await handler(event, data)
+
+
+dp.update.outer_middleware(_ClearStaleStateMiddleware())
+
 
 async def ensure_authorized(message: Message) -> bool:
     if message.from_user and is_authorized(message.from_user.id):
@@ -91,14 +147,108 @@ async def ensure_authorized(message: Message) -> bool:
     return False
 
 
-menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🤖 AI Tahlil")],
-        [KeyboardButton(text="📦 Ombor")],
-        [KeyboardButton(text="⚙️ Sozlamalar")],
-    ],
-    resize_keyboard=True,
-)
+# --------------------------------------------------------------- menyu --
+
+# Har bir bo'lim allaqachon mavjud va testlangan buyruqlarni ko'rsatadi —
+# tugma matni doim "/buyruq" bilan boshlanadi, shuning uchun bosilganda
+# aynan shu buyruqning o'z (mavjud, o'zgartirilmagan) handleri ishga
+# tushadi. Bu yerda yangi biznes mantiq yo'q — faqat navigatsiya.
+_SHARED_COMMANDS = [
+    "/mystars — Mening yulduzlarim",
+    "/mymaosh — Mening oylik/bonus holatim",
+    "/apellyatsiya — Jarimaga e'tiroz bildirish",
+    "/bugungiporga — Bugungi reyting",
+    "/oylikturnir — Oylik reyting",
+    "/listnizom — Korxona nizomlari",
+]
+
+_ROLE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
+    "founder": (
+        "👑 Asoschi",
+        [
+            "/invite — Yangi xodimga taklif havolasi",
+            "/setrole — Foydalanuvchiga rol berish",
+            "/removeuser — Foydalanuvchini ro'yxatdan o'chirish",
+            "/listusers — Ro'yxatdagi foydalanuvchilar",
+            "/profile — Xodim anketasi (user_id bilan)",
+            "/addnizom — Yangi korxona nizomi qo'shish",
+            "/setsalary — Fiks oylik belgilash",
+            "/maosh — Xodim maoshi/bonusini ko'rish",
+            "/setrule — Qoida qiymatini o'zgartirish",
+            "/listrules — Barcha qoidalarni ko'rish",
+            "/processmonth — Oylik KPI/yulduz hisoblash",
+            "/addvehicle — Yangi mashina qo'shish",
+        ],
+    ),
+    "nazoratchi": (
+        "🧑‍💼 Nazoratchi",
+        [
+            "/baholash — Xodimni kunlik baholash/jarima",
+            "/kunniyop — Bugungi kunni yopish",
+            "/score — Xodimga oylik ball qo'yish",
+        ],
+    ),
+    "kassir": (
+        "💰 Kassa",
+        [
+            "/openshift — Kassa smenasini ochish",
+            "/closeshift — Kassa smenasini yopish",
+            "/expense — Kassa xarajatini kiritish",
+        ],
+    ),
+    "savdo_boshligi": (
+        "📦 Ombor",
+        [
+            "/invsnapshot — Kunlik ombor hisobotini yuborish",
+            "/inventorysummary — Ombor hisobotlari xulosasi",
+            "/mealplan — Ovqat rejasini kiritish",
+        ],
+    ),
+    "haydovchi": (
+        "🚚 Haydovchi",
+        ["/drivercheck — Kunlik mashina/servis tekshiruvi"],
+    ),
+    "taminotchi": (
+        "🛒 Ta'minotchi",
+        ["/marketlog — Bozor kuzatuvi qo'shish"],
+    ),
+    "moliyachi": (
+        "💵 Moliyachi",
+        [
+            "/cashsummary — Kassa xulosasi",
+            "/inventorysummary — Ombor xulosasi",
+        ],
+    ),
+}
+
+_SHARED_CATEGORY_TEXT = "⭐ Mening natijalarim"
+
+# Bo'lim tugmasi matni -> shu bo'limdagi buyruqlar ro'yxati (Orqaga
+# bosilganda yoki noto'g'ri matn kelganda ishlatiladi).
+_CATEGORY_COMMANDS: dict[str, list[str]] = {label: cmds for label, cmds in _ROLE_CATEGORIES.values()}
+_CATEGORY_COMMANDS[_SHARED_CATEGORY_TEXT] = _SHARED_COMMANDS
+
+
+def build_menu(role_key: str | None) -> ReplyKeyboardMarkup:
+    """Foydalanuvchining o'z roliga mos yagona menyu — faqat unga
+    tegishli (va ruxsat berilgan) bo'limlarni ko'rsatadi.
+    """
+    rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
+
+    if role_key in _ROLE_CATEGORIES:
+        category_text, _ = _ROLE_CATEGORIES[role_key]
+        rows.append([KeyboardButton(text=category_text)])
+
+    rows.append([KeyboardButton(text=_SHARED_CATEGORY_TEXT)])
+    rows.append([KeyboardButton(text="⚙️ Sozlamalar")])
+
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def build_category_menu(commands: list[str]) -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=command)] for command in commands]
+    rows.append([KeyboardButton(text=BACK_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 onboarding.register(dp)
 approval.register(dp)
@@ -128,13 +278,13 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     if not await ensure_authorized(message):
         return
 
+    role = get_role(message.from_user.id)
     if message.from_user.id == FOUNDER_ID:
         greeting = "Assalomu alaykum, Asoschi! 👑\nFokus AI botingiz tayyor!"
     else:
-        role = role_name(get_role(message.from_user.id))
-        greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role}"
+        greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(role)}"
 
-    await message.answer(greeting, reply_markup=menu)
+    await message.answer(greeting, reply_markup=build_menu(role))
 
 
 @dp.message(F.text == "🤖 AI Tahlil")
@@ -151,21 +301,6 @@ async def analysis_handler(message: Message) -> None:
     )
 
 
-@dp.message(F.text == "📦 Ombor")
-async def warehouse_handler(message: Message) -> None:
-    if not await ensure_authorized(message):
-        return
-
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
-
-    await message.answer(
-        "📦 Ombor nazorati tegishli xodim uchun buyruqlar orqali ishlaydi:\n"
-        "/invsnapshot — kunlik ombor/qoldiq hisobotini yuborish\n"
-        "/inventorysummary — hisobotlar xulosasini ko‘rish"
-    )
-
-
 @dp.message(F.text == "⚙️ Sozlamalar")
 async def settings_handler(message: Message) -> None:
     if not await ensure_authorized(message):
@@ -175,6 +310,52 @@ async def settings_handler(message: Message) -> None:
         ai_users.discard(message.from_user.id)
 
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
+
+
+@dp.message(F.text.in_(set(_CATEGORY_COMMANDS.keys())))
+async def category_menu_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    if message.from_user:
+        ai_users.discard(message.from_user.id)
+
+    commands = _CATEGORY_COMMANDS[message.text]
+    await message.answer(
+        f"{message.text}\nKerakli buyruqni tanlang (ba'zilari qo'shimcha "
+        "ma'lumot so'raydi):",
+        reply_markup=build_category_menu(commands),
+    )
+
+
+@dp.message(F.text == BACK_TEXT)
+async def menu_back_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    if message.from_user:
+        ai_users.discard(message.from_user.id)
+
+    await message.answer(
+        "🔙 Asosiy menyu.", reply_markup=build_menu(get_role(message.from_user.id))
+    )
+
+
+@dp.message(F.text == CANCEL_TEXT)
+async def menu_cancel_handler(message: Message) -> None:
+    # Eski FSM holati bu xabar handlerlarga yetib borishidan oldin
+    # ``_ClearStaleStateMiddleware`` tomonidan allaqachon tozalangan —
+    # bu yerda faqat foydalanuvchiga aniq tasdiq va asosiy menyu
+    # qaytariladi.
+    if not await ensure_authorized(message):
+        return
+
+    if message.from_user:
+        ai_users.discard(message.from_user.id)
+
+    await message.answer(
+        "✅ Amal bekor qilindi.", reply_markup=build_menu(get_role(message.from_user.id))
+    )
 
 
 @dp.message(Command("invite"))

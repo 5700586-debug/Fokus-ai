@@ -39,7 +39,46 @@ backend uchun ham bajaradi.
 To'liq ro'yxat va izohlar: `.env.example`. Majburiy: `BOT_TOKEN`,
 `OPENAI_API_KEY`. Qolgani ixtiyoriy, standart qiymat bilan ishlaydi.
 
-## 4. Render deploy (prod)
+## 4. Test muhiti (alohida test bot, prodga tegmaydi)
+
+Production botdan BUTUNLAY ajratilgan test bot (masalan
+`@Saturn_FokusAI_Testbot`) ishga tushirish uchun:
+
+1. **Lokal sinash** (eng tez yo'l): `.env` faylida `ENVIRONMENT=production`
+   qatorini `ENVIRONMENT=test`ga o'zgartiring, va `TEST_BOT_TOKEN=`
+   qatoriga (allaqachon tayyorlangan, bo'sh) @BotFather'dan olingan test
+   bot tokenini yozing. `python main.py` — bot endi `TEST_BOT_TOKEN`
+   bilan ishlaydi, `BOT_TOKEN` (production) hech qachon o'qilmaydi, va
+   ma'lumotlar alohida `fokus_test.db` fayliga yoziladi (production
+   `fokus.db`ga tegmaydi).
+2. **Alohida Render servisi** (production servisidan mustaqil, doim
+   ishlab turishi uchun): Render dashboardida **yangi** Web Service
+   yarating (xuddi productiondagi kabi sozlamalar — start command
+   `python main.py`), lekin uning Environment bo'limida:
+   - `ENVIRONMENT` = `test`
+   - `TEST_BOT_TOKEN` = (test bot tokeningiz — **faqat shu yerga**,
+     boshqa hech qayerga yozilmaydi)
+   - `OPENAI_API_KEY` = (productiondagi bilan bir xil bo'lishi mumkin)
+   - `DATABASE_URL` — **qo'ymang** (yoki productiondagi qiymatni aslo
+     nusxalamang) — shunda test avtomatik ajratilgan SQLite bilan
+     ishlaydi
+   - `TEST_DATABASE_URL` — faqat agar kelajakda Supabase'da alohida
+     test schema/baza ochilsa, o'sha connection stringni shu yerga
+   - `COMPANY_TIMEZONE`, `FOUNDER_ID` — xohlasangiz productiondagi bilan
+     bir xil (test uchun ahamiyati yo'q)
+
+   Bu ikkinchi, mustaqil Render servisi bo'lgani uchun production
+   servisi bilan bir vaqtda, bir-biriga tegmasdan ishlaydi — ikkalasi
+   ham o'z tokeni bilan alohida polling qiladi.
+
+**Muhim:** `ENVIRONMENT`, `TEST_BOT_TOKEN`, `TEST_DATABASE_URL` —
+production nomlaridan (`BOT_TOKEN`, `DATABASE_URL`) BUTUNLAY BOSHQA
+o'zgaruvchi nomlari. Shuning uchun ikkalasi bir xil `.env`da yoki bir
+xil Render loyihasida tursa ham, bitta jarayon ikkinchisining
+tokeni/bazasiga tasodifan ulanib qololmaydi — bu strukturaviy himoya,
+qo'lda ehtiyot bo'lishga tayanmaydi.
+
+## 5. Render deploy (prod)
 
 - **Servis turi:** Web Service (Render Free tarifida Background Worker
   yo'q). Bot Telegramga **long polling** orqali ulanadi — HTTP so'rov
@@ -61,14 +100,19 @@ To'liq ro'yxat va izohlar: `.env.example`. Majburiy: `BOT_TOKEN`,
   - `COMPANY_TIMEZONE` (ixtiyoriy, standart `Asia/Tashkent`)
   - `FOUNDER_ID` (ixtiyoriy — qo'yilmasa kodda yozilgan avvalgi
     Founder bilan ishlaydi, o'zgartirish uchun qo'yiladi)
-- **Bitta instance qoidasi:** bir xil `BOT_TOKEN` bilan ikki joyda
-  (masalan lokal `python main.py` + Render) bir vaqtda polling
-  ishlatilmasin — Telegram 409 conflict qaytaradi. aiogram buni o'zi
-  ushlab oladi va cheksiz qayta uradi (botni yiqitmaydi), lekin Render
-  loglarida ketma-ket `TelegramConflictError` ko'rinsa — bu aynan shu
-  holat, ikkinchi instance'ni to'xtatish kerak.
+- **Bitta instance qoidasi:** bir xil TOKEN (`BOT_TOKEN` YOKI
+  `TEST_BOT_TOKEN`, ikkisi mustaqil — masalan test botni lokal +
+  Render'da bir vaqtda ishga tushirish ham xuddi shu qoidaga tegishli)
+  bilan ikki joyda bir vaqtda polling ishlatilmasin — Telegram 409
+  conflict qaytaradi. aiogram buni o'zi ushlab oladi va cheksiz qayta
+  uradi (botni yiqitmaydi), lekin loglarda ketma-ket
+  `TelegramConflictError` ko'rinsa — bu aynan shu holat, ikkinchi
+  instance'ni to'xtatish kerak. Production (`BOT_TOKEN`) va test
+  (`TEST_BOT_TOKEN`) esa BUTUNLAY BOSHQA tokenlar bo'lgani uchun
+  ikkalasi bir vaqtda, alohida-alohida polling qilib ishlashi
+  MUTLAQO NORMAL — bir-biriga umuman ta'sir qilmaydi.
 
-## 5. Migration
+## 6. Migration
 
 Sxema o'zgarishlari `schema/*.py`da `CREATE TABLE IF NOT EXISTS` +
 kerak bo'lsa `INSERT OR IGNORE` seed qatorlar sifatida yoziladi —
@@ -85,7 +129,7 @@ jadval/qatorga tegmaydi). Yangi ustun qo'shish kerak bo'lsa:
 jadval o'chirish kerak bo'lsa, avval eskisini saqlab, yangisini
 qo'shib, kod to'liq ko'chgandan keyin alohida bosqichda o'chiriladi.
 
-## 6. Rollback
+## 7. Rollback
 
 Bu loyiha alohida migration versiyalash ishlatmaydi (yuqoridagi
 "idempotent sxema" yondashuvi), shuning uchun rollback = **oldingi git
@@ -101,7 +145,7 @@ Agar muammoli o'zgarish yangi ustun/jadval qo'shgan bo'lsa (lekin
 o'chirmagan), kodni oldingi holatga qaytarish xavfsiz — yangi
 ustun/jadval shunchaki ishlatilmay qoladi, ma'lumot yo'qolmaydi.
 
-## 7. Xatolik yuz bersa — tiklash
+## 8. Xatolik yuz bersa — tiklash
 
 - **`init_db()` muvaffaqiyatsiz** (`main.py` darhol to'xtaydi, aniq
   xabar bilan): `DATABASE_URL`ni tekshiring (host/port/foydalanuvchi/
@@ -111,7 +155,7 @@ ustun/jadval shunchaki ishlatilmay qoladi, ma'lumot yo'qolmaydi.
   to'xtaydi (startup validatsiyasi) — Render dashboardida env var
   borligini tekshiring.
 - **Ketma-ket `TelegramConflictError`:** ikkinchi instance ishlab
-  turibdi — §4ga qarang.
+  turibdi — §5ga qarang.
 - **`COMPANY_TIMEZONE` noto'g'ri/`tzdata` yo'q:** bot yiqilmaydi,
   avtomatik UTC'ga qaytadi va aniq log yozadi (`_resolve_timezone()`
   har bir bot faylida) — lekin bu holatda kunlik chegaralar UTC

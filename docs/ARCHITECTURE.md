@@ -105,6 +105,52 @@ to'g'ridan-to'g'ri "bugungi biznes kuni" sifatida ishlatmasin — doim
   chaqiruvi `try/except` bilan o'ralgan va xato bo'lsa oddiy fallback
   matn bilan davom etadi (hech qachon botni yiqitmaydi).
 
+## 5.1. Test va production muhitini ajratish (2026-08)
+
+`config.ENVIRONMENT` ("production" standart, yoki "test") — butun
+tizimning yagona manba nuqtasi:
+
+- `main.py`: `ENVIRONMENT=test` bo'lsa `TEST_BOT_TOKEN` o'qiladi,
+  `BOT_TOKEN` emas (ikkisi BUTUNLAY BOSHQA nomli o'zgaruvchi).
+- `db.py`: xuddi shunday `TEST_DATABASE_URL` (yoki topilmasa alohida
+  `fokus_test.db`) vs `DATABASE_URL`/`fokus.db`.
+- `roles.py`: `db._DATABASE_URL`dan (mustaqil qayta hisoblamaydi —
+  oldin shunday edi, ikkisi divergensiya xavfi bor edi) va
+  `allowed_users_test.json` vs `allowed_users.json`.
+
+Bu ikkisi bir xil `.env`da yoki bir xil Render loyihasida tursa ham,
+o'zgaruvchi NOMI boshqa bo'lgani uchun bitta jarayon ikkinchisiga
+tasodifan ulanib qololmaydi (qo'lda ehtiyotkorlikka tayanmaydigan
+strukturaviy himoya). To'liq sozlash: `DEPLOYMENT.md` §4.
+
+## 5.2. Eski FSM holatidan xavfsiz chiqish + yagona menyu (2026-08)
+
+**Muammo edi:** foydalanuvchi ko'p-bosqichli oqimda (masalan BOS jarima
+uchun nizom raqami kutilayotgan holatda) "qotib qolsa", keyingi
+buyruq (`/start` yoki boshqasi) eski `StateFilter`ga tayanadigan
+handler tomonidan "matn kiritish" deb noto'g'ri yutib olinardi.
+
+**Yechim:** `main.py`dagi `_ClearStaleStateMiddleware`,
+`dp.update.outer_middleware(...)` orqali ro'yxatdan o'tadi (BU MUHIM —
+`dp.message.outer_middleware` YETARLI EMAS, chunki u faqat filtr
+ALLAQACHON handlerni tanlagandan keyin ishga tushadi, ya'ni kech
+qoladi). Har bir kelayotgan xabar matn "/" bilan boshlansa yoki
+"❌ Bekor qilish"/"🔙 Orqaga" bo'lsa, boshqa hech qanday handler
+tekshirilishidan OLDIN foydalanuvchining FSM holati tozalanadi (va
+`StateFilter`ning keshlangan `raw_state` qiymati ham yangilanadi —
+aks holda kesh eski qiymatni ko'rsatib qolardi).
+
+**Yagona menyu:** `build_menu(role_key)` — har bir foydalanuvchiga
+FAQAT o'z roliga tegishli bo'lim (masalan kassirga "💰 Kassa",
+nazoratchiga "🧑‍💼 Nazoratchi") + umumiy "⭐ Mening natijalarim" +
+"🤖 AI Tahlil" + "⚙️ Sozlamalar" ko'rsatadi. Bo'lim ichidagi tugmalar
+mavjud buyruqning O'ZI (masalan "/openshift — Kassa smenasini ochish")
+— bosilganda aynan shu buyruqning o'zgartirilmagan handleri ishga
+tushadi, hech qanday yangi biznes mantiq yozilmagan, faqat
+navigatsiya. "🔙 Orqaga" asosiy menyuga qaytaradi, "❌ Bekor qilish"
+esa (middleware bilan birga) istalgan qotib qolgan oqimni bekor qilib,
+asosiy menyuga qaytaradi.
+
 ## 6. Yangi funksiya qayerga qo'shiladi
 
 1. Yangi jadval kerak bo'lsa: `schema/<mavzu>.py` (`CREATE TABLE IF NOT

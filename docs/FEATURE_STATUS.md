@@ -77,6 +77,8 @@ ikkilanmoqda, biznes qarori kerak).
 |---|---|---|---|
 | `/setrule`, `/listrules` | production | `performance_bot.py`, `services/rules.py` | Haqiqiy "sozlamalar" — Founder istalgan qoidani o'zgartiradi |
 | "⚙️ Sozlamalar" asosiy menyu tugmasi | rejalashtirilgan | `main.py` | Hozircha "tez orada qo'shiladi" placeholder — chalg'ituvchi emas (haqiqatan qurilmagan, shuning uchun matn to'g'ri) |
+| Rol-asosli yagona menyu (2026-08) | production | `main.py` (`build_menu`, `build_category_menu`) | Har bir foydalanuvchiga faqat o'z roliga tegishli bo'lim + umumiy bo'limlar; tugmalar mavjud buyruqlarning o'zi (yangi biznes mantiq yo'q) |
+| Eski FSM holatidan xavfsiz chiqish (2026-08) | production | `main.py` (`_ClearStaleStateMiddleware`) | `/start` va boshqa har qanday buyruq, "❌ Bekor qilish", "🔙 Orqaga" — qotib qolgan oqimni doim xavfsiz tozalaydi |
 | Kunlik/oylik reyting (in-chat dashboard) | production | `/bugungiporga`, `/oylikturnir` | CSV/tashqi eksport yo'q, faqat chatda matn |
 | CSV/fayl eksport | **mavjud emas** | — | Kodda topilmadi |
 

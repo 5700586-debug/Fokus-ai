@@ -16,9 +16,11 @@ import json
 import os
 from datetime import datetime, timezone
 
-from config import FOUNDER_ID
-
-_DATABASE_URL = os.getenv("DATABASE_URL")
+from config import ENVIRONMENT, FOUNDER_ID
+# ``db``dagi ENVIRONMENT-asosidagi qarordan (DATABASE_URL vs
+# TEST_DATABASE_URL) foydalaniladi — bu yerda mustaqil qayta hisoblanmaydi,
+# aks holda ikkisi turli natijaga kelib qolishi mumkin edi.
+from db import _DATABASE_URL
 
 # Rol kaliti -> ko'rinadigan nom. Keyinchalik har bir rolga alohida
 # permission biriktirish shu lug'atga tayanadi (masalan ROLE_PERMISSIONS).
@@ -42,7 +44,7 @@ SINGLE_SLOT_ROLES = {"nazoratchi", "haydovchi", "taminotchi", "moliyachi"}
 
 _ALLOWED_USERS_FILE = os.path.join(
     os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__)),
-    "allowed_users.json",
+    "allowed_users_test.json" if ENVIRONMENT == "test" else "allowed_users.json",
 )
 
 

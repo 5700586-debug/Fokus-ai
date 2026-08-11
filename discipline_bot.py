@@ -128,7 +128,7 @@ def _penalty_amount_keyboard(employee_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text=f"-{amount}", callback_data=f"bos:pen:{employee_id}:{amount}")
-                for amount in discipline.PENALTY_AMOUNTS
+                for amount in discipline.get_penalty_amounts()
             ]
         ]
     )

@@ -93,6 +93,21 @@ def get_bos_supervisor_late_penalty() -> int:
     return int(value) if value is not None else 40
 
 
+def get_bos_grade_points() -> dict[str, int]:
+    return {
+        "chala": int(performance_repo.get_rule("bos.grade_points.chala") or 1),
+        "norma": int(performance_repo.get_rule("bos.grade_points.norma") or 2),
+        "alo": int(performance_repo.get_rule("bos.grade_points.alo") or 3),
+    }
+
+
+def get_bos_penalty_amounts() -> tuple[int, ...]:
+    value = performance_repo.get_rule("bos.penalty_amounts")
+    if not value:
+        return (10, 20, 30)
+    return tuple(int(part) for part in value.split(","))
+
+
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
     performance_repo.set_rule(rule_key, rule_value, updated_by)
 

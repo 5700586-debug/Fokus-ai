@@ -12,15 +12,27 @@ import re
 from dataclasses import dataclass
 
 from repositories import discipline as discipline_repo
+from services import rules as rules_service
 
 GRADE_CHALA = "chala"
 GRADE_NORMA = "norma"
 GRADE_ALO = "alo"
 
-GRADE_POINTS = {GRADE_CHALA: 1, GRADE_NORMA: 2, GRADE_ALO: 3}
 GRADE_LABELS = {GRADE_CHALA: "Chala", GRADE_NORMA: "Norma", GRADE_ALO: "A'lo"}
 
-PENALTY_AMOUNTS = (10, 20, 30)
+
+def get_grade_points() -> dict[str, int]:
+    """Har bir baho uchun ball qiymati — ``bos.grade_points.*`` qoidalari
+    orqali Founder ``/setrule`` bilan sozlashi mumkin (kod o'zgarishisiz).
+    """
+    return rules_service.get_bos_grade_points()
+
+
+def get_penalty_amounts() -> tuple[int, ...]:
+    """Ruxsat etilgan jarima miqdorlari — ``bos.penalty_amounts`` qoidasi
+    orqali Founder ``/setrule`` bilan sozlashi mumkin (kod o'zgarishisiz).
+    """
+    return rules_service.get_bos_penalty_amounts()
 
 APPEAL_NONE = "none"
 APPEAL_PENDING = "pending"
@@ -88,10 +100,11 @@ class EvaluationResult:
 
 
 def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> EvaluationResult:
-    if grade_key not in GRADE_POINTS:
+    grade_points_map = get_grade_points()
+    if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")
 
-    grade_points = GRADE_POINTS[grade_key]
+    grade_points = grade_points_map[grade_key]
     previous = discipline_repo.get_daily_evaluation(employee_id, eval_date)
     discipline_repo.upsert_daily_evaluation(employee_id, supervisor_id, eval_date, grade_key, grade_points)
 
@@ -141,7 +154,7 @@ def apply_penalty(
     comment: str | None,
     ai_note: str | None,
 ) -> dict:
-    if amount not in PENALTY_AMOUNTS:
+    if amount not in get_penalty_amounts():
         raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
     rule = discipline_repo.get_rule_by_number(rule_number)

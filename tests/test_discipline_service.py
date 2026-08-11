@@ -99,6 +99,33 @@ def test_record_daily_grade_invalid_grade_raises():
         discipline.record_daily_grade(111, 999, "2026-03-01", "a'lo-emas")
 
 
+def test_grade_points_are_tunable_via_rules(monkeypatch):
+    """Founder /setrule orqali (kod o'zgarishisiz) baho ballarini
+    o'zgartira olishi kerak — GRADE_POINTS avvalgidek kodga hardcode
+    qilinmagan.
+    """
+    from services import rules as rules_service
+
+    rules_service.set_rule("bos.grade_points.alo", "5", updated_by=1)
+
+    result = discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_ALO)
+    assert result.grade_points == 5
+    assert result.bonus_bank_balance == 5
+
+
+def test_penalty_amounts_are_tunable_via_rules():
+    from services import rules as rules_service
+
+    _add_rule(5)
+    rules_service.set_rule("bos.penalty_amounts", "15,25", updated_by=1)
+
+    with pytest.raises(ValueError):
+        discipline.apply_penalty(1, 999, "2026-03-01", 10, 5, comment=None, ai_note=None)
+
+    result = discipline.apply_penalty(1, 999, "2026-03-01", 15, 5, comment=None, ai_note=None)
+    assert result["bonus_bank_balance"] == -15
+
+
 def test_daily_leaderboard_orders_by_points_desc():
     discipline.record_daily_grade(1, 999, "2026-03-01", discipline.GRADE_CHALA)
     discipline.record_daily_grade(2, 999, "2026-03-01", discipline.GRADE_ALO)

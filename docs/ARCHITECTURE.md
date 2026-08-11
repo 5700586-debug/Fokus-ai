@@ -1,0 +1,161 @@
+# Fokus AI — Arxitektura
+
+Bu hujjat kodning **hozirgi haqiqiy holatini** tasvirlaydi (2026-08 audit
+asosida yangilangan). Yangi narsa qo'shishdan oldin shu yerni o'qing —
+"qayerga qo'shish kerak" bo'limi eng muhim.
+
+## 1. Yuqori darajadagi ko'rinish
+
+```
+Telegram (long polling)
+        |
+        v
+   main.py  --- Dispatcher (aiogram 3.x), global error handler
+        |
+        +--> onboarding.py, approval.py        (ro'yxatdan o'tish)
+        +--> performance_bot.py                (KPI/reyting/mashina)
+        +--> cash_shift_bot.py                 (kassa smenasi)
+        +--> inventory_bot.py                  (ombor snapshot/tafovut)
+        +--> calibration_bot.py                (yangi xodim adaptatsiyasi)
+        +--> discipline_bot.py                 (BOS: baho/jarima/apellyatsiya)
+        |
+        v
+   services/*.py   <-- biznes mantiq (bu yerda handler yo'q, Telegram bilmaydi)
+        |
+        v
+   repositories/*.py  <-- xom SQL (faqat shu qatlamda SQL yoziladi)
+        |
+        v
+   db.py -> (SQLite | db_postgres.py) -> fokus.db yoki Supabase Postgres
+
+Alohida: config.py (env o'qish), roles.py (kim qanday rolda),
+providers/*.py (SMS/ob-havo/vision — hozircha barchasi stub),
+health_server.py (Render uchun HTTP port), company_time.py (TZ helper).
+```
+
+**Muhim invariant:** `main.py`ning eng boshida `load_dotenv()` va
+`init_db()` boshqa har qanday loyiha modulidan OLDIN chaqiriladi —
+aks holda `.env` o'qilmaydi yoki hali yaratilmagan jadvalga so'rov ketadi
+(qarang `main.py`dagi izoh).
+
+## 2. Qatlamlar va mas'uliyat
+
+| Qatlam | Fayllar | Nima qiladi | Nima qilmasligi kerak |
+|---|---|---|---|
+| Bot/handler | `*_bot.py`, `onboarding.py`, `approval.py`, `main.py` | Telegram xabar/callback qabul qilish, klaviatura chiqarish, FSM holatini boshqarish | To'g'ridan-to'g'ri SQL, murakkab hisob-kitob |
+| Biznes mantiq | `services/*.py` | Qoidalar, hisob-kitoblar (ball, bonus, jarima, tafovut), tashqi servis (OpenAI) chaqiruvi | Telegram obyektlarini bilish (`Message`, `CallbackQuery`) |
+| Ma'lumot | `repositories/*.py` | Xom SQL (parametrli query), CRUD | Biznes qoida (masalan "jarima qaysi miqdorlar bilan bo'lishi mumkin" — bu `services/discipline.py`da) |
+| Sxema | `schema/*.py` | `CREATE TABLE IF NOT EXISTS ...` + boshlang'ich `INSERT OR IGNORE` seed qatorlar | — |
+| Konfiguratsiya | `config.py`, `.env` | Barcha muhit o'zgaruvchilarini o'qish | Hardcoded qiymat (Founder ID kabi) |
+| Provider | `providers/*.py` | Tashqi servislarga (SMS/ob-havo/OCR) abstraksiya — hozircha hammasi `Null*` stub | — |
+
+Bu chegaralar **audit qilingan va asosan to'g'ri saqlanadi** — yagona
+istisno: `employees.py` va `roles.py` (loyihaning eng eski qismlari)
+`repositories/`dan oldin yozilgan va o'zlarida xom SQL saqlaydi. Ular
+ishlaydi va testlangan — qayta yozish rejalashtirilmagan, lekin **yangi**
+DB so'rovlari doim `repositories/`ga qo'shiladi, bu ikki eski faylga emas.
+
+## 3. Ma'lumotlar bazasi
+
+- **Dev/lokal:** SQLite, `fokus.db` (yo'li `FOKUS_DATA_DIR` orqali
+  sozlanadi, standart — loyiha papkasi).
+- **Prod (Render):** PostgreSQL (Supabase), `DATABASE_URL` orqali.
+  Backend tanlovi `db.py`da: `DATABASE_URL` bo'lsa Postgres, bo'lmasa
+  SQLite — chaqiruvchi kod (`repositories/*.py`) buni bilmaydi.
+- `db_postgres.py` — Postgres ustida sqlite3'ga o'xshash interfeys
+  (`conn.execute(...).fetchone()/fetchall()`, `row["col"]`,
+  `cursor.lastrowid`). SQLite-only naqshlarni (`INSERT OR IGNORE`,
+  `AUTOINCREMENT`, `?` placeholder, `IS ?`) Postgres ekvivalentiga
+  tarjima qiladi — **umumiy SQL parser emas**, faqat haqiqatda
+  ishlatiladigan naqshlar. Yangi SQL naqshi qo'shilsa, shu fayldagi
+  tarjima qoidalari ham tekshirilishi/yangilanishi kerak.
+- Har ikki backend ham CI'da haqiqiy ishga tushiriladi (qarang
+  `.github/workflows/tests.yml` — SQLite va real `postgres:16-alpine`
+  konteyner bilan to'liq test to'plami).
+
+## 4. Vaqt zonasi
+
+Barcha "bugungi kun" hisob-kitoblari `company_time.py` (yoki
+`calibration_bot.py`/`discipline_bot.py`ning o'z `_resolve_timezone()`
+nusxasi) orqali `COMPANY_TIMEZONE` (standart: `Asia/Tashkent`, UTC+5)
+bo'yicha olinadi — server (Render, UTC) soatiga emas. Bu 2026-08
+auditida topilgan va tuzatilgan sistemali xato edi (server UTC'da,
+19:00-23:59 oralig'ida Toshkentda allaqachon ertangi kun edi).
+
+**Qoida:** yangi kod hech qachon `datetime.now()` yoki `date.today()`ni
+to'g'ridan-to'g'ri "bugungi biznes kuni" sifatida ishlatmasin — doim
+`company_time.today()`/`company_time.now()` (yoki mavjud bot faylidagi
+`_resolve_timezone()`) orqali.
+
+## 5. Telegram <-> Render <-> Supabase <-> OpenAI aloqasi
+
+- **Telegram:** long polling (`dp.start_polling(bot)`), webhook EMAS.
+- **Render:** Free tarifda faqat "Web Service" mavjud (Background
+  Worker pullik), va Web Service `$PORT`ga bog'lanishni kutadi — aks
+  holda deploy "Timed out"/"No open ports detected" bo'ladi. Shuning
+  uchun `health_server.py` polling bilan bir vaqtda ahamiyatsiz HTTP
+  server ochadi (`GET /` -> `200 OK`). Bot HTTP so'rov qabul qilmaydi —
+  bu faqat Render health-check uchun.
+- **Supabase:** faqat `DATABASE_URL` orqali (Postgres protokoli,
+  `psycopg2-binary`). Session Pooler manzili tavsiya etiladi (Render
+  kabi ko'p-qisqa-connection muhitlar uchun).
+- **OpenAI:** `openai_client` (`AsyncOpenAI`) `main.py`da yaratiladi va
+  handler modullariga (`discipline_bot.register(dp, openai_client)`
+  kabi) parametr sifatida uzatiladi — global emas. Har bir AI
+  chaqiruvi `try/except` bilan o'ralgan va xato bo'lsa oddiy fallback
+  matn bilan davom etadi (hech qachon botni yiqitmaydi).
+
+## 6. Yangi funksiya qayerga qo'shiladi
+
+1. Yangi jadval kerak bo'lsa: `schema/<mavzu>.py` (`CREATE TABLE IF NOT
+   EXISTS` + kerak bo'lsa seed `INSERT OR IGNORE`), `schema/__init__.py`
+   ro'yxatiga qo'sh.
+2. Xom SQL: `repositories/<mavzu>.py` — parametrli query, `?`
+   placeholder (Postgres tarjimasi avtomatik).
+3. Biznes qoida/hisob-kitob: `services/<mavzu>.py` — Telegram
+   obyektlarisiz, mustaqil test qilinadigan sof funksiyalar.
+4. Threshold/sana/miqdor kabi sozlanishi kerak bo'lgan qiymatlar:
+   hardcode qilinmasin — `services/rules.py` + `rules` jadvali orqali
+   (Founder `/setrule` bilan o'zgartiradi).
+5. Telegram interfeysi: yangi `<mavzu>_bot.py` (yoki mavjud modulga
+   qo'shimcha `register()` ichida) — faqat chaqiruv, hisoblamaydi.
+6. Ruxsat: yangi amal bo'lsa `services/permissions.py`ga
+   `ACTION_*` qo'sh va tegishli rolga biriktir.
+7. `main.py`da import qil va `register(dp)` chaqir (kerak bo'lsa
+   scheduler ham `start_scheduler`/`shutdown` bilan).
+8. Test yoz: `tests/test_<mavzu>_service.py` (biznes mantiq) va
+   `tests/test_<mavzu>_bot_flows.py` (Telegram oqimi, `bot_dp` fixture).
+9. `docs/FEATURE_STATUS.md` va kerak bo'lsa `docs/BUSINESS_RULES.md`ni
+   yangila.
+
+## 7. Bilingan cheklovlar (qasddan tuzatilmagan)
+
+Bular audit paytida topildi, lekin hozircha **ataylab** tegilmagan —
+sabab har birida yozilgan. Kelajakda qo'l urishdan oldin shu ro'yxatni
+o'qing:
+
+- **Ikki mustaqil xodim-baholash tizimi:** `services/star_engine.py`
+  (oylik "to'liq bonus" -> yulduz) va yangi BOS (`services/discipline.py`,
+  kunlik ball/jarima banki) bir-biridan bexabar ishlaydi — biri
+  ikkinchisiga ta'sir qilmaydi. Bu ataylab shundayligi yoki ular
+  birlashtirilishi kerakligi biznes qarori — `docs/BUSINESS_RULES.md`da
+  `NEEDS_BUSINESS_DECISION` deb belgilangan.
+- **`close_day` bir nazoratchi faraziga tayanadi:** `/kunniyop`dagi
+  "baholangan xodimlar soni" barcha nazoratchilar bo'yicha umumiy
+  hisoblanadi, aloqador nazoratchiga filtrlanmagan. Bugungi kunda
+  loyihada har doim bittadan nazoratchi bo'lgani uchun (`find_user_by_role`
+  bitta natija qaytaradi — butun kodda shu farazga tayaniladi:
+  scheduler, kalibratsiya va h.k.) amalda muammo yo'q. Ikkinchi
+  nazoratchi qo'shilsa, bu qatlam qayta ko'rib chiqilishi kerak.
+- **Uch xil ruxsat tekshiruvi bir vaqtda ishlaydi:** `id == FOUNDER_ID`
+  (eng eski), `roles.is_authorized`/`get_role` ("har qanday ro'yxatdan
+  o'tgan foydalanuvchi"), `services/permissions.has_permission`
+  (granular amal-asosli). Uchtasi ham ishlaydi va testlangan — birini
+  tanlab hammasini qayta yozish katta, past-foydali refaktor bo'lardi.
+  Yangi komandalar `services/permissions.py`dan foydalansin.
+- **Provider'lar (`providers/*.py`) hali ulanmagan:** `SMS_PROVIDER_ENABLED`
+  va shu kabi flag'lar `config.py`da bor, lekin `get_sms_provider()`
+  va boshqalar hozircha SHART-SIZ doim `Null*` qaytaradi — flag'ga
+  qaramaydi. Bu qasddan (real provider ulanmagan), lekin flag hozircha
+  hech narsaga ta'sir qilmaydi — chalkashlikka olib kelmasin uchun shu
+  yerda aniq yozilgan.

@@ -47,7 +47,6 @@ import inventory_bot  # noqa: E402
 import invites  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
-from warehouse_ai import WarehouseAI  # noqa: E402
 from config import FOUNDER_ID  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
@@ -94,7 +93,6 @@ async def ensure_authorized(message: Message) -> bool:
 
 menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📊 Hisobot")],
         [KeyboardButton(text="🤖 AI Tahlil")],
         [KeyboardButton(text="📦 Ombor")],
         [KeyboardButton(text="⚙️ Sozlamalar")],
@@ -139,25 +137,6 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     await message.answer(greeting, reply_markup=menu)
 
 
-@dp.message(F.text == "📊 Hisobot")
-async def report_handler(message: Message) -> None:
-    if not await ensure_authorized(message):
-        return
-
-    ai = WarehouseAI()
-
-    result = ai.analyze(
-        old_stock=100000,
-        new_products=50000,
-        expenses=20000,
-        computer_stock=125000,
-        old_margin=20,
-        new_margin=15,
-    )
-
-    await message.answer(result)
-
-
 @dp.message(F.text == "🤖 AI Tahlil")
 async def analysis_handler(message: Message) -> None:
     if not await ensure_authorized(message):
@@ -180,7 +159,11 @@ async def warehouse_handler(message: Message) -> None:
     if message.from_user:
         ai_users.discard(message.from_user.id)
 
-    await message.answer("📦 Ombor nazorati bo‘limi tayyorlanmoqda.")
+    await message.answer(
+        "📦 Ombor nazorati tegishli xodim uchun buyruqlar orqali ishlaydi:\n"
+        "/invsnapshot — kunlik ombor/qoldiq hisobotini yuborish\n"
+        "/inventorysummary — hisobotlar xulosasini ko‘rish"
+    )
 
 
 @dp.message(F.text == "⚙️ Sozlamalar")

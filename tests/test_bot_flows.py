@@ -300,9 +300,6 @@ async def test_full_onboarding_to_approval_flow(bot_dp):
 async def test_menu_buttons_still_work_for_founder(bot_dp):
     main, bot = bot_dp
 
-    sent = await send(main.dp, bot, FOUNDER_ID, text="📊 Hisobot")
-    assert len(sent) == 1
-
     sent = await send(main.dp, bot, FOUNDER_ID, text="📦 Ombor")
     assert "Ombor" in sent[0].text
 
@@ -313,7 +310,7 @@ async def test_menu_buttons_still_work_for_founder(bot_dp):
 async def test_menu_buttons_rejected_for_stranger(bot_dp):
     main, bot = bot_dp
 
-    sent = await send(main.dp, bot, 999999, text="📊 Hisobot")
+    sent = await send(main.dp, bot, 999999, text="📦 Ombor")
     assert sent[0].text == main.STRANGER_TEXT
 
 

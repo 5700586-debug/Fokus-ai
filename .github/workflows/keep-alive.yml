@@ -13,10 +13,25 @@ jobs:
       - name: Ping Render app
         run: |
           echo "Pinging https://fokus-ai.onrender.com ..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 https://fokus-ai.onrender.com)
-          echo "HTTP status: $response"
-          if [ "$response" -ge 200 ] && [ "$response" -lt 500 ]; then
+          # Render Free tarifida servis uzoq faolsizlikdan keyin uxlab qoladi
+          # va "cold start" 30 soniyadan ko'p vaqt olishi mumkin — shuning
+          # uchun bir necha marta, uzunroq timeout bilan urinamiz (aks holda
+          # ping servisni uyg'otishga vaqt topmasdan muvaffaqiyatsiz tugaydi
+          # va servis hech qachon iliq holatga yetmaydi).
+          success=0
+          for attempt in 1 2 3; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://fokus-ai.onrender.com || echo "000")
+            echo "Urinish $attempt: HTTP status $response"
+            if [ "$response" -ge 200 ] && [ "$response" -lt 500 ]; then
+              success=1
+              break
+            fi
+            sleep 10
+          done
+
+          if [ "$success" -eq 1 ]; then
             echo "Bot uyg'oq (yoki javob berdi)."
           else
-            echo "Ogohlantirish: kutilmagan status kodi ($response)."
+            echo "Ogohlantirish: bot 3 urinishdan keyin ham javob bermadi."
+            exit 1
           fi

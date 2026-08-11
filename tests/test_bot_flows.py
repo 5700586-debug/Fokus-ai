@@ -84,6 +84,47 @@ async def test_invite_and_setrole_flow(bot_dp):
     assert any("Ismingiz" in t or "F.I.Sh" in t or "Familiya" in t for t in texts(sent)), texts(sent)
 
 
+async def test_only_founder_can_assign_nazoratchi(bot_dp):
+    """Bu yil kompaniyada faqat bitta nazoratchi ishlaydi va uni faqat
+    asoschi tayinlay oladi — begona emas, balki ALLAQACHON ro'yxatdan
+    o'tgan, boshqa roldagi xodim ham nazoratchi tayinlay olmasligini
+    tekshiradi (kuchliroq tahdid modeli, shunchaki "begona"dan farqli).
+    """
+    main, bot = bot_dp
+    from roles import get_role, set_role
+
+    set_role(111, "kassir", set_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, 111, text="/setrole 222 nazoratchi")
+    assert sent == []
+    assert get_role(222) is None
+
+    sent = await send(main.dp, bot, 111, text="/invite nazoratchi")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/setrole 222 nazoratchi")
+    assert sent[0].text.startswith("✅")
+    assert get_role(222) == "nazoratchi"
+
+
+async def test_second_nazoratchi_assignment_is_rejected(bot_dp):
+    """Bitta nazoratchi tizimi: Founder ikkinchi nazoratchi tayinlashga
+    urinsa ham, mavjud nazoratchi almashtirilmaydi (roles.set_role'dagi
+    single-slot himoyasi Telegram qatlamida ham amal qilishini
+    tasdiqlaydi).
+    """
+    main, bot = bot_dp
+    from roles import get_role
+
+    await send(main.dp, bot, FOUNDER_ID, text="/setrole 111 nazoratchi")
+    assert get_role(111) == "nazoratchi"
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/setrole 222 nazoratchi")
+    assert "allaqachon" in sent[0].text.lower()
+    assert get_role(222) is None
+    assert get_role(111) == "nazoratchi"
+
+
 async def test_setrole_and_listusers(bot_dp):
     main, bot = bot_dp
 

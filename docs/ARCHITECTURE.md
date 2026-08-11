@@ -140,13 +140,37 @@ o'qing:
   ikkinchisiga ta'sir qilmaydi. Bu ataylab shundayligi yoki ular
   birlashtirilishi kerakligi biznes qarori — `docs/BUSINESS_RULES.md`da
   `NEEDS_BUSINESS_DECISION` deb belgilangan.
-- **`close_day` bir nazoratchi faraziga tayanadi:** `/kunniyop`dagi
-  "baholangan xodimlar soni" barcha nazoratchilar bo'yicha umumiy
-  hisoblanadi, aloqador nazoratchiga filtrlanmagan. Bugungi kunda
-  loyihada har doim bittadan nazoratchi bo'lgani uchun (`find_user_by_role`
-  bitta natija qaytaradi — butun kodda shu farazga tayaniladi:
-  scheduler, kalibratsiya va h.k.) amalda muammo yo'q. Ikkinchi
-  nazoratchi qo'shilsa, bu qatlam qayta ko'rib chiqilishi kerak.
+- **Bitta nazoratchi — Founder qarori bilan tasdiqlangan (2026-08).**
+  Kompaniyada bu yil faqat bitta nazoratchi ishlaydi va Founder buni
+  ataylab shunday qoldirishga qaror qildi — ko'p-nazoratchi
+  funksionalligi HOZIR qurilmaydi (database, murakkab vakolat,
+  yangi funksiya yaratilmadi). Amaldagi himoya (allaqachon mavjud,
+  testlangan):
+  - Nazoratchini FAQAT Founder tayinlaydi — `/setrole` (`main.py`) va
+    `/invite` -> onboarding approve (`approval.py`) ikkalasi ham
+    `message.from_user.id != FOUNDER_ID` bilan boshqa hech kimga
+    ochilmagan.
+  - `roles.py`dagi `SINGLE_SLOT_ROLES` ro'yxatida `"nazoratchi"` bor —
+    `roles.set_role()`ning o'zi (Telegram qatlamidan mustaqil,
+    ikkinchi himoya qatlami) ikkinchi nazoratchi tayinlanishini rad
+    etadi, mavjudini almashtirmaydi.
+  - `/kunniyop`dagi "baholangan xodimlar soni" barcha nazoratchilar
+    bo'yicha umumiy hisoblanadi (bittaga filtrlanmagan) — bitta
+    nazoratchi bilan bu to'g'ri ishlaydi, muammo yo'q.
+  - Test bilan qulflangan: `tests/test_bot_flows.py::test_only_founder_can_assign_nazoratchi`,
+    `::test_second_nazoratchi_assignment_is_rejected`, `tests/test_roles.py`.
+
+  **Kelajak rejasi (hozir qilinmagan, faqat qayd etilgan):** agar
+  kompaniya kelajakda ikkinchi nazoratchi qo'shishga qaror qilsa, kamida
+  quyidagilar qayta ko'rib chiqilishi kerak — `SINGLE_SLOT_ROLES`dan
+  `"nazoratchi"`ni olib tashlash; `discipline_bot.py`/`services/discipline.py`
+  ichida `close_day`/`get_evaluations_for_date`ni har bir nazoratchiga
+  filtrlash (hozir global); `_day_close_tick` scheduleri
+  `find_user_by_role("nazoratchi")` (bitta natija) o'rniga barcha
+  nazoratchilarni aylanishi; filial-nazoratchi bog'lanishi kerak bo'lsa
+  (kim qaysi filialga mas'ul) yangi ustun/jadval. Bu ish HOZIR
+  boshlanmagan — faqat "qayerdan boshlash kerak" xaritasi sifatida
+  yozildi.
 - **Uch xil ruxsat tekshiruvi bir vaqtda ishlaydi:** `id == FOUNDER_ID`
   (eng eski), `roles.is_authorized`/`get_role` ("har qanday ro'yxatdan
   o'tgan foydalanuvchi"), `services/permissions.has_permission`

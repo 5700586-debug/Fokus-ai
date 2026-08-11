@@ -75,8 +75,14 @@ Bitta jarimaga faqat bitta marta apellyatsiya berish mumkin
   `bos.supervisor_late_penalty` (standart 40) ball yechiladi va bir
   marta qayd etiladi (`UNIQUE(supervisor_id, audit_date, event_type)`
   — bir kunga ikki marta jarimalanmaydi).
-- **Cheklov:** hisoblash bitta faol nazoratchi farazi bilan ishlaydi
-  (qarang `ARCHITECTURE.md` §7).
+- **Qasddan qaror (Founder, 2026-08):** kompaniyada bu yil faqat bitta
+  nazoratchi ishlaydi, buni Founder tasdiqladi — ko'p-nazoratchi
+  qo'llab-quvvatlash hozircha ataylab qurilmagan. Nazoratchini FAQAT
+  Founder tayinlaydi (`/setrole`, `/invite` — ikkalasi ham koddan
+  boshqa hech kimga ochiq emas), va tizim ikkinchi nazoratchi
+  tayinlanishiga yo'l qo'ymaydi (`roles.SINGLE_SLOT_ROLES`). To'liq
+  tafsilot va kelajakda ko'p-nazoratchi qo'shish kerak bo'lsa nimadan
+  boshlash haqida: `ARCHITECTURE.md` §7.
 
 ## 6. Kassa smenasi (`services/cash_shift.py`, `services/cash_expense.py`)
 

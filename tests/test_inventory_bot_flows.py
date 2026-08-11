@@ -137,6 +137,33 @@ async def test_full_variance_explanation_flow_with_urgent_push(bot_dp):
     assert "tekshirildi va yopildi" in reporter_notif[0].text.lower()
 
 
+async def test_variance_resolve_twice_is_idempotent(bot_dp):
+    """Regression: ikkinchi marta bosish (double-tap) yoki takroriy callback
+    xodimga ikkinchi marta "tekshirildi" xabarini yubormasligi kerak.
+    """
+    main, bot = bot_dp
+    from repositories import inventory as inv_repo
+
+    snapshot = inv_repo.create_snapshot(
+        "Filial-1", "2026-01-01", reported_by_employee_id=111,
+        total_inventory_value=100, previous_inventory_value=None,
+        gross_difference=None, threshold=1_000_000, photo_reference=None,
+    )
+
+    from roles import set_role
+    set_role(1, "nazoratchi", set_by=FOUNDER_ID)
+
+    first = await send_callback(
+        main.dp, bot, 1, data=f"invvariance_resolve:{snapshot['id']}", target_chat_id=FOUNDER_ID
+    )
+    assert any(getattr(m, "chat_id", None) == 111 for m in first)
+
+    second = await send_callback(
+        main.dp, bot, 1, data=f"invvariance_resolve:{snapshot['id']}", target_chat_id=FOUNDER_ID
+    )
+    assert not any(getattr(m, "chat_id", None) == 111 for m in second)
+
+
 async def test_non_supervisor_cannot_resolve_variance(bot_dp):
     main, bot = bot_dp
     from repositories import inventory as inv_repo

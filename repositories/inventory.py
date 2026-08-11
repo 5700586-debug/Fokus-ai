@@ -163,3 +163,15 @@ def record_variance_review(snapshot_id: int, reviewed_by: int, decision: str, co
         return cursor.lastrowid
     finally:
         conn.close()
+
+
+def has_variance_review(snapshot_id: int) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM inventory_variance_reviews WHERE snapshot_id = ? LIMIT 1", (snapshot_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return row is not None

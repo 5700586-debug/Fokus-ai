@@ -105,5 +105,9 @@ def record_supervisor_review(snapshot_id: int, reviewed_by: int, decision: str, 
     repo.record_variance_review(snapshot_id, reviewed_by, decision, comment)
 
 
+def has_review(snapshot_id: int) -> bool:
+    return repo.has_variance_review(snapshot_id)
+
+
 def get_snapshot(snapshot_id: int) -> dict | None:
     return repo.get_snapshot(snapshot_id)

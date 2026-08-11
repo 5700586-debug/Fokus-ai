@@ -286,6 +286,10 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Snapshot topilmadi.", show_alert=True)
             return
 
+        if inv.has_review(snapshot_id):
+            await callback.answer("Bu tafovut allaqachon ko'rib chiqilgan.", show_alert=True)
+            return
+
         inv.record_supervisor_review(snapshot_id, callback.from_user.id, decision, comment=None)
 
         if callback.message:

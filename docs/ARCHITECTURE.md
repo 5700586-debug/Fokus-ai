@@ -153,6 +153,16 @@ o'qing:
   (granular amal-asosli). Uchtasi ham ishlaydi va testlangan — birini
   tanlab hammasini qayta yozish katta, past-foydali refaktor bo'lardi.
   Yangi komandalar `services/permissions.py`dan foydalansin.
+- **Logging hali birxil emas:** ko'pchilik joyda `print()` ishlatiladi,
+  faqat bir nechta faylda (`discipline_bot.py`, `calibration_bot.py`)
+  qisman `logging.getLogger(__name__)`. Xavfsizlik talabi (parol/token
+  hech qachon loglanmasin) allaqachon bajarilgan — `db.py`dagi
+  `_redact_dsn()` va h.k. Global exception handler mavjud (`main.py`,
+  `@dp.errors()`), spam qilmaydi. Lekin yagona strukturali `logging`
+  formatiga (vaqt/modul/daraja/user_id) o'tish hali qilinmagan — bu
+  ~15 faylni qamrab oladigan, sof kosmetik/observability o'zgarish,
+  audit paytida ataylab keyingi navbatga qoldirilgan (xavfsizlik yoki
+  to'g'rilik xatosi emas).
 - **Provider'lar (`providers/*.py`) hali ulanmagan:** `SMS_PROVIDER_ENABLED`
   va shu kabi flag'lar `config.py`da bor, lekin `get_sms_provider()`
   va boshqalar hozircha SHART-SIZ doim `Null*` qaytaradi — flag'ga

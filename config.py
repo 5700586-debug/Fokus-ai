@@ -1,6 +1,11 @@
 import os
 
-FOUNDER_ID = 34213422
+# Asoschi (Founder) Telegram user_id. Kodga hardcode qilinmaydi — Founder
+# almashsa, kod o'zgarishi/qayta deploy shart bo'lmasin uchun .env/Render
+# environment orqali boshqariladi. Standart qiymat — bot yaratilgandan
+# beri ishlatib kelingan Founder ID (mavjud .env'da FOUNDER_ID yo'q bo'lsa
+# ham prod ishlashda uzilish bo'lmasligi uchun).
+FOUNDER_ID = int(os.getenv("FOUNDER_ID") or "34213422")
 
 # Tashqi providerlar (SMS, ob-havo) hali ulanmagan. Flag'lar False bo'lsa
 # (yoki .env'da yo'q bo'lsa), providers/ paketidagi Null* implementatsiyalar

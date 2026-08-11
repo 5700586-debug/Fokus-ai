@@ -46,6 +46,11 @@ def _resolve_timezone():
         return dt_timezone.utc
 
 
+def _today() -> date:
+    """Server UTC bo'lsa ham, kompaniya vaqt zonasi bo'yicha bugungi sana."""
+    return datetime.now(_resolve_timezone()).date()
+
+
 def _employee_name(user_id: int) -> str:
     profile = employees.get_profile(user_id)
     if profile is None:
@@ -203,7 +208,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         _, _, employee_id_str, grade_key = callback.data.split(":")
         employee_id = int(employee_id_str)
-        eval_date = date.today().isoformat()
+        eval_date = _today().isoformat()
 
         result = discipline.record_daily_grade(employee_id, callback.from_user.id, eval_date, grade_key)
 
@@ -277,7 +282,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         result = discipline.apply_penalty(
             employee_id,
             message.from_user.id,
-            date.today().isoformat(),
+            _today().isoformat(),
             amount,
             rule_number,
             comment=text,
@@ -310,7 +315,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         ):
             return
 
-        today = date.today().isoformat()
+        today = _today().isoformat()
         total = len(_target_employees())
 
         if not discipline.close_day(message.from_user.id, today, total):
@@ -327,7 +332,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
 
-        today = date.today()
+        today = _today()
         board = discipline.get_daily_leaderboard(today.isoformat())
         await message.answer(
             _format_board(f"🏆 Bugungi Poyga — {today.strftime('%d.%m.%Y')}", board, "grade_points")
@@ -338,7 +343,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
 
-        today = date.today()
+        today = _today()
         board = discipline.get_monthly_leaderboard(today.strftime("%Y-%m"))
         await message.answer(
             _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")

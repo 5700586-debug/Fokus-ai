@@ -2,10 +2,10 @@ from services import calibration
 
 
 def test_ensure_session_creates_with_default_start_date_today():
-    from datetime import date
+    import company_time
 
     session = calibration.ensure_session(111, "taminotchi")
-    assert session["start_date"] == date.today().isoformat()
+    assert session["start_date"] == company_time.today().isoformat()
 
 
 def test_ensure_session_is_idempotent_and_keeps_first_start_date():

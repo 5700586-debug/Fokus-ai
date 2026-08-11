@@ -1,7 +1,8 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
+import company_time
 from config import FOUNDER_ID
 from tests.bot_harness import send, send_callback
 
@@ -28,7 +29,7 @@ def _make_savdo_boshligi(user_id: int, branch: str = "Filial-1") -> None:
 
 
 def _yesterday() -> str:
-    return (date.today() - timedelta(days=1)).isoformat()
+    return (company_time.today() - timedelta(days=1)).isoformat()
 
 
 async def test_invsnapshot_requires_savdo_boshligi_role(bot_dp):
@@ -126,7 +127,7 @@ async def test_full_variance_explanation_flow_with_urgent_push(bot_dp):
 
     from services import inventory_snapshot as inv
 
-    snapshot = inv_repo.get_snapshot_for_date("Filial-1", date.today().isoformat())
+    snapshot = inv_repo.get_snapshot_for_date("Filial-1", company_time.today().isoformat())
     assert snapshot["status"] == inv.STATUS_URGENT_REVIEW
 
     resolve_sent = await send_callback(

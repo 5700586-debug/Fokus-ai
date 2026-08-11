@@ -11,7 +11,7 @@ scheduler orqali (``start_scheduler``) yuboriladi.
 """
 
 import logging
-from datetime import date, datetime, timezone as dt_timezone
+from datetime import datetime, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Dispatcher
@@ -68,7 +68,7 @@ def _resolve_start_date(user_id: int) -> str:
     approved_at = profile.get("approved_at") if profile else None
     if approved_at:
         return approved_at[:10]
-    return date.today().isoformat()
+    return datetime.now(_resolve_timezone()).date().isoformat()
 
 
 def on_employee_approved(user_id: int, role_key: str) -> None:

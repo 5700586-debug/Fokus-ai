@@ -11,6 +11,7 @@ to'g'ridan-to'g'ri ``FOUNDER_ID`` bilan tekshiriladi.
 
 from datetime import date, datetime
 
+import company_time
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -92,7 +93,7 @@ def register(dp: Dispatcher) -> None:
             await message.answer("❌ Ball 0 dan 100 gacha bo'lishi kerak.")
             return
 
-        score_date = date.today().isoformat()
+        score_date = company_time.today().isoformat()
         supervisor_scoring.record_score(user_id, message.from_user.id, score_date, score, comment)
         await message.answer(f"✅ {user_id} uchun {score_date} kuni ball qayd etildi: {score}")
 
@@ -328,7 +329,7 @@ def register(dp: Dispatcher) -> None:
 
         market_observation.log_observation(
             employee_id=message.from_user.id,
-            observation_date=date.today().isoformat(),
+            observation_date=company_time.today().isoformat(),
             product=data["product"],
             variety=data.get("variety"),
             photo_reference=data.get("photo_reference"),
@@ -446,7 +447,7 @@ def register(dp: Dispatcher) -> None:
         try:
             driver_checks.record_daily_check(
                 driver_id=message.from_user.id,
-                check_date=date.today().isoformat(),
+                check_date=company_time.today().isoformat(),
                 exterior_photo_ref=data.get("exterior_photo_ref"),
                 interior_photo_ref=data.get("interior_photo_ref"),
                 start_km=data.get("start_km"),

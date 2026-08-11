@@ -10,6 +10,7 @@ qo'llanmaydi).
 import random
 from datetime import date, datetime
 
+import company_time
 from repositories import baselines as baselines_repo
 from services import learning as learning_service
 
@@ -46,7 +47,7 @@ def _parse_date(value: str) -> date:
 
 def day_number_since(start_date: str, today: str | None = None) -> int:
     start = _parse_date(start_date)
-    current = _parse_date(today) if today else date.today()
+    current = _parse_date(today) if today else company_time.today()
     return (current - start).days + 1
 
 
@@ -183,7 +184,7 @@ def ensure_session(user_id: int, role_key: str, start_date: str | None = None) -
     yubormaydi — approval callback ichida chaqirilishi mumkin, chunki
     uzoq interview shu yerda BOSHLANMAYDI.
     """
-    resolved_start_date = start_date or date.today().isoformat()
+    resolved_start_date = start_date or company_time.today().isoformat()
     return baselines_repo.create_session(user_id, role_key, resolved_start_date)
 
 

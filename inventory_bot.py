@@ -7,8 +7,7 @@ hali Null) — Savdo bo'limi boshlig'i jami ombor summasini har doim
 qo'lda kiritadi, rasm faqat hujjat sifatida ilova qilinadi.
 """
 
-from datetime import date, datetime
-
+import company_time
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -178,7 +177,7 @@ def register(dp: Dispatcher) -> None:
         branch = profile.get("branch") if profile else None
 
         outcome = inv.create_snapshot_for_today(
-            branch, date.today().isoformat(), user_id, amount, data.get("photo_reference")
+            branch, company_time.today().isoformat(), user_id, amount, data.get("photo_reference")
         )
 
         if outcome.already_existed:
@@ -330,7 +329,7 @@ def register(dp: Dispatcher) -> None:
 
         from repositories import inventory as inventory_repo
 
-        snapshot = inventory_repo.get_snapshot_for_date(branch, date.today().isoformat())
+        snapshot = inventory_repo.get_snapshot_for_date(branch, company_time.today().isoformat())
         if snapshot is None:
             await message.answer("ℹ️ Bugun uchun ombor hisoboti topilmadi.")
             return
@@ -350,7 +349,7 @@ async def send_daily_reminders(bot) -> None:
     """
     from roles import list_users
 
-    today = date.today().isoformat()
+    today = company_time.today().isoformat()
     for user_id, info in list_users().items():
         if info["role"] != "savdo_boshligi":
             continue
@@ -365,7 +364,7 @@ async def send_daily_reminders(bot) -> None:
 
 async def _reminder_tick(bot) -> None:
     reminder_time = rules_service.get_inventory_reminder_time()
-    current_hm = datetime.now().strftime("%H:%M")
+    current_hm = company_time.now().strftime("%H:%M")
     if current_hm < reminder_time:
         return
 

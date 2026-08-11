@@ -1,5 +1,6 @@
 import pytest
 
+import company_time
 from config import FOUNDER_ID
 from tests.bot_harness import send, send_callback
 
@@ -97,7 +98,7 @@ async def test_expense_full_flow_no_anomaly(bot_dp):
     from services import cash_expense
     from services import cash_shift
 
-    shift = cash_shift.get_open_shift(111, __import__("datetime").date.today().isoformat())
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
     assert cash_expense.total_expenses_for_shift(shift["id"]) == 65000
 
 
@@ -107,7 +108,7 @@ async def test_expense_anomaly_requires_reason(bot_dp):
 
     _make_kassir(111)
     await _open_shift(main, bot, 111, "0")
-    shift = repo.get_open_shift(111, __import__("datetime").date.today().isoformat())
+    shift = repo.get_open_shift(111, company_time.today().isoformat())
 
     for i, amount in enumerate((60_000,) * 7):
         repo.add_expense(shift["id"], 111, "Filial-1", "taxi", amount, None, f"2020-01-{10 + i}")
@@ -211,7 +212,7 @@ async def test_supervisor_approve_finalizes_and_notifies_kassir(bot_dp):
         await send(main.dp, bot, 111, text="0")
         await send(main.dp, bot, 111, text="50000")
 
-    shift = cash_shift.get_open_shift(111, __import__("datetime").date.today().isoformat())
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
     assert shift["status"] == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL
 
     sent = await send_callback(
@@ -240,7 +241,7 @@ async def test_non_supervisor_cannot_approve(bot_dp):
         await send(main.dp, bot, 111, text="0")
         await send(main.dp, bot, 111, text="50000")
 
-    shift = cash_shift.get_open_shift(111, __import__("datetime").date.today().isoformat())
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
 
     _make_kassir(222, branch="Filial-2")
     await send_callback(

@@ -7,8 +7,7 @@ hali Null) — kassir savdo/xarajat/qoldiq raqamlarini har doim qo'lda
 kiritadi, rasmlar faqat hujjat sifatida ilova qilinadi.
 """
 
-from datetime import date
-
+import company_time
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -168,7 +167,7 @@ def register(dp: Dispatcher) -> None:
             return
 
         user_id = message.from_user.id
-        today = date.today().isoformat()
+        today = company_time.today().isoformat()
 
         existing = cash_shift.get_open_shift(user_id, today)
         if existing is not None:
@@ -204,7 +203,7 @@ def register(dp: Dispatcher) -> None:
         profile = get_profile(user_id)
         branch = profile.get("branch") if profile else None
         shift = cash_shift.open_shift_for_today(
-            user_id, branch, date.today().isoformat(), manual_opening_balance=amount
+            user_id, branch, company_time.today().isoformat(), manual_opening_balance=amount
         )
         await message.answer(f"✅ Smena ochildi.\nBoshlang'ich qoldiq: {shift['opening_balance']} so'm.")
 
@@ -217,7 +216,7 @@ def register(dp: Dispatcher) -> None:
         ):
             return
 
-        today_shift = cash_shift.get_open_shift(message.from_user.id, date.today().isoformat())
+        today_shift = cash_shift.get_open_shift(message.from_user.id, company_time.today().isoformat())
         if today_shift is None:
             await message.answer("❌ Avval /openshift bilan bugungi smenani oching.")
             return
@@ -247,7 +246,7 @@ def register(dp: Dispatcher) -> None:
         data = await state.update_data(amount=amount)
         user_id = message.from_user.id
         is_anomaly, baseline_average = cash_expense.check_anomaly(
-            user_id, data["category"], amount, date.today().isoformat()
+            user_id, data["category"], amount, company_time.today().isoformat()
         )
 
         if is_anomaly:
@@ -282,13 +281,13 @@ def register(dp: Dispatcher) -> None:
         await state.clear()
 
         user_id = message.from_user.id
-        today_shift = cash_shift.get_open_shift(user_id, date.today().isoformat())
+        today_shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
         profile = get_profile(user_id)
         branch = profile.get("branch") if profile else None
 
         cash_expense.log_expense(
             today_shift["id"], user_id, branch, data["category"], data["amount"],
-            description, date.today().isoformat(),
+            description, company_time.today().isoformat(),
         )
         await message.answer(
             f"✅ Xarajat qayd etildi: {_CATEGORY_LABELS[data['category']]} — {data['amount']} so'm.",
@@ -305,7 +304,7 @@ def register(dp: Dispatcher) -> None:
             return
 
         user_id = message.from_user.id
-        shift = cash_shift.get_open_shift(user_id, date.today().isoformat())
+        shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
         if shift is None:
             await message.answer("❌ Avval /openshift bilan bugungi smenani oching.")
             return
@@ -513,7 +512,7 @@ def register(dp: Dispatcher) -> None:
         elif not permissions.has_permission(message.from_user.id, permissions.ACTION_OPEN_CASH_SHIFT):
             return
 
-        shift = cash_shift.get_open_shift(target_id, date.today().isoformat())
+        shift = cash_shift.get_open_shift(target_id, company_time.today().isoformat())
         if shift is None:
             await message.answer("ℹ️ Bugun uchun smena topilmadi.")
             return

@@ -50,6 +50,55 @@ async def test_saturntest_sends_requested_post_type(bot_dp, monkeypatch):
     assert any("yuborildi" in (t or "") for t in texts_out)
 
 
+async def test_saturntest_in_group_auto_captures_chat_id(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main.openai_client.responses, "create", _FakeResponses().create)
+
+    assert rules_service.get_saturn_group_chat_id() is None
+
+    sent = await send(
+        main.dp, bot, FOUNDER_ID, text="/saturntest tip", chat_id=-100555, chat_type="group"
+    )
+
+    assert rules_service.get_saturn_group_chat_id() == -100555
+    texts_out = [m.text for m in sent]
+    assert any("Guruh ID saqlandi: -100555" in (t or "") for t in texts_out)
+
+
+async def test_saturntest_in_group_without_post_type_still_captures_and_shows_hint(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest", chat_id=-100555, chat_type="group")
+
+    assert rules_service.get_saturn_group_chat_id() == -100555
+    texts_out = [m.text for m in sent]
+    assert any("Guruh ID saqlandi: -100555" in (t or "") for t in texts_out)
+    assert any("Foydalanish" in (t or "") for t in texts_out)
+
+
+async def test_saturntest_in_group_does_not_re_announce_capture_when_already_set(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main.openai_client.responses, "create", _FakeResponses().create)
+
+    rules_service.set_rule("saturn.group_chat_id", "-100555", updated_by=FOUNDER_ID)
+
+    sent = await send(
+        main.dp, bot, FOUNDER_ID, text="/saturntest tip", chat_id=-100555, chat_type="group"
+    )
+
+    texts_out = [m.text for m in sent]
+    assert not any("Guruh ID saqlandi" in (t or "") for t in texts_out)
+    assert any("yuborildi" in (t or "") for t in texts_out)
+
+
+async def test_saturntest_non_founder_in_group_does_not_capture(bot_dp):
+    main, bot = bot_dp
+
+    await send(main.dp, bot, 999999, text="/saturntest tip", chat_id=-100555, chat_type="group")
+
+    assert rules_service.get_saturn_group_chat_id() is None
+
+
 async def test_tick_does_nothing_without_group_chat_id_configured():
     bot = RecordingBot(token="123456:TEST-TOKEN")
     await saturn_group_bot._tick(bot, _FakeClient())

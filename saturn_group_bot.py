@@ -8,6 +8,10 @@ sozlanadi (``services/rules.py``: ``saturn.group_chat_id``,
 o'rnatilmagan bo'lsa (standart holat), scheduler hech narsa yubormaydi —
 bu xato emas, balki "hali sozlanmagan" holati.
 
+Founder ID'ni qo'lda qidirmasin: ``/saturntest`` buyrug'i to'g'ridan-to'g'ri
+Saturn guruhining o'zida yuborilsa, ``message.chat.id`` avtomatik
+``saturn.group_chat_id`` sifatida saqlanadi (qarang ``saturn_test_handler``).
+
 Bu modul ta'minotchi bilan HECH QACHON muzokara olib bormaydi —
 ``supplier_chat_bot.py``dan butunlay mustaqil, faqat guruhga bir
 tomonlama ma'lumot yuboradi.
@@ -62,17 +66,36 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             return
 
         parts = (message.text or "").split(maxsplit=1)
-        group_chat_id = rules_service.get_saturn_group_chat_id()
-        if group_chat_id is None:
-            await message.answer(
-                "❌ Guruh ID hali sozlanmagan. Avval: "
-                "/setrule saturn.group_chat_id <guruh_chat_id>"
-            )
-            return
+
+        # Buyruq to'g'ridan-to'g'ri guruhning o'zida yuborilsa, Founder ID
+        # qidirishga majbur bo'lmasin — shu guruhning chat_id'si avtomatik
+        # ``saturn.group_chat_id`` sifatida saqlanadi (qo'lda /setrule shart
+        # emas, lekin hali ham kodga hardcode qilinmaydi).
+        captured_now = False
+        if message.chat.type in ("group", "supergroup"):
+            group_chat_id = message.chat.id
+            if rules_service.get_saturn_group_chat_id() != group_chat_id:
+                rules_service.set_rule(
+                    "saturn.group_chat_id", str(group_chat_id), updated_by=FOUNDER_ID
+                )
+                captured_now = True
+        else:
+            group_chat_id = rules_service.get_saturn_group_chat_id()
+            if group_chat_id is None:
+                await message.answer(
+                    "❌ Guruh ID hali sozlanmagan. Bu buyruqni Saturn guruhining "
+                    "o'zida yuboring — guruh ID avtomatik saqlanadi. Yoki: "
+                    "/setrule saturn.group_chat_id <guruh_chat_id>"
+                )
+                return
 
         post_type = parts[1].strip() if len(parts) > 1 else ""
         if post_type not in ("morning", "dashboard", "evening", "tip"):
+            captured_line = (
+                f"✅ Guruh ID saqlandi: {group_chat_id}\n" if captured_now else ""
+            )
             await message.answer(
+                f"{captured_line}"
                 "Foydalanish: /saturntest <morning|dashboard|evening|tip>\n"
                 f"Joriy guruh ID: {group_chat_id}"
             )
@@ -89,7 +112,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 message.bot, openai_client, group_chat_id, "manual"
             )
 
-        await message.answer(f"✅ '{post_type}' posti guruhga (ID: {group_chat_id}) yuborildi.")
+        captured_line = f"✅ Guruh ID saqlandi: {group_chat_id}\n" if captured_now else ""
+        await message.answer(
+            f"{captured_line}✅ '{post_type}' posti guruhga (ID: {group_chat_id}) yuborildi."
+        )
 
 
 def start_scheduler(bot, openai_client: AsyncOpenAI):

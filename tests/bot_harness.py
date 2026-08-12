@@ -47,9 +47,11 @@ def make_message(
     text: str | None = None,
     photo_file_id: str | None = None,
     message_id: int = 1,
+    chat_id: int | None = None,
+    chat_type: str = "private",
 ) -> Message:
     user = TgUser(id=user_id, is_bot=False, first_name="Test")
-    chat = Chat(id=user_id, type="private")
+    chat = Chat(id=chat_id if chat_id is not None else user_id, type=chat_type)
     kwargs: dict = dict(message_id=message_id, date=datetime.now(), chat=chat, from_user=user)
 
     if photo_file_id is not None:
@@ -62,9 +64,24 @@ def make_message(
     return Message(**kwargs)
 
 
-async def send(dp, bot: RecordingBot, user_id: int, text: str | None = None, photo_file_id: str | None = None):
+async def send(
+    dp,
+    bot: RecordingBot,
+    user_id: int,
+    text: str | None = None,
+    photo_file_id: str | None = None,
+    chat_id: int | None = None,
+    chat_type: str = "private",
+):
     bot.sent = []
-    message = make_message(user_id, text=text, photo_file_id=photo_file_id, message_id=len(bot.sent) + 1)
+    message = make_message(
+        user_id,
+        text=text,
+        photo_file_id=photo_file_id,
+        message_id=len(bot.sent) + 1,
+        chat_id=chat_id,
+        chat_type=chat_type,
+    )
     update = Update(update_id=1, message=message)
     await dp.feed_update(bot, update)
     return bot.sent

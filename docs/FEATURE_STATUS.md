@@ -83,7 +83,8 @@ mumkin, `allowed_users`ga kirmaydi.
 
 | Funksiya | Holat | Fayl | Izoh |
 |---|---|---|---|
-| Ertalabki salom, kunlik dashboard, foydali ma'lumot, kechqurungi xulosa | production (test) | `services/saturn_group.py`, `saturn_group_bot.py` | Har biri `/setrule saturn.*` bilan sozlanadi (guruh ID, vaqtlar) — kodga hardcode qilinmagan |
+| Ertalabki salom, kunlik dashboard, foydali ma'lumot, kechqurungi xulosa | production (test) | `services/saturn_group.py`, `saturn_group_bot.py` | Yuborish vaqtlari `/setrule saturn.*` bilan sozlanadi — kodga hardcode qilinmagan |
+| Guruh ID avtomatik aniqlash | production (test) | `saturn_group_bot.py` (`saturn_test_handler`) | Founder `/saturntest`ni Saturn guruhining o'zida yuborsa, `chat.id` avtomatik `saturn.group_chat_id` sifatida saqlanadi — qo'lda ID qidirish/`/setrule` shart emas |
 | Qayta ishga tushganda dublikat post yubormaslik | production (test), testlangan | `services/notifications.send_once` orqali | `tests/test_saturn_group_service.py::test_send_morning_message_is_idempotent_across_restarts` |
 | Foydali ma'lumot (tip) takrorlanmasligi | production (test), testlangan | `_pick_tip`, `saturn_posts_log` | Oxirgi 7 kunlik tip bilan solishtiriladi |
 | Kunlik savdo raqamlari (reja/haqiqiy/cheklar/o'rtacha chek) | **rejalashtirilgan** | `providers/sales_data_provider.py` | Loyihada hech qanday POS/kassa tizimi bu raqamlarni markazlashtirmaydi (qarang yuqorida — "O'rtacha chek" mavjud emas). `NullSalesDataProvider` — SMS/ob-havo bilan bir xil naqsh — hech qachon taxminiy raqam bermaydi, dashboard har bo'sh maydon uchun "Ma'lumot kelmadi" ko'rsatadi. Kassa smenasi (`cash_shift`) raqami ataylab ISHLATILMADI — u naqd pul solishtirish, tasdiqlanmagan savdo aylanmasi emas. Haqiqiy manba ulanganda faqat shu provayder almashtiriladi. |

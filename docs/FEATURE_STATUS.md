@@ -59,9 +59,35 @@ ikkilanmoqda, biznes qarori kerak).
 |---|---|---|---|
 | Haydovchi kunlik tekshiruv | production | `services/driver_checks.py`, `/drivercheck` | |
 | Mashina/servis kuzatuvi | production | `repositories/vehicles.py`, `/addvehicle` | Moy almashtirish intervali `/setrule` orqali |
-| Bozor kuzatuvi (ta'minotchi) | production | `services/market_observation.py`, `/marketlog` | |
+| Bozor kuzatuvi (ta'minotchi, ichki xodim) | production | `services/market_observation.py`, `/marketlog` | Bu ichki `taminotchi` xodim rolidan — tashqi hamkor ta'minotchilardan FARQLI (qarang pastda) |
 | Ovqat rejasi | production | `services/meal_plan.py`, `/mealplan` | |
 | Bildirishnomalar (idempotent) | production | `services/notifications.py` | `send_once` — bir kunga bir marta, dublikat yo'q |
+
+## Tashqi ta'minotchi AI chati (2026-08, test muhitida qo'shildi)
+
+`suppliers`/`supplier_offers`/`supplier_messages` — `roles.py`dagi ichki
+`taminotchi` xodim rolidan (yagona shtat birligi) BUTUNLAY mustaqil
+yangi obyekt: tashqi hamkor kompaniyalar, xohlagancha sonda bo'lishi
+mumkin, `allowed_users`ga kirmaydi.
+
+| Funksiya | Holat | Fayl | Izoh |
+|---|---|---|---|
+| Founder taklif havolasi | production (test) | `/invitesupplier`, `repositories/suppliers.py` | 48 soat amal qiladi, bir martalik |
+| Shaxsiy chatdagi AI suhbat | production (test) | `services/supplier_ai.py`, `supplier_chat_bot.py` | Faqat `chat.type == "private"`, hech qachon guruhda ishlamaydi |
+| Struktura ma'lumot yig'ish (mahsulot/narx/shart) | production (test) | `supplier_offers` jadvali | AI faqat ANIQ aytilgan maydonni yozadi, hech narsani to'qimaydi |
+| Ta'minotchilar taqqoslash + bozor taqqoslash | production (test) | `/supplierscompare`, `services/market_observation.py` bilan birlashtirilgan | Founder-only — ta'minotchining o'ziga boshqa hech kimning ma'lumoti ko'rsatilmaydi |
+| Founder xulosasi | production (test) | `/supplierreport` | AI faqat tahlil/tavsiya beradi, narx/hamkorlik qarorini hech qachon o'zi qabul qilmaydi |
+| Suhbat konteksti maxfiyligi | production (test), testlangan | `tests/test_supplier_ai.py::test_prompt_never_includes_other_suppliers_data` | Har bir ta'minotchining promptiga faqat O'ZINING tarixi/profili beriladi |
+
+## Saturn umumiy guruh kunlik postlari (2026-08, test muhitida qo'shildi)
+
+| Funksiya | Holat | Fayl | Izoh |
+|---|---|---|---|
+| Ertalabki salom, kunlik dashboard, foydali ma'lumot, kechqurungi xulosa | production (test) | `services/saturn_group.py`, `saturn_group_bot.py` | Har biri `/setrule saturn.*` bilan sozlanadi (guruh ID, vaqtlar) — kodga hardcode qilinmagan |
+| Qayta ishga tushganda dublikat post yubormaslik | production (test), testlangan | `services/notifications.send_once` orqali | `tests/test_saturn_group_service.py::test_send_morning_message_is_idempotent_across_restarts` |
+| Foydali ma'lumot (tip) takrorlanmasligi | production (test), testlangan | `_pick_tip`, `saturn_posts_log` | Oxirgi 7 kunlik tip bilan solishtiriladi |
+| Kunlik savdo raqamlari (reja/haqiqiy/cheklar/o'rtacha chek) | **rejalashtirilgan** | `providers/sales_data_provider.py` | Loyihada hech qanday POS/kassa tizimi bu raqamlarni markazlashtirmaydi (qarang yuqorida — "O'rtacha chek" mavjud emas). `NullSalesDataProvider` — SMS/ob-havo bilan bir xil naqsh — hech qachon taxminiy raqam bermaydi, dashboard har bo'sh maydon uchun "Ma'lumot kelmadi" ko'rsatadi. Kassa smenasi (`cash_shift`) raqami ataylab ISHLATILMADI — u naqd pul solishtirish, tasdiqlanmagan savdo aylanmasi emas. Haqiqiy manba ulanganda faqat shu provayder almashtiriladi. |
+| Ertalabki/kechqurungi post rasm/infografika | **rejalashtirilgan** | — | Loyihada hech qanday rasm generatsiya provayderi yo'q (SMS/ob-havo/OCR kabi barchasi hali ulanmagan) — yangi pullik integratsiya (masalan OpenAI Images) tanlash biznes qarori, shuning uchun qurilmadi. Postlar hozircha faqat matn. |
 
 ## AI
 

@@ -108,6 +108,36 @@ def get_bos_penalty_amounts() -> tuple[int, ...]:
     return tuple(int(part) for part in value.split(","))
 
 
+def get_saturn_group_chat_id() -> int | None:
+    """Founder ``/setrule saturn.group_chat_id <chat_id>`` bilan
+    o'rnatadi — rule bo'sh bo'lsa (standart), Saturn guruh scheduleri
+    hech narsa yubormaydi (jim o'chirilgan holat, xato emas)."""
+    value = performance_repo.get_rule("saturn.group_chat_id")
+    return int(value) if value else None
+
+
+def get_saturn_morning_time() -> str:
+    value = performance_repo.get_rule("saturn.morning_time")
+    return value if value else "07:00"
+
+
+def get_saturn_dashboard_times() -> list[str]:
+    value = performance_repo.get_rule("saturn.dashboard_times")
+    if not value:
+        return ["12:00", "16:00"]
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def get_saturn_evening_time() -> str:
+    value = performance_repo.get_rule("saturn.evening_time")
+    return value if value else "21:00"
+
+
+def get_saturn_tip_time() -> str:
+    value = performance_repo.get_rule("saturn.tip_time")
+    return value if value else "13:00"
+
+
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
     performance_repo.set_rule(rule_key, rule_value, updated_by)
 

@@ -47,6 +47,8 @@ import inventory_bot  # noqa: E402
 import invites  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
+import saturn_group_bot  # noqa: E402
+import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
@@ -257,6 +259,8 @@ cash_shift_bot.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
+supplier_chat_bot.register(dp, openai_client)
+saturn_group_bot.register(dp, openai_client)
 
 
 @dp.message(CommandStart())
@@ -268,6 +272,12 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
     parts = (message.text or "").split(maxsplit=1)
     invite_token = parts[1].strip() if len(parts) > 1 else None
+
+    # Ta'minotchi (tashqi hamkor) taklifi xodim onboarding'idan butunlay
+    # mustaqil oqim — avval shu tekshiriladi, token mos kelmasa (odatiy
+    # xodim taklifi bo'lsa) False qaytadi va pastdagi oqim davom etadi.
+    if invite_token and await supplier_chat_bot.try_claim_invite(message, invite_token):
+        return
 
     # Onboarding FAQAT bir martalik invite havolasi orqali boshlanadi —
     # oddiy /start bosgan begona/ruxsatsiz foydalanuvchi bu yerga kirmaydi.
@@ -572,6 +582,7 @@ async def main() -> None:
     scheduler = inventory_bot.start_scheduler(bot)
     calibration_scheduler = calibration_bot.start_scheduler(bot)
     discipline_scheduler = discipline_bot.start_scheduler(bot)
+    saturn_group_scheduler = saturn_group_bot.start_scheduler(bot, openai_client)
     # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
@@ -584,6 +595,7 @@ async def main() -> None:
         scheduler.shutdown(wait=False)
         calibration_scheduler.shutdown(wait=False)
         discipline_scheduler.shutdown(wait=False)
+        saturn_group_scheduler.shutdown(wait=False)
         await bot.session.close()
 
 

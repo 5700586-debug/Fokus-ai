@@ -284,8 +284,24 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
+def _bare_command(label: str) -> str:
+    """``"/invite — Yangi xodimga taklif havolasi"`` -> ``"/invite"``.
+
+    Reply keyboard tugmasida ko'rsatilgan MATNNING O'ZI bosilganda
+    Telegram tomonidan xabar sifatida yuboriladi — agar butun izohli
+    yorliq tugma matni sifatida ishlatilsa, "/invite — Yangi xodimga..."
+    o'sha holicha ``message.text``ga tushib, ``Command`` filtri buni
+    "/invite" + argument ("— Yangi ...") deb noto'g'ri talqin qilib
+    qo'yardi (masalan ``/invite`` handleri "— " ni rol kaliti deb
+    qabul qilib "Noto'g'ri rol kaliti: —" xatosini chiqargan). Shuning
+    uchun tugmaning o'zida FAQAT toza buyruq yuboriladi, to'liq izohli
+    matn esa bo'lim xabarining tanasida (o'qish uchun) ko'rsatiladi.
+    """
+    return label.split(" — ", 1)[0].strip()
+
+
 def build_category_menu(commands: list[str]) -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=command)] for command in commands]
+    rows = [[KeyboardButton(text=_bare_command(command))] for command in commands]
     rows.append([KeyboardButton(text=BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
@@ -385,9 +401,10 @@ async def category_menu_handler(message: Message) -> None:
         )
         return
 
+    command_list = "\n".join(commands)
     await message.answer(
-        f"{message.text}\nKerakli buyruqni tanlang (ba'zilari qo'shimcha "
-        "ma'lumot so'raydi):",
+        f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
+        "qo'shimcha ma'lumot so'raydi):",
         reply_markup=build_category_menu(commands),
     )
 

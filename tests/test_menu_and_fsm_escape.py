@@ -109,6 +109,116 @@ async def test_category_button_lists_commands_and_back(bot_dp):
     assert "🔙 Orqaga" in buttons
 
 
+# --------------------------------- regressiya: tugma matnida izoh yubormasin --
+# Bug: bo'lim tugmasi to'liq "/invite — Yangi xodimga taklif havolasi" matnini
+# yuborardi — Command filtri buni "/invite" + argument ("— Yangi ...") deb
+# talqin qilib, handler "—"ni rol kaliti sifatida qabul qilib
+# "Noto'g'ri rol kaliti: —" xatosini chiqarardi.
+
+
+def test_bare_command_strips_description_from_every_menu_entry():
+    import main
+
+    for _category, label, _action in main._MENU_ENTRIES:
+        bare = main._bare_command(label)
+        assert bare.startswith("/")
+        assert " " not in bare
+        assert "—" not in bare
+
+    for label in main._SHARED_COMMANDS:
+        bare = main._bare_command(label)
+        assert bare.startswith("/")
+        assert " " not in bare
+        assert "—" not in bare
+
+
+async def test_category_menu_buttons_contain_no_description_text(bot_dp):
+    """Har bir bo'lim tugmasi FAQAT toza buyruq bo'lishi kerak — izohli
+    qism ("— ...") tugma matniga umuman kirmasin.
+    """
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+
+    assert "/openshift" in buttons
+    assert "/closeshift" in buttons
+    assert "/expense" in buttons
+    assert not any("—" in b for b in buttons)
+
+
+async def test_shared_category_buttons_contain_no_description_text(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="⭐ Mening natijalarim")
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+
+    assert "/mystars" in buttons
+    assert not any("—" in b for b in buttons)
+
+
+async def test_founder_category_buttons_contain_no_description_text(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👑 Asoschi")
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+
+    assert "/invite" in buttons
+    assert "/setrole" in buttons
+    assert "/removeuser" in buttons
+    assert "/listusers" in buttons
+    assert not any("—" in b for b in buttons)
+
+
+async def test_invite_button_press_does_not_report_invalid_role_key(bot_dp):
+    """Regressiya: tugma bosilganda ``/invite`` argumentsiz kelishi kerak
+    (foydalanish yo'riqnomasi ko'rsatiladi), "Noto'g'ri rol kaliti: —"
+    emas.
+    """
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="👑 Asoschi")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/invite")
+
+    assert "Noto'g'ri rol kaliti" not in sent[0].text
+    assert "Foydalanish" in sent[0].text
+
+
+async def test_setrole_button_press_does_not_leak_dash_as_argument(bot_dp):
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="👑 Asoschi")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/setrole")
+
+    assert "Noto'g'ri rol kaliti" not in sent[0].text
+    assert "Foydalanish" in sent[0].text
+
+
+@pytest.mark.parametrize(
+    "role_key,category_label",
+    [
+        ("nazoratchi", "🧑‍💼 Nazoratchi"),
+        ("kassir", "💰 Kassa"),
+        ("savdo_boshligi", "📦 Ombor"),
+        ("haydovchi", "🚚 Haydovchi"),
+        ("taminotchi", "🛒 Ta'minotchi"),
+        ("moliyachi", "💵 Moliyachi"),
+    ],
+)
+async def test_every_role_category_buttons_are_description_free(bot_dp, role_key, category_label):
+    main, bot = bot_dp
+    _set_role(555, role_key)
+
+    sent = await send(main.dp, bot, 555, text=category_label)
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+
+    assert len(buttons) > 1  # kamida bitta buyruq + "Orqaga"
+    assert not any("—" in b for b in buttons)
+    assert all(b == "🔙 Orqaga" or b.startswith("/") for b in buttons)
+
+
 async def test_category_command_button_triggers_real_command(bot_dp):
     """Bo'lim ichidagi tugma matni haqiqiy buyruq bilan boshlanadi va
     bosilganda o'zining mavjud handleri ishga tushishi kerak (yangi

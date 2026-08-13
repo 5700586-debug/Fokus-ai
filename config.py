@@ -1,4 +1,16 @@
 import os
+import sys
+
+# Konsol kodировkasi muhitga qarab turlicha bo'ladi (masalan ba'zi Windows
+# konsollari cp1251/cp866) — shuning uchun log/print'dagi emoji va
+# o'zbekcha belgilar tashqi sozlamaga (PYTHONIOENCODING, konsol kodировkasi)
+# bog'liq bo'lmasdan har doim xatosiz chiqishi uchun stdout/stderr shu
+# yerda, har qanday boshqa modul print() chaqirishidan oldin, UTF-8'ga
+# majburlanadi. ``config`` deyarli barcha modullar tomonidan eng birinchi
+# import qilinadigan modul bo'lgani uchun bu yerga qo'yilgan.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # Test va production muhitini ajratish. "test" bo'lsa main.py TEST_BOT_TOKEN
 # (BOT_TOKEN emas), db.py esa TEST_DATABASE_URL (DATABASE_URL emas) o'qiydi —

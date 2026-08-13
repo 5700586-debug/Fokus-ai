@@ -1,0 +1,367 @@
+"""RBAC markazlashtirilgan mexanizmi uchun testlar.
+
+Ikki qatlam tekshiriladi:
+1. Sof birlik testlar (``services/permissions.py``): yangi Founder-only
+   ``ACTION_*``lar, ``has_any_permission()``, ``ensure_permission()``/
+   ``ensure_any_permission()`` — ruxsat berilgan, taqiqlangan va noma'lum
+   (ro'yxatdan o'tmagan) foydalanuvchi holatlari uchun.
+2. Uchidan-uchigacha regressiya (``bot_dp``): ilgari to'g'ridan-to'g'ri
+   ``FOUNDER_ID`` bilan tekshirilgan, endi markazlashtirilgan mexanizmga
+   o'tkazilgan buyruqlar — Founder ishlayapti, boshqa rol va begona
+   foydalanuvchi jim rad etilyapti.
+"""
+
+import os
+from datetime import datetime
+
+import pytest
+from aiogram.methods import AnswerCallbackQuery
+from aiogram.types import CallbackQuery, Chat, Message
+from aiogram.types import User as TgUser
+
+from config import FOUNDER_ID
+from roles import ROLES
+from services import permissions
+from tests.bot_harness import RecordingBot, make_message, send, send_callback
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def _set_role(user_id: int, role_key: str) -> None:
+    from roles import set_role
+
+    set_role(user_id, role_key, set_by=FOUNDER_ID)
+
+
+# --------------------------------------------------------- has_permission --
+
+_NEW_FOUNDER_ONLY_ACTIONS = sorted(
+    {
+        permissions.ACTION_MANAGE_INVITES,
+        permissions.ACTION_MANAGE_ROLES,
+        permissions.ACTION_REMOVE_USER,
+        permissions.ACTION_LIST_USERS,
+        permissions.ACTION_VIEW_PROFILE,
+        permissions.ACTION_APPROVE_APPLICANT,
+        permissions.ACTION_MANAGE_DISCIPLINE_RULES,
+        permissions.ACTION_SET_SALARY,
+        permissions.ACTION_LOOKUP_ANY_SALARY,
+        permissions.ACTION_DECIDE_APPEAL,
+        permissions.ACTION_SET_RULE,
+        permissions.ACTION_LIST_RULES,
+        permissions.ACTION_PROCESS_MONTH,
+        permissions.ACTION_MANAGE_VEHICLES,
+        permissions.ACTION_SATURN_TEST,
+        permissions.ACTION_INVITE_SUPPLIER,
+        permissions.ACTION_LIST_SUPPLIERS,
+        permissions.ACTION_SUPPLIER_REPORT,
+        permissions.ACTION_COMPARE_SUPPLIERS,
+    }
+)
+
+_NON_FOUNDER_ROLES = [key for key in ROLES if key != "founder"]
+
+
+def test_founder_only_actions_absent_from_role_permissions_table():
+    granted_anywhere = set()
+    for actions in permissions.ROLE_PERMISSIONS.values():
+        granted_anywhere |= actions
+
+    overlap = granted_anywhere & set(_NEW_FOUNDER_ONLY_ACTIONS)
+    assert overlap == set(), f"Founder-only amallar rolga biriktirilib qo'yilgan: {overlap}"
+
+
+@pytest.mark.parametrize("action", _NEW_FOUNDER_ONLY_ACTIONS)
+def test_founder_only_action_granted_to_founder(monkeypatch, action):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "founder")
+    assert permissions.has_permission(1, action) is True
+
+
+@pytest.mark.parametrize("role_key", _NON_FOUNDER_ROLES)
+@pytest.mark.parametrize("action", _NEW_FOUNDER_ONLY_ACTIONS)
+def test_founder_only_action_denied_for_every_non_founder_role(monkeypatch, action, role_key):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: role_key)
+    assert permissions.has_permission(1, action) is False
+
+
+@pytest.mark.parametrize("action", _NEW_FOUNDER_ONLY_ACTIONS)
+def test_founder_only_action_denied_for_unknown_user(monkeypatch, action):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: None)
+    assert permissions.has_permission(1, action) is False
+
+
+# ----------------------------------------------------- has_any_permission --
+
+
+def test_has_any_permission_true_if_one_of_several_actions_granted(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "moliyachi")
+    assert (
+        permissions.has_any_permission(
+            1, permissions.ACTION_VIEW_CASH_SUMMARY, permissions.ACTION_REVIEW_CASH_SHIFT
+        )
+        is True
+    )
+
+
+def test_has_any_permission_false_if_none_of_several_actions_granted(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "sotuvchi")
+    assert (
+        permissions.has_any_permission(
+            1, permissions.ACTION_VIEW_CASH_SUMMARY, permissions.ACTION_REVIEW_CASH_SHIFT
+        )
+        is False
+    )
+
+
+def test_has_any_permission_false_for_unknown_user(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: None)
+    assert (
+        permissions.has_any_permission(
+            1, permissions.ACTION_VIEW_CASH_SUMMARY, permissions.ACTION_REVIEW_CASH_SHIFT
+        )
+        is False
+    )
+
+
+def test_has_any_permission_true_for_founder_even_without_table_entry(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "founder")
+    assert permissions.has_any_permission(1, permissions.ACTION_SET_SALARY) is True
+
+
+# --------------------------------------------------------- ensure_permission --
+
+
+async def test_ensure_permission_true_for_granted_message(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "founder")
+    message = make_message(1, text="/setrule x 1")
+
+    assert await permissions.ensure_permission(message, permissions.ACTION_SET_RULE) is True
+
+
+async def test_ensure_permission_message_denied_silently(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "kassir")
+    message = make_message(1, text="/setrule x 1")
+
+    assert await permissions.ensure_permission(message, permissions.ACTION_SET_RULE) is False
+
+
+async def test_ensure_permission_denied_when_message_has_no_user(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "founder")
+    message = Message(message_id=1, date=datetime.now(), chat=Chat(id=1, type="private"), text="hi")
+
+    assert await permissions.ensure_permission(message, permissions.ACTION_SET_RULE) is False
+
+
+def _make_bound_callback(bot: RecordingBot, user_id: int, data: str) -> CallbackQuery:
+    target_message = Message(
+        message_id=1, date=datetime.now(), chat=Chat(id=user_id, type="private"), text="card"
+    )
+    user = TgUser(id=user_id, is_bot=False, first_name="Test")
+    return CallbackQuery(
+        id="1", from_user=user, chat_instance="ci", data=data, message=target_message
+    ).as_(bot)
+
+
+async def test_ensure_permission_callback_denied_acks_empty(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "kassir")
+    bot = RecordingBot(token=os.environ["BOT_TOKEN"])
+    callback = _make_bound_callback(bot, 1, "bos:decide:1:approved")
+
+    result = await permissions.ensure_permission(callback, permissions.ACTION_DECIDE_APPEAL)
+
+    assert result is False
+    assert len(bot.sent) == 1
+    assert isinstance(bot.sent[0], AnswerCallbackQuery)
+
+
+async def test_ensure_permission_callback_granted_sends_no_ack(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "founder")
+    bot = RecordingBot(token=os.environ["BOT_TOKEN"])
+    callback = _make_bound_callback(bot, 1, "bos:decide:1:approved")
+
+    result = await permissions.ensure_permission(callback, permissions.ACTION_DECIDE_APPEAL)
+
+    assert result is True
+    assert bot.sent == []
+
+
+async def test_ensure_any_permission_true_if_one_of_two_granted(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "moliyachi")
+    message = make_message(1, text="/cashsummary")
+
+    result = await permissions.ensure_any_permission(
+        message, permissions.ACTION_VIEW_CASH_SUMMARY, permissions.ACTION_OPEN_CASH_SHIFT
+    )
+    assert result is True
+
+
+async def test_ensure_any_permission_false_if_none_granted(monkeypatch):
+    monkeypatch.setattr(permissions, "get_role", lambda user_id: "sotuvchi")
+    message = make_message(1, text="/cashsummary")
+
+    result = await permissions.ensure_any_permission(
+        message, permissions.ACTION_VIEW_CASH_SUMMARY, permissions.ACTION_OPEN_CASH_SHIFT
+    )
+    assert result is False
+
+
+# ------------------------------------------------- uchidan-uchigacha regressiya --
+# Ilgari to'g'ridan-to'g'ri ``id != FOUNDER_ID`` bilan tekshirilgan, endi
+# ``services/permissions.py`` orqali markazlashtirilgan buyruqlar — xatti-
+# harakat (Founder ishlaydi, boshqa rol/begona jim rad etiladi) o'zgarmagan.
+
+
+async def test_removeuser_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+    _set_role(222, "sotuvchi")
+
+    sent = await send(main.dp, bot, 111, text="/removeuser 222")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/removeuser 222")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/removeuser 222")
+    assert "chirildi" in sent[0].text
+
+
+async def test_profile_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "nazoratchi")
+
+    sent = await send(main.dp, bot, 111, text="/profile 111")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/profile 111")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/profile 111")
+    assert "topilmadi" in sent[0].text
+
+
+async def test_setsalary_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/setsalary 111 3000000")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/setsalary 111 3000000")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/setsalary 111 3000000")
+    assert "o'rnatildi" in sent[0].text
+
+
+async def test_maosh_lookup_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/maosh 111")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/maosh 111")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/maosh 111")
+    assert "Fiks oylik" in sent[0].text
+
+
+async def test_listrules_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/listrules")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/listrules")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/listrules")
+    assert sent != []
+
+
+async def test_supplierlist_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/supplierlist")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/supplierlist")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/supplierlist")
+    assert sent != []
+
+
+async def test_supplierscompare_founder_only(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/supplierscompare pomidor")
+    assert sent == []
+
+    sent = await send(main.dp, bot, 999999, text="/supplierscompare pomidor")
+    assert sent == []
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/supplierscompare pomidor")
+    assert sent != []
+
+
+async def test_appeal_decision_denied_for_non_founder(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _set_role(1, "nazoratchi")
+    _set_role(111, "kassir")
+
+    from services import discipline
+
+    discipline.add_rule(3, "Kechikish", "Ishga kechikish taqiqlanadi", created_by=FOUNDER_ID)
+
+    async def fake_create(**kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(output_text="✅ Mos keladi.")
+
+    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
+
+    await send_callback(main.dp, bot, 1, data="bos:pen:111:10", target_chat_id=1)
+    await send(main.dp, bot, 1, text="3-nizom")
+    assert discipline.get_salary(111)["bonus_bank"] == -10
+
+    sent = await send(main.dp, bot, 111, text="/apellyatsiya")
+    penalty_callback_data = sent[0].reply_markup.inline_keyboard[0][0].callback_data
+    await send_callback(main.dp, bot, 111, data=penalty_callback_data, target_chat_id=111)
+    await send(main.dp, bot, 111, text="Men kasal edim")
+
+    # Nazoratchi (Founder emas) apellyatsiyani hal qilishga urinadi —
+    # yakuniy qaror doim Founderga tegishli, shu sababli jim rad etilishi
+    # va jarima o'zgarishsiz qolishi kerak.
+    approve_data = f"bos:decide:{penalty_callback_data.split(':')[2]}:{discipline.DECISION_APPROVED}"
+    await send_callback(main.dp, bot, 1, data=approve_data, target_chat_id=1)
+
+    assert discipline.get_salary(111)["bonus_bank"] == -10
+
+
+async def test_moliyachi_can_view_other_employee_cash_summary(bot_dp):
+    main, bot = bot_dp
+    _set_role(1, "moliyachi")
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 1, text="/cashsummary 111")
+    assert "smena topilmadi" in sent[0].text
+
+
+async def test_sotuvchi_cannot_view_other_employee_cash_summary(bot_dp):
+    main, bot = bot_dp
+    _set_role(1, "sotuvchi")
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 1, text="/cashsummary 111")
+    assert sent == []

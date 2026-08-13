@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from config import FOUNDER_ID
 from repositories import suppliers as suppliers_repo
 from roles import is_authorized
-from services import supplier_ai
+from services import permissions, supplier_ai
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def try_claim_invite(message: Message, token: str) -> bool:
 def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     @dp.message(Command("invitesupplier"))
     async def invite_supplier_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_INVITE_SUPPLIER):
             return
 
         parts = (message.text or "").split(maxsplit=1)
@@ -91,7 +91,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(Command("supplierlist"))
     async def supplier_list_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_LIST_SUPPLIERS):
             return
 
         active = suppliers_repo.list_suppliers("active")
@@ -108,7 +108,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(Command("supplierreport"))
     async def supplier_report_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_SUPPLIER_REPORT):
             return
 
         parts = (message.text or "").split(maxsplit=1)
@@ -130,7 +130,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(Command("supplierscompare"))
     async def supplier_compare_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_COMPARE_SUPPLIERS):
             return
 
         parts = (message.text or "").split(maxsplit=1)

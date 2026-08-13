@@ -141,9 +141,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("invsnapshot"))
     async def invsnapshot_start(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT):
             return
 
         await state.set_state(InventorySnapshotStates.photo)
@@ -274,10 +272,7 @@ def register(dp: Dispatcher) -> None:
         await _handle_variance_decision(callback, "recheck", "🔁 Qo'shimcha izoh so'raldi")
 
     async def _handle_variance_decision(callback: CallbackQuery, decision: str, ack_text: str) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_REVIEW_INVENTORY_VARIANCE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_REVIEW_INVENTORY_VARIANCE):
             return
 
         snapshot_id = int(callback.data.split(":", 1)[1])
@@ -319,9 +314,10 @@ def register(dp: Dispatcher) -> None:
         branch: str | None
 
         if len(parts) > 1 and parts[1].strip():
-            if not (
-                permissions.has_permission(message.from_user.id, permissions.ACTION_VIEW_INVENTORY_SUMMARY)
-                or permissions.has_permission(message.from_user.id, permissions.ACTION_REVIEW_INVENTORY_VARIANCE)
+            if not permissions.has_any_permission(
+                message.from_user.id,
+                permissions.ACTION_VIEW_INVENTORY_SUMMARY,
+                permissions.ACTION_REVIEW_INVENTORY_VARIANCE,
             ):
                 return
             branch = parts[1].strip()

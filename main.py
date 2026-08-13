@@ -50,6 +50,7 @@ import performance_bot  # noqa: E402
 import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
+from services import permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -370,7 +371,7 @@ async def menu_cancel_handler(message: Message) -> None:
 
 @dp.message(Command("invite"))
 async def invite_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id != FOUNDER_ID:
+    if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_INVITES):
         return
 
     parts = (message.text or "").split(maxsplit=2)
@@ -428,7 +429,7 @@ async def invite_handler(message: Message) -> None:
 
 @dp.message(Command("setrole"))
 async def set_role_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id != FOUNDER_ID:
+    if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_ROLES):
         return
 
     parts = (message.text or "").split(maxsplit=2)
@@ -463,7 +464,7 @@ async def set_role_handler(message: Message) -> None:
 
 @dp.message(Command("removeuser"))
 async def remove_user_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id != FOUNDER_ID:
+    if not await permissions.ensure_permission(message, permissions.ACTION_REMOVE_USER):
         return
 
     parts = (message.text or "").split(maxsplit=1)
@@ -480,7 +481,7 @@ async def remove_user_handler(message: Message) -> None:
 
 @dp.message(Command("listusers"))
 async def list_users_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id != FOUNDER_ID:
+    if not await permissions.ensure_permission(message, permissions.ACTION_LIST_USERS):
         return
 
     users = list_users()
@@ -498,7 +499,7 @@ async def list_users_handler(message: Message) -> None:
 
 @dp.message(Command("profile"))
 async def profile_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id != FOUNDER_ID:
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_PROFILE):
         return
 
     parts = (message.text or "").split(maxsplit=1)

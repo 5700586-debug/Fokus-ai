@@ -26,6 +26,7 @@ from openai import AsyncOpenAI
 
 import company_time
 from config import FOUNDER_ID
+from services import permissions
 from services import rules as rules_service
 from services import saturn_group
 
@@ -62,7 +63,7 @@ async def _tick(bot, openai_client: AsyncOpenAI) -> None:
 def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     @dp.message(Command("saturntest"))
     async def saturn_test_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_SATURN_TEST):
             return
 
         parts = (message.text or "").split(maxsplit=1)

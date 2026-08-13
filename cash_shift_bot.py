@@ -161,9 +161,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("openshift"))
     async def openshift_handler(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_OPEN_CASH_SHIFT
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_OPEN_CASH_SHIFT):
             return
 
         user_id = message.from_user.id
@@ -211,9 +209,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("expense"))
     async def expense_start(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_LOG_CASH_EXPENSE
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_LOG_CASH_EXPENSE):
             return
 
         today_shift = cash_shift.get_open_shift(message.from_user.id, company_time.today().isoformat())
@@ -298,9 +294,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("closeshift"))
     async def closeshift_start(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_CLOSE_CASH_SHIFT
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_CLOSE_CASH_SHIFT):
             return
 
         user_id = message.from_user.id
@@ -464,10 +458,7 @@ def register(dp: Dispatcher) -> None:
         )
 
     async def _handle_review_decision(callback: CallbackQuery, decision: str, ack_text: str) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_REVIEW_CASH_SHIFT
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_REVIEW_CASH_SHIFT):
             return
 
         shift_id = int(callback.data.split(":", 1)[1])
@@ -503,9 +494,10 @@ def register(dp: Dispatcher) -> None:
 
         if len(parts) > 1 and parts[1].strip().lstrip("-").isdigit():
             requested_id = int(parts[1].strip())
-            if requested_id != message.from_user.id and not (
-                permissions.has_permission(message.from_user.id, permissions.ACTION_VIEW_CASH_SUMMARY)
-                or permissions.has_permission(message.from_user.id, permissions.ACTION_REVIEW_CASH_SHIFT)
+            if requested_id != message.from_user.id and not permissions.has_any_permission(
+                message.from_user.id,
+                permissions.ACTION_VIEW_CASH_SUMMARY,
+                permissions.ACTION_REVIEW_CASH_SHIFT,
             ):
                 return
             target_id = requested_id

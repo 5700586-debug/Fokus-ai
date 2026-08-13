@@ -3,10 +3,11 @@
 ``services/`` qatlami (star_engine, calibration, driver_checks va h.k.)
 biznes logikani ushlab turadi — bu modul faqat Telegram interfeysi:
 komanda/FSM orqali kirish ma'lumotlarini yig'ib, mos servis funksiyasini
-chaqiradi. Ruxsat tekshiruvi ``services/permissions.py`` orqali (Founder
-har doim ruxsatli), sof Founder-only amallar (``/setrule``,
-``/processmonth``, ``/addvehicle``) esa mavjud ``main.py`` uslubida
-to'g'ridan-to'g'ri ``FOUNDER_ID`` bilan tekshiriladi.
+chaqiradi. Ruxsat tekshiruvi butunlay ``services/permissions.py`` orqali
+(Founder har doim ruxsatli) — sof Founder-only amallar (``/setrule``,
+``/processmonth``, ``/addvehicle``) ham shu yerda ``ACTION_*`` sifatida
+ro'yxatlangan, ularga hech qanday rol biriktirilmagani uchun faqat
+Founder bypass'i orqali ishlaydi.
 """
 
 from datetime import date, datetime
@@ -18,7 +19,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
-from config import FOUNDER_ID
 from db import IntegrityError
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized
@@ -72,9 +72,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("score"))
     async def score_handler(message: Message) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_SCORE_EMPLOYEE
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_SCORE_EMPLOYEE):
             return
 
         parts = (message.text or "").split(maxsplit=3)
@@ -121,7 +119,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("setrule"))
     async def setrule_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_SET_RULE):
             return
 
         parts = (message.text or "").split(maxsplit=2)
@@ -137,7 +135,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("listrules"))
     async def listrules_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_LIST_RULES):
             return
 
         rules = rules_service.list_rules()
@@ -152,7 +150,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("processmonth"))
     async def processmonth_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_PROCESS_MONTH):
             return
 
         parts = (message.text or "").split()
@@ -202,7 +200,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("addvehicle"))
     async def addvehicle_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_VEHICLES):
             return
 
         parts = (message.text or "").split(maxsplit=3)
@@ -228,9 +226,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("mealplan"))
     async def mealplan_handler(message: Message) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_ENTER_MEAL_PLAN
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_ENTER_MEAL_PLAN):
             return
 
         parts = (message.text or "").split(maxsplit=2)
@@ -253,9 +249,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("marketlog"))
     async def marketlog_start(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_LOG_MARKET_OBSERVATION
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_LOG_MARKET_OBSERVATION):
             return
 
         await state.set_state(MarketLogStates.product)
@@ -361,9 +355,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(Command("drivercheck"))
     async def drivercheck_start(message: Message, state: FSMContext) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_DRIVER_DAILY_CHECK
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_DRIVER_DAILY_CHECK):
             return
 
         vehicle = vehicles_repo.get_vehicle_for_driver(message.from_user.id)

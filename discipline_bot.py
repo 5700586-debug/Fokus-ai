@@ -163,19 +163,14 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("baholash"))
     async def baholash_start(message: Message) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         await message.answer("👥 Xodimni tanlang:", reply_markup=_employee_list_keyboard(0))
 
     @dp.callback_query(F.data.startswith("bos:page:"))
     async def baholash_page(callback: CallbackQuery) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         page = int(callback.data.split(":")[2])
@@ -184,10 +179,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith("bos:emp:"))
     async def baholash_pick_employee(callback: CallbackQuery) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         employee_id = int(callback.data.split(":")[2])
@@ -200,10 +192,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith("bos:grade:"))
     async def baholash_pick_grade(callback: CallbackQuery) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         _, _, employee_id_str, grade_key = callback.data.split(":")
@@ -222,10 +211,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith("bos:penalty_menu:"))
     async def baholash_penalty_menu(callback: CallbackQuery) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         employee_id = int(callback.data.split(":")[2])
@@ -238,10 +224,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith("bos:pen:"))
     async def baholash_pick_penalty(callback: CallbackQuery, state: FSMContext) -> None:
-        if not callback.from_user or not permissions.has_permission(
-            callback.from_user.id, permissions.ACTION_EVALUATE_EMPLOYEE
-        ):
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
         _, _, employee_id_str, amount_str = callback.data.split(":")
@@ -310,9 +293,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("kunniyop"))
     async def close_day_handler(message: Message) -> None:
-        if not message.from_user or not permissions.has_permission(
-            message.from_user.id, permissions.ACTION_CLOSE_DAY
-        ):
+        if not await permissions.ensure_permission(message, permissions.ACTION_CLOSE_DAY):
             return
 
         today = _today().isoformat()
@@ -353,7 +334,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("addnizom"))
     async def add_rule_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
             return
 
         parts = (message.text or "").split(maxsplit=2)
@@ -392,7 +373,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("setsalary"))
     async def set_salary_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_SET_SALARY):
             return
 
         parts = (message.text or "").split()
@@ -407,7 +388,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("maosh"))
     async def salary_lookup_handler(message: Message) -> None:
-        if not message.from_user or message.from_user.id != FOUNDER_ID:
+        if not await permissions.ensure_permission(message, permissions.ACTION_LOOKUP_ANY_SALARY):
             return
 
         parts = (message.text or "").split()
@@ -521,8 +502,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith("bos:decide:"))
     async def appeal_decide(callback: CallbackQuery) -> None:
-        if not callback.from_user or callback.from_user.id != FOUNDER_ID:
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_DECIDE_APPEAL):
             return
 
         _, _, penalty_id_str, decision = callback.data.split(":")

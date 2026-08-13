@@ -174,6 +174,36 @@ asosiy menyuga qaytaradi.
 9. `docs/FEATURE_STATUS.md` va kerak bo'lsa `docs/BUSINESS_RULES.md`ni
    yangila.
 
+## 6.1. Ruxsat tekshiruvi — markazlashtirilgan (2026-08, RBAC refaktori)
+
+Ilgari uch xil uslub aralash ishlatilgan edi: `id == FOUNDER_ID`
+(to'g'ridan-to'g'ri), `roles.is_authorized`/`get_role` ("har qanday
+ro'yxatdan o'tgan foydalanuvchi"), `services/permissions.has_permission`
+(granular amal-asosli). Endi barcha buyruq/callback handlerlar
+(main.py, approval.py, discipline_bot.py, performance_bot.py,
+saturn_group_bot.py, supplier_chat_bot.py, cash_shift_bot.py,
+inventory_bot.py) `services/permissions.py` orqali ruxsat tekshiradi —
+hech qayerda to'g'ridan-to'g'ri `id != FOUNDER_ID` bilan qaror
+qilinmaydi. Ikki daraja qoladi (ataylab, ikkalasi ham markazlashgan):
+
+- **Amal-asosli** (`has_permission()`/`ensure_permission()`): har bir
+  buyruq/callback bitta `ACTION_*`ga bog'langan, `ROLE_PERMISSIONS`
+  qaysi rol qaysi amalga ruxsatli ekanini belgilaydi. Sof Founder-only
+  buyruqlar (masalan `/setrule`, `/invite`) ham oddiy `ACTION_*`
+  sifatida ro'yxatlangan — ularga hech qanday rol biriktirilmagani
+  uchun faqat Founder bypass orqali ishlaydi. `ensure_permission()`
+  mavjud "ruxsat yo'q bo'lsa jim rad et" konvensiyasini (xabarga javob
+  yo'q, callback'da bo'sh `answer()`) bitta joyga yig'adi.
+- **"Har qanday ro'yxatdan o'tgan foydalanuvchi"** (`roles.is_authorized`):
+  asosiy menyu, `/mystars`, `/apellyatsiya` kabi rol farqi bo'lmagan
+  komandalar uchun — bu ataylab alohida, chunki amal-jadvali kerak emas.
+
+Ikki komanda (`/cashsummary`, `/inventorysummary`) "o'zining resursi
+har doim ruxsatli, boshqasiniki uchun ikkinchi amal kerak" tarzida
+filiallanadi — bular uchun `has_any_permission()` (OR-kompozit
+tekshiruv) ishlatiladi, `ensure_permission()` emas (filiallanish
+handler ichida davom etadi).
+
 ## 7. Bilingan cheklovlar (qasddan tuzatilmagan)
 
 Bular audit paytida topildi, lekin hozircha **ataylab** tegilmagan —
@@ -192,10 +222,11 @@ o'qing:
   funksionalligi HOZIR qurilmaydi (database, murakkab vakolat,
   yangi funksiya yaratilmadi). Amaldagi himoya (allaqachon mavjud,
   testlangan):
-  - Nazoratchini FAQAT Founder tayinlaydi — `/setrole` (`main.py`) va
-    `/invite` -> onboarding approve (`approval.py`) ikkalasi ham
-    `message.from_user.id != FOUNDER_ID` bilan boshqa hech kimga
-    ochilmagan.
+  - Nazoratchini FAQAT Founder tayinlaydi — `/setrole` (`main.py`,
+    `ACTION_MANAGE_ROLES`) va `/invite` -> onboarding approve
+    (`approval.py`, `ACTION_APPROVE_APPLICANT`) ikkalasi ham
+    `services/permissions.py` orqali Founderdan boshqa hech kimga
+    ochilmagan (qarang yuqoridagi "Ruxsat tekshiruvi markazlashtirilgan").
   - `roles.py`dagi `SINGLE_SLOT_ROLES` ro'yxatida `"nazoratchi"` bor —
     `roles.set_role()`ning o'zi (Telegram qatlamidan mustaqil,
     ikkinchi himoya qatlami) ikkinchi nazoratchi tayinlanishini rad
@@ -217,12 +248,6 @@ o'qing:
   (kim qaysi filialga mas'ul) yangi ustun/jadval. Bu ish HOZIR
   boshlanmagan — faqat "qayerdan boshlash kerak" xaritasi sifatida
   yozildi.
-- **Uch xil ruxsat tekshiruvi bir vaqtda ishlaydi:** `id == FOUNDER_ID`
-  (eng eski), `roles.is_authorized`/`get_role` ("har qanday ro'yxatdan
-  o'tgan foydalanuvchi"), `services/permissions.has_permission`
-  (granular amal-asosli). Uchtasi ham ishlaydi va testlangan — birini
-  tanlab hammasini qayta yozish katta, past-foydali refaktor bo'lardi.
-  Yangi komandalar `services/permissions.py`dan foydalansin.
 - **Logging hali birxil emas:** ko'pchilik joyda `print()` ishlatiladi,
   faqat bir nechta faylda (`discipline_bot.py`, `calibration_bot.py`)
   qisman `logging.getLogger(__name__)`. Xavfsizlik talabi (parol/token

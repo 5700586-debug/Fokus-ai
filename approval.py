@@ -12,6 +12,7 @@ import calibration_bot
 import employees
 import roles
 from config import FOUNDER_ID
+from services import permissions
 
 
 def _review_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -48,8 +49,7 @@ async def send_for_review(bot: Bot, user_id: int) -> None:
 def register(dp: Dispatcher) -> None:
     @dp.callback_query(F.data.startswith("approve:"))
     async def handle_approve(callback: CallbackQuery) -> None:
-        if not callback.from_user or callback.from_user.id != FOUNDER_ID:
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_APPROVE_APPLICANT):
             return
 
         user_id = int(callback.data.split(":", 1)[1])
@@ -91,8 +91,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.callback_query(F.data.startswith("reject:"))
     async def handle_reject(callback: CallbackQuery) -> None:
-        if not callback.from_user or callback.from_user.id != FOUNDER_ID:
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_APPROVE_APPLICANT):
             return
 
         user_id = int(callback.data.split(":", 1)[1])
@@ -106,8 +105,7 @@ def register(dp: Dispatcher) -> None:
 
     @dp.callback_query(F.data.startswith("detail:"))
     async def handle_detail(callback: CallbackQuery) -> None:
-        if not callback.from_user or callback.from_user.id != FOUNDER_ID:
-            await callback.answer()
+        if not await permissions.ensure_permission(callback, permissions.ACTION_APPROVE_APPLICANT):
             return
 
         user_id = int(callback.data.split(":", 1)[1])

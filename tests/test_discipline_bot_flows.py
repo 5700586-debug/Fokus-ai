@@ -4,9 +4,22 @@ import pytest
 
 import discipline_bot
 from config import FOUNDER_ID
+from services import messages as messages_catalog
 from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
+
+_DENIAL_TEXTS = {
+    messages_catalog.GENERIC_DENIAL,
+    messages_catalog.CASH_FINANCE_DENIAL,
+    messages_catalog.MANAGEMENT_DENIAL,
+    messages_catalog.REPEAT_OFFENDER_DENIAL,
+}
+
+
+def _assert_denied(sent) -> None:
+    assert len(sent) == 1, sent
+    assert sent[0].text in _DENIAL_TEXTS, sent[0].text
 
 
 @pytest.fixture
@@ -32,7 +45,7 @@ async def test_baholash_denied_for_employee_without_permission(bot_dp):
     _set_role(111, "kassir")
 
     sent = await send(main.dp, bot, 111, text="/baholash")
-    assert sent == []
+    _assert_denied(sent)
 
 
 async def test_baholash_allowed_for_nazoratchi(bot_dp):
@@ -127,7 +140,7 @@ async def test_addnizom_founder_only(bot_dp):
     _set_role(1, "nazoratchi")
 
     sent = await send(main.dp, bot, 1, text="/addnizom 3 Sarlavha | Matn")
-    assert sent == []
+    _assert_denied(sent)
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="/addnizom 3 Kechikish | Kechikish taqiqlanadi")
     assert "qo'shildi" in sent[0].text

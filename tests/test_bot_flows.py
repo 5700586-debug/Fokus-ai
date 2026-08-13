@@ -1,9 +1,24 @@
 import pytest
 
 from config import FOUNDER_ID
+from services import messages as messages_catalog
 from tests.bot_harness import send, send_callback, texts
 
 pytestmark = pytest.mark.anyio
+
+_DENIAL_TEXTS = {
+    messages_catalog.GENERIC_DENIAL,
+    messages_catalog.CASH_FINANCE_DENIAL,
+    messages_catalog.MANAGEMENT_DENIAL,
+    messages_catalog.REPEAT_OFFENDER_DENIAL,
+}
+
+
+def _assert_denied(sent) -> None:
+    """Ruxsatsiz urinish endi jim emas — qisqa "Saturncha" javob
+    yuboriladi (qarang ``services/messages.py``)."""
+    assert len(sent) == 1, sent
+    assert sent[0].text in _DENIAL_TEXTS, sent[0].text
 
 
 @pytest.fixture
@@ -67,7 +82,7 @@ async def test_stranger_founder_only_commands_are_silently_ignored(bot_dp):
 
     for command in ("/invite", "/listusers", "/setrule x 1", "/processmonth 1 2026-01 1 1 1"):
         sent = await send(main.dp, bot, 999999, text=command)
-        assert sent == [], f"{command} begona foydalanuvchiga javob berdi"
+        _assert_denied(sent)
 
 
 async def test_invite_and_setrole_flow(bot_dp):
@@ -96,11 +111,11 @@ async def test_only_founder_can_assign_nazoratchi(bot_dp):
     set_role(111, "kassir", set_by=FOUNDER_ID)
 
     sent = await send(main.dp, bot, 111, text="/setrole 222 nazoratchi")
-    assert sent == []
+    _assert_denied(sent)
     assert get_role(222) is None
 
     sent = await send(main.dp, bot, 111, text="/invite nazoratchi")
-    assert sent == []
+    _assert_denied(sent)
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="/setrole 222 nazoratchi")
     assert sent[0].text.startswith("✅")
@@ -142,7 +157,7 @@ async def test_score_requires_nazoratchi_role(bot_dp):
     set_role(888, "haydovchi", set_by=FOUNDER_ID)
 
     sent = await send(main.dp, bot, 888, text="/score 1 90")
-    assert sent == []
+    _assert_denied(sent)
 
     set_role(999, "nazoratchi", set_by=FOUNDER_ID)
     sent = await send(main.dp, bot, 999, text="/score 1 90")

@@ -131,3 +131,41 @@ async def test_back_button_returns_to_main_menu(bot_dp):
     buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
     assert "💰 Kassa" in buttons
     assert "⭐ Mening natijalarim" in buttons
+
+
+async def test_sotuvchi_menu_has_no_role_category_button(bot_dp):
+    """``sotuvchi`` rolida ``ROLE_PERMISSIONS``da bironta amal yo'q —
+    menyu markaziy permission-matrixdan shakllangani uchun uning uchun
+    HECH QANDAY bo'lim tugmasi chiqmasligi kerak (faqat AI/umumiy/
+    sozlamalar), moliya/kassa/savdo tugmalari umuman ko'rinmaydi.
+    """
+    main, bot = bot_dp
+    _set_role(222, "sotuvchi")
+
+    sent = await send(main.dp, bot, 222, text="/start")
+    buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
+
+    role_category_buttons = set(main._CATEGORY_LABELS.values())
+    assert buttons & role_category_buttons == set()
+    assert "⭐ Mening natijalarim" in buttons
+    assert "🤖 AI Tahlil" in buttons
+
+
+async def test_stale_category_button_after_role_change_is_rejected(bot_dp):
+    """Foydalanuvchi "💰 Kassa" bo'limini ko'rgandan keyin roli
+    o'zgartirilsa (endi kassir emas), mijozda keshlangan eski tugma
+    matnini qayta yuborsa ham backend uni endi bermasligi kerak — bo'sh
+    bo'lim o'rniga asosiy menyuga xushmuomalalik bilan qaytariladi.
+    """
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+    assert any(b.startswith("/openshift") for row in sent[0].reply_markup.keyboard for b in [row[0].text])
+
+    _set_role(111, "sotuvchi")
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+    assert "Asosiy menyu" in sent[0].text
+    buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
+    assert "💰 Kassa" not in buttons

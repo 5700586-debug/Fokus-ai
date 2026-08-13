@@ -4,10 +4,23 @@ import pytest
 
 import saturn_group_bot
 from config import FOUNDER_ID
+from services import messages as messages_catalog
 from services import rules as rules_service
 from tests.bot_harness import RecordingBot, send, texts
 
 pytestmark = pytest.mark.anyio
+
+_DENIAL_TEXTS = {
+    messages_catalog.GENERIC_DENIAL,
+    messages_catalog.CASH_FINANCE_DENIAL,
+    messages_catalog.MANAGEMENT_DENIAL,
+    messages_catalog.REPEAT_OFFENDER_DENIAL,
+}
+
+
+def _assert_denied(sent) -> None:
+    assert len(sent) == 1, sent
+    assert sent[0].text in _DENIAL_TEXTS, sent[0].text
 
 
 @pytest.fixture
@@ -28,7 +41,7 @@ async def test_saturntest_requires_founder(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, 999999, text="/saturntest morning")
-    assert sent == []
+    _assert_denied(sent)
 
 
 async def test_saturntest_without_group_id_configured_shows_setup_hint(bot_dp):

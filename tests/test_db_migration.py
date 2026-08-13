@@ -78,3 +78,65 @@ def test_additive_column_migration_runs_twice_without_error(tmp_path, monkeypatc
         conn.close()
 
     assert "prior_employer_reference_consent" in columns
+
+
+def test_single_slot_role_unique_index_exists_after_init(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_DB_FILE", str(tmp_path / "fresh.db"))
+    db.init_db()
+
+    conn = db.get_connection()
+    try:
+        indexes = {
+            row["name"] for row in conn.execute("PRAGMA index_list(allowed_users)")
+        }
+    finally:
+        conn.close()
+
+    assert "idx_allowed_users_single_slot_role" in indexes
+
+
+def test_single_slot_role_unique_index_rejects_duplicate_role_key(tmp_path, monkeypatch):
+    """``nazoratchi=1`` DB invarianti — hatto ilova (``roles.set_role()``)
+    qatlamidan chetlab o'tib, to'g'ridan-to'g'ri SQL bilan ikkinchi
+    nazoratchi yozilsa ham, qisman UNIQUE indeks buni rad etadi.
+    """
+    monkeypatch.setattr(db, "_DB_FILE", str(tmp_path / "fresh.db"))
+    db.init_db()
+
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO allowed_users (user_id, role_key, added_by, added_at) "
+            "VALUES (1, 'nazoratchi', 999, 'now')"
+        )
+        conn.commit()
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO allowed_users (user_id, role_key, added_by, added_at) "
+                "VALUES (2, 'nazoratchi', 999, 'now')"
+            )
+    finally:
+        conn.close()
+
+
+def test_single_slot_role_unique_index_allows_different_single_slot_roles(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "_DB_FILE", str(tmp_path / "fresh.db"))
+    db.init_db()
+
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO allowed_users (user_id, role_key, added_by, added_at) "
+            "VALUES (1, 'nazoratchi', 999, 'now')"
+        )
+        conn.execute(
+            "INSERT INTO allowed_users (user_id, role_key, added_by, added_at) "
+            "VALUES (2, 'haydovchi', 999, 'now')"
+        )
+        conn.commit()
+
+        rows = conn.execute("SELECT COUNT(*) AS c FROM allowed_users").fetchone()
+        assert rows["c"] == 2
+    finally:
+        conn.close()

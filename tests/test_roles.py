@@ -87,3 +87,90 @@ def test_role_name_lookup():
     assert roles.role_name("nazoratchi") == "Nazoratchi"
     assert roles.role_name(None) == "Noma'lum"
     assert roles.role_name("unknown_key") == "unknown_key"
+
+
+# --------------------------------------- nazoratchi=1 race-condition himoyasi --
+# ``schema/core.py``dagi qisman UNIQUE indeks (Postgres/production) DB
+# darajasida, atomik ravishda single-slot rol duplikatini rad etadi —
+# bu yerda ``set_role()``ning shu holatni (``IntegrityError``) to'g'ri
+# ushlab, xotiradagi ``_USERS`` keshini buzmasdan ``False`` qaytarishini
+# tekshiramiz (haqiqiy Postgres'siz ham, DB xatosini simulyatsiya qilib).
+
+
+def test_set_role_handles_db_level_race_condition_gracefully(monkeypatch):
+    """Ikki jarayon (masalan deploy paytida eski+yangi instance) deyarli
+    bir vaqtda ``nazoratchi``ni band qilishga urinsa, ikkinchisi Python
+    tekshiruvidan o'tib ketishi mumkin (hali yozmagan bo'lsa) — lekin DB
+    yozuvi (``_persist_set_role``) ``IntegrityError`` bilan rad etiladi.
+    """
+    from db import IntegrityError
+
+    def _boom(user_id, info):
+        raise IntegrityError("duplicate key value violates unique constraint")
+
+    monkeypatch.setattr(roles, "_persist_set_role", _boom)
+
+    assert roles.set_role(1, "nazoratchi", set_by=FOUNDER_ID) is False
+    assert roles.get_role(1) is None
+    assert roles.find_user_by_role("nazoratchi") is None
+
+
+def test_set_role_race_rejection_does_not_corrupt_cache(monkeypatch):
+    roles.set_role(1, "nazoratchi", set_by=FOUNDER_ID)
+
+    from db import IntegrityError
+
+    def _boom(user_id, info):
+        raise IntegrityError("duplicate key")
+
+    monkeypatch.setattr(roles, "_persist_set_role", _boom)
+
+    # 1-chi allaqachon nazoratchi — Python darajasidagi tekshiruv buni
+    # "o'zini qayta tayinlash" deb topib DB yozuviga o'tkazadi, u yerda
+    # (simulyatsiya qilingan) race bilan rad etiladi.
+    assert roles.set_role(1, "nazoratchi", set_by=FOUNDER_ID) is False
+    assert roles.get_role(1) == "nazoratchi"
+
+
+# -------------------------------------------------------------------- audit --
+
+
+def test_role_assignment_is_audited():
+    from repositories import audit as audit_repo
+    from services import audit
+
+    roles.set_role(123, "nazoratchi", set_by=FOUNDER_ID)
+
+    events = audit_repo.list_events_for_actor(FOUNDER_ID)
+    assigned = [e for e in events if e["event_type"] == audit.EVENT_ROLE_ASSIGNED]
+    assert len(assigned) == 1
+    assert assigned[0]["target_id"] == 123
+    assert assigned[0]["new_value"] == "nazoratchi"
+    assert assigned[0]["actor_role"] == "founder"
+
+
+def test_blocked_nazoratchi_assignment_is_audited():
+    from repositories import audit as audit_repo
+    from services import audit
+
+    roles.set_role(1, "nazoratchi", set_by=FOUNDER_ID)
+    roles.set_role(2, "nazoratchi", set_by=FOUNDER_ID)
+
+    events = audit_repo.list_events_for_actor(FOUNDER_ID)
+    blocked = [e for e in events if e["event_type"] == audit.EVENT_NAZORATCHI_ASSIGN_BLOCKED]
+    assert len(blocked) == 1
+    assert blocked[0]["target_id"] == 2
+
+
+def test_user_removal_is_audited():
+    from repositories import audit as audit_repo
+    from services import audit
+
+    roles.set_role(123, "sotuvchi", set_by=FOUNDER_ID)
+    roles.remove_user(123, removed_by=FOUNDER_ID)
+
+    events = audit_repo.list_events_for_actor(FOUNDER_ID)
+    removed = [e for e in events if e["event_type"] == audit.EVENT_USER_REMOVED]
+    assert len(removed) == 1
+    assert removed[0]["target_id"] == 123
+    assert removed[0]["old_value"] == "sotuvchi"

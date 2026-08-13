@@ -499,9 +499,11 @@ def register(dp: Dispatcher) -> None:
                 permissions.ACTION_VIEW_CASH_SUMMARY,
                 permissions.ACTION_REVIEW_CASH_SHIFT,
             ):
+                await permissions.deny(message, permissions.ACTION_VIEW_CASH_SUMMARY)
                 return
             target_id = requested_id
         elif not permissions.has_permission(message.from_user.id, permissions.ACTION_OPEN_CASH_SHIFT):
+            await permissions.deny(message, permissions.ACTION_OPEN_CASH_SHIFT)
             return
 
         shift = cash_shift.get_open_shift(target_id, company_time.today().isoformat())

@@ -109,6 +109,30 @@ mumkin, `allowed_users`ga kirmaydi.
 | Kunlik/oylik reyting (in-chat dashboard) | production | `/bugungiporga`, `/oylikturnir` | CSV/tashqi eksport yo'q, faqat chatda matn |
 | CSV/fayl eksport | **mavjud emas** | — | Kodda topilmadi |
 
+## Kelajak uchun qulflangan talablar (2026-08, Founder tasdiqlagan, hali implement qilinmagan)
+
+Quyidagilar RBAC/menyu/filial-huquqlari audit sessiyasida (2026-08,
+`feature/rbac-permissions`) Founder tomonidan **tasdiqlangan**, lekin
+**ataylab shu branchda qurilmagan** talablar — arxitektura ularga
+qarshi bo'lmasin deb saqlab qo'yilgan, lekin biznes funksiyasi hali
+yozilmagan. Keyingi ishga tushirilganda shu ro'yxatdan olib tashlanadi
+va tegishli bo'limga (yuqorida) "production"/"qisman" sifatida
+ko'chiriladi.
+
+| Talab | Qisqacha | Fayl (kelajakda) | Holat |
+|---|---|---|---|
+| A. Xodimni tugmalar orqali ishga olish | Founder menyusida "👥 Xodim ishga olish": filial → lavozim tugmalari → 2 soatlik bir martalik taklif havolasi (`/invite`ni qo'lda yozish shart emas) | `main.py`, `invites.py` | **rejalashtirilgan** |
+| B. AI rekruting (alohida jiddiy modul) | Vakansiya havolasi orqali kirgan nomzod `candidate` rejimida 10-15 ta savolga javob beradi, AI 100 ballik baho + tavsiya beradi, yakuniy qarorni Founder qabul qiladi | yangi `recruiting_bot.py`/`services/recruiting.py` | **rejalashtirilgan** |
+| C. Saturn umumiy guruhida Fokus AI (asosiy bot, test bot emas) | Ertalabki/kechqurungi rasmli post + iliq, o'zini AI deb yashirmaydigan tabrik/munosabat; hech qanday moliyaviy raqam guruhga chiqmaydi | `saturn_group_bot.py`, `services/saturn_group.py` | **rejalashtirilgan** (hozir faqat matn, test muhitida) |
+| D. Kundalik xodimlar dashboardi (rasmli karta) | Kechagi yakunlangan kunga asoslangan, rangli (yashil→oq→qizil) kartalar, moliyaviy ma'lumotsiz, scoring formulasi hali aniqlanmagan | `saturn_group_bot.py`, `services/star_engine.py`/yangi servis | **NEEDS_BUSINESS_DECISION** (saralash mezoni) |
+| E. Production pilot bosqichi | Test bot faqat qisqa smoke-test; biznes pilot asosiy botda 3-5 xodim (2 kun) → butun jamoa (1 oy), avtomatik oylik/jazo/chiqarish qarori yo'q | — (jarayon, kod emas) | **rejalashtirilgan** |
+
+Diqqat: bu ro'yxat **biznes qaror** hujjati emas — `services/permissions.py`,
+`main.py` menyu tizimi va `services/audit.py` allaqachon shu talablarga
+kengayadigan tarzda qurilgan (masalan yangi `ACTION_*` qo'shish orqali
+rekruting/dashboard huquqlarini RBAC jadvaliga kiritish mumkin bo'ladi,
+alohida parallel ruxsat tizimi kerak bo'lmaydi).
+
 ## Provider'lar (tashqi integratsiyalar)
 
 | Funksiya | Holat | Fayl | Izoh |

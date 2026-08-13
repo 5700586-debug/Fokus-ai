@@ -6,9 +6,22 @@ from aiogram.types import User as TgUser
 
 from config import FOUNDER_ID
 from repositories import suppliers as suppliers_repo
+from services import messages as messages_catalog
 from tests.bot_harness import send
 
 pytestmark = pytest.mark.anyio
+
+_DENIAL_TEXTS = {
+    messages_catalog.GENERIC_DENIAL,
+    messages_catalog.CASH_FINANCE_DENIAL,
+    messages_catalog.MANAGEMENT_DENIAL,
+    messages_catalog.REPEAT_OFFENDER_DENIAL,
+}
+
+
+def _assert_denied(sent) -> None:
+    assert len(sent) == 1, sent
+    assert sent[0].text in _DENIAL_TEXTS, sent[0].text
 
 
 @pytest.fixture
@@ -52,7 +65,7 @@ async def test_invitesupplier_is_founder_only(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, user_id=999999, text="/invitesupplier")
-    assert sent == []
+    _assert_denied(sent)
 
 
 async def test_founder_can_create_supplier_invite_link(bot_dp):

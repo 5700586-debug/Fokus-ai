@@ -4,9 +4,22 @@ import pytest
 
 import company_time
 from config import FOUNDER_ID
+from services import messages as messages_catalog
 from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
+
+_DENIAL_TEXTS = {
+    messages_catalog.GENERIC_DENIAL,
+    messages_catalog.CASH_FINANCE_DENIAL,
+    messages_catalog.MANAGEMENT_DENIAL,
+    messages_catalog.REPEAT_OFFENDER_DENIAL,
+}
+
+
+def _assert_denied(sent) -> None:
+    assert len(sent) == 1, sent
+    assert sent[0].text in _DENIAL_TEXTS, sent[0].text
 
 
 @pytest.fixture
@@ -36,7 +49,7 @@ async def test_invsnapshot_requires_savdo_boshligi_role(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, 111, text="/invsnapshot")
-    assert sent == []
+    _assert_denied(sent)
 
 
 async def test_first_snapshot_no_previous_no_causes(bot_dp):
@@ -211,4 +224,4 @@ async def test_stranger_cannot_view_inventorysummary_by_branch(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, 999999, text="/inventorysummary Filial-1")
-    assert sent == []
+    _assert_denied(sent)

@@ -56,6 +56,15 @@ def temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(roles, "_ALLOWED_USERS_FILE", str(tmp_path / "test_allowed_users.json"))
     monkeypatch.setattr(roles, "_USERS", {})
 
+    # ``services.permissions``dagi takroriy-urinish (repeat-offender)
+    # kuzatuvchisi jarayon xotirasida (module-level) saqlanadi — testlar
+    # orasida tozalanmasa, bir testda ishlatilgan user_id (masalan 999999
+    # "begona" sifatida ko'p testda takrorlanadi) keyingi testda "avval
+    # ham ko'rganman" xabarini noto'g'ri qaytarib, testni chalkashtiradi.
+    from services import permissions as permissions_service
+
+    monkeypatch.setattr(permissions_service, "_RECENT_DENIALS", {})
+
     yield
 
 

@@ -77,4 +77,18 @@ CREATE TABLE IF NOT EXISTS allowed_users (
     added_by INTEGER NOT NULL,
     added_at TEXT NOT NULL
 );
+
+-- ``roles.py``dagi ``SINGLE_SLOT_ROLES`` (nazoratchi/haydovchi/taminotchi/
+-- moliyachi — filialga bog'lanmagan, faqat 1 kishi) uchun ilova
+-- darajasidagi tekshiruv (``roles.set_role()``) yagona himoya EMAS: ikki
+-- alohida jarayon (masalan deploy paytida eski+yangi instance bir vaqtda
+-- ishlab qolsa) bir xil rolni deyarli bir vaqtda tekshirib, ikkalasi ham
+-- "bo'sh" deb topib, ikkalasi ham yozib qo'yishi mumkin (race condition).
+-- Shu qisman UNIQUE indeks buni DB darajasida, atomik ravishda oldini
+-- oladi — ikkinchi yozuv ``IntegrityError`` bilan rad etiladi
+-- (``roles.py``dagi ``set_role()`` shu xatoni ushlab ``False`` qaytaradi).
+-- Ro'yxat ``roles.SINGLE_SLOT_ROLES`` bilan qo'lda sinxron ushlanadi.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_allowed_users_single_slot_role
+    ON allowed_users(role_key)
+    WHERE role_key IN ('nazoratchi', 'haydovchi', 'taminotchi', 'moliyachi');
 """

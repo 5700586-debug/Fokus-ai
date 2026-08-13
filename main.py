@@ -50,7 +50,7 @@ import performance_bot  # noqa: E402
 import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
-from services import permissions  # noqa: E402
+from services import messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -98,7 +98,10 @@ openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 # AI Tahlil rejimiga kirgan foydalanuvchilar
 ai_users: set[int] = set()
 
-STRANGER_TEXT = "Hmm… bu bot bilan qiziqib qoldingizmi? 🤨"
+# Markaziy "Saturncha" xabar katalogidan (``services/messages.py``) —
+# begona/ro'yxatdan o'tmagan foydalanuvchi uchun ham matn shu yerda
+# takrorlanmaydi, bitta manbadan olinadi.
+STRANGER_TEXT = messages.GENERIC_DENIAL
 
 CANCEL_TEXT = "❌ Bekor qilish"
 BACK_TEXT = "🔙 Orqaga"
@@ -156,6 +159,16 @@ async def ensure_authorized(message: Message) -> bool:
 # tugma matni doim "/buyruq" bilan boshlanadi, shuning uchun bosilganda
 # aynan shu buyruqning o'z (mavjud, o'zgartirilmagan) handleri ishga
 # tushadi. Bu yerda yangi biznes mantiq yo'q — faqat navigatsiya.
+#
+# MUHIM: qaysi tugma ko'rsatilishini rol nomi emas, balki har bir buyruq
+# uchun ``services/permissions.has_permission()``ning HAQIQIY natijasi
+# hal qiladi (qarang ``_visible_categories``/``_visible_commands``) — shu
+# orqali menyu va backenddagi haqiqiy ruxsat hech qachon bir-biridan
+# ajralib qolmaydi. Tugma yashirilishi o'zi xavfsizlik EMAS — har bir
+# buyruq handleri baribir mustaqil ravishda ``ensure_permission()``/
+# ``ensure_any_permission()`` bilan qayta tekshiradi, shuning uchun eski
+# tugma/callback/deep-link/qo'lda yozilgan buyruq orqali kirishga
+# urinish ham backendda rad etiladi.
 _SHARED_COMMANDS = [
     "/mystars — Mening yulduzlarim",
     "/mymaosh — Mening oylik/bonus holatim",
@@ -165,82 +178,105 @@ _SHARED_COMMANDS = [
     "/listnizom — Korxona nizomlari",
 ]
 
-_ROLE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
-    "founder": (
-        "👑 Asoschi",
-        [
-            "/invite — Yangi xodimga taklif havolasi",
-            "/setrole — Foydalanuvchiga rol berish",
-            "/removeuser — Foydalanuvchini ro'yxatdan o'chirish",
-            "/listusers — Ro'yxatdagi foydalanuvchilar",
-            "/profile — Xodim anketasi (user_id bilan)",
-            "/addnizom — Yangi korxona nizomi qo'shish",
-            "/setsalary — Fiks oylik belgilash",
-            "/maosh — Xodim maoshi/bonusini ko'rish",
-            "/setrule — Qoida qiymatini o'zgartirish",
-            "/listrules — Barcha qoidalarni ko'rish",
-            "/processmonth — Oylik KPI/yulduz hisoblash",
-            "/addvehicle — Yangi mashina qo'shish",
-        ],
-    ),
-    "nazoratchi": (
-        "🧑‍💼 Nazoratchi",
-        [
-            "/baholash — Xodimni kunlik baholash/jarima",
-            "/kunniyop — Bugungi kunni yopish",
-            "/score — Xodimga oylik ball qo'yish",
-        ],
-    ),
-    "kassir": (
-        "💰 Kassa",
-        [
-            "/openshift — Kassa smenasini ochish",
-            "/closeshift — Kassa smenasini yopish",
-            "/expense — Kassa xarajatini kiritish",
-        ],
-    ),
-    "savdo_boshligi": (
-        "📦 Ombor",
-        [
-            "/invsnapshot — Kunlik ombor hisobotini yuborish",
-            "/inventorysummary — Ombor hisobotlari xulosasi",
-            "/mealplan — Ovqat rejasini kiritish",
-        ],
-    ),
-    "haydovchi": (
-        "🚚 Haydovchi",
-        ["/drivercheck — Kunlik mashina/servis tekshiruvi"],
-    ),
-    "taminotchi": (
-        "🛒 Ta'minotchi",
-        ["/marketlog — Bozor kuzatuvi qo'shish"],
-    ),
-    "moliyachi": (
-        "💵 Moliyachi",
-        [
-            "/cashsummary — Kassa xulosasi",
-            "/inventorysummary — Ombor xulosasi",
-        ],
-    ),
+_CATEGORY_LABELS: dict[str, str] = {
+    "founder": "👑 Asoschi",
+    "nazoratchi": "🧑‍💼 Nazoratchi",
+    "kassir": "💰 Kassa",
+    "savdo_boshligi": "📦 Ombor",
+    "haydovchi": "🚚 Haydovchi",
+    "taminotchi": "🛒 Ta'minotchi",
+    "moliyachi": "💵 Moliyachi",
 }
+_CATEGORY_LABEL_TO_KEY: dict[str, str] = {label: key for key, label in _CATEGORY_LABELS.items()}
+
+# (bo'lim kaliti, tugma matni, kerakli ACTION_*). Bitta buyruq bir necha
+# bo'limda ko'rinishi mumkin (masalan "/inventorysummary" ham ombor, ham
+# moliyachi bo'limida) — chunki ikkalasi HAQIQATDA turli ACTION_* orqali
+# mustaqil ruxsatlanadi (savdo bo'limi boshlig'i uchun o'z hisoboti,
+# moliyachi uchun umumiy ko'rish huquqi).
+_MENU_ENTRIES: list[tuple[str, str, str]] = [
+    ("founder", "/invite — Yangi xodimga taklif havolasi", permissions.ACTION_MANAGE_INVITES),
+    ("founder", "/setrole — Foydalanuvchiga rol berish", permissions.ACTION_MANAGE_ROLES),
+    ("founder", "/removeuser — Foydalanuvchini ro'yxatdan o'chirish", permissions.ACTION_REMOVE_USER),
+    ("founder", "/listusers — Ro'yxatdagi foydalanuvchilar", permissions.ACTION_LIST_USERS),
+    ("founder", "/profile — Xodim anketasi (user_id bilan)", permissions.ACTION_VIEW_PROFILE),
+    ("founder", "/addnizom — Yangi korxona nizomi qo'shish", permissions.ACTION_MANAGE_DISCIPLINE_RULES),
+    ("founder", "/setsalary — Fiks oylik belgilash", permissions.ACTION_SET_SALARY),
+    ("founder", "/maosh — Xodim maoshi/bonusini ko'rish", permissions.ACTION_LOOKUP_ANY_SALARY),
+    ("founder", "/setrule — Qoida qiymatini o'zgartirish", permissions.ACTION_SET_RULE),
+    ("founder", "/listrules — Barcha qoidalarni ko'rish", permissions.ACTION_LIST_RULES),
+    ("founder", "/processmonth — Oylik KPI/yulduz hisoblash", permissions.ACTION_PROCESS_MONTH),
+    ("founder", "/addvehicle — Yangi mashina qo'shish", permissions.ACTION_MANAGE_VEHICLES),
+    ("nazoratchi", "/baholash — Xodimni kunlik baholash/jarima", permissions.ACTION_EVALUATE_EMPLOYEE),
+    ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),
+    ("nazoratchi", "/score — Xodimga oylik ball qo'yish", permissions.ACTION_SCORE_EMPLOYEE),
+    ("kassir", "/openshift — Kassa smenasini ochish", permissions.ACTION_OPEN_CASH_SHIFT),
+    ("kassir", "/closeshift — Kassa smenasini yopish", permissions.ACTION_CLOSE_CASH_SHIFT),
+    ("kassir", "/expense — Kassa xarajatini kiritish", permissions.ACTION_LOG_CASH_EXPENSE),
+    (
+        "savdo_boshligi",
+        "/invsnapshot — Kunlik ombor hisobotini yuborish",
+        permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT,
+    ),
+    (
+        "savdo_boshligi",
+        "/inventorysummary — Ombor hisobotlari xulosasi",
+        permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT,
+    ),
+    ("savdo_boshligi", "/mealplan — Ovqat rejasini kiritish", permissions.ACTION_ENTER_MEAL_PLAN),
+    ("haydovchi", "/drivercheck — Kunlik mashina/servis tekshiruvi", permissions.ACTION_DRIVER_DAILY_CHECK),
+    ("taminotchi", "/marketlog — Bozor kuzatuvi qo'shish", permissions.ACTION_LOG_MARKET_OBSERVATION),
+    ("moliyachi", "/cashsummary — Kassa xulosasi", permissions.ACTION_VIEW_CASH_SUMMARY),
+    ("moliyachi", "/inventorysummary — Ombor xulosasi", permissions.ACTION_VIEW_INVENTORY_SUMMARY),
+]
 
 _SHARED_CATEGORY_TEXT = "⭐ Mening natijalarim"
-
-# Bo'lim tugmasi matni -> shu bo'limdagi buyruqlar ro'yxati (Orqaga
-# bosilganda yoki noto'g'ri matn kelganda ishlatiladi).
-_CATEGORY_COMMANDS: dict[str, list[str]] = {label: cmds for label, cmds in _ROLE_CATEGORIES.values()}
-_CATEGORY_COMMANDS[_SHARED_CATEGORY_TEXT] = _SHARED_COMMANDS
+_ALL_MENU_BUTTON_TEXTS = set(_CATEGORY_LABELS.values()) | {_SHARED_CATEGORY_TEXT}
 
 
-def build_menu(role_key: str | None) -> ReplyKeyboardMarkup:
-    """Foydalanuvchining o'z roliga mos yagona menyu — faqat unga
-    tegishli (va ruxsat berilgan) bo'limlarni ko'rsatadi.
+def _visible_categories(user_id: int) -> list[str]:
+    """Foydalanuvchi kamida bitta amalga haqiqatda ruxsatli bo'lgan
+    bo'limlar — rol nomidan emas, ``has_permission()``dan hisoblanadi.
+
+    Founder uchun bitta istisno: Founderning ``has_permission()`` bypass'i
+    UNIVERSAL (istalgan amalga ``True``), shuning uchun naiv hisoblash
+    Founderga BARCHA bo'lim tugmasini (kassir, haydovchi va h.k.) ham
+    ko'rsatib yuborardi — bu xavfsizlik emas, sof UX muammosi (Founder
+    o'zining "👑 Asoschi" bo'limida barcha o'ziga xos buyruqlarni ko'radi,
+    boshqa xodimlarning kundalik menyusi bilan chalkashmasin). Backend
+    tekshiruvi (``ensure_permission``) buni cheklamaydi — Founder
+    istalgan buyruqni qo'lda yozib ishlata oladi, faqat tugma ko'p
+    bo'lim bilan tirband bo'lib qolmasligi uchun menyuda faqat o'z
+    bo'limi ko'rsatiladi.
     """
+    if get_role(user_id) == "founder":
+        return ["founder"] if any(cat == "founder" for cat, _label, _action in _MENU_ENTRIES) else []
+
+    return [
+        category_key
+        for category_key in _CATEGORY_LABELS
+        if any(
+            permissions.has_permission(user_id, action)
+            for cat, _label, action in _MENU_ENTRIES
+            if cat == category_key
+        )
+    ]
+
+
+def _visible_commands(user_id: int, category_key: str) -> list[str]:
+    return [
+        label
+        for cat, label, action in _MENU_ENTRIES
+        if cat == category_key and permissions.has_permission(user_id, action)
+    ]
+
+
+def build_menu(user_id: int) -> ReplyKeyboardMarkup:
+    """Foydalanuvchining HAQIQIY (joriy) ruxsatlariga mos yagona menyu."""
     rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
 
-    if role_key in _ROLE_CATEGORIES:
-        category_text, _ = _ROLE_CATEGORIES[role_key]
-        rows.append([KeyboardButton(text=category_text)])
+    for category_key in _visible_categories(user_id):
+        rows.append([KeyboardButton(text=_CATEGORY_LABELS[category_key])])
 
     rows.append([KeyboardButton(text=_SHARED_CATEGORY_TEXT)])
     rows.append([KeyboardButton(text="⚙️ Sozlamalar")])
@@ -295,7 +331,7 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     else:
         greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(role)}"
 
-    await message.answer(greeting, reply_markup=build_menu(role))
+    await message.answer(greeting, reply_markup=build_menu(message.from_user.id))
 
 
 @dp.message(F.text == "🤖 AI Tahlil")
@@ -323,7 +359,7 @@ async def settings_handler(message: Message) -> None:
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
 
 
-@dp.message(F.text.in_(set(_CATEGORY_COMMANDS.keys())))
+@dp.message(F.text.in_(_ALL_MENU_BUTTON_TEXTS))
 async def category_menu_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
@@ -331,7 +367,24 @@ async def category_menu_handler(message: Message) -> None:
     if message.from_user:
         ai_users.discard(message.from_user.id)
 
-    commands = _CATEGORY_COMMANDS[message.text]
+    if message.text == _SHARED_CATEGORY_TEXT:
+        commands = _SHARED_COMMANDS
+    else:
+        category_key = _CATEGORY_LABEL_TO_KEY[message.text]
+        commands = _visible_commands(message.from_user.id, category_key)
+
+    if not commands:
+        # Rol o'zgargach yoki ruxsat olib tashlangach, eski (mijozda
+        # keshlangan) tugma endi bu foydalanuvchiga hech narsa
+        # bermaydi — bo'sh bo'lim o'rniga xushmuomalalik bilan asosiy
+        # menyuga qaytariladi (qarang "Rol o'zgargach eski tugma endi
+        # ishlamasin" talabi).
+        await message.answer(
+            f"{messages.GENERIC_DENIAL}\nAsosiy menyu:",
+            reply_markup=build_menu(message.from_user.id),
+        )
+        return
+
     await message.answer(
         f"{message.text}\nKerakli buyruqni tanlang (ba'zilari qo'shimcha "
         "ma'lumot so'raydi):",
@@ -348,7 +401,7 @@ async def menu_back_handler(message: Message) -> None:
         ai_users.discard(message.from_user.id)
 
     await message.answer(
-        "🔙 Asosiy menyu.", reply_markup=build_menu(get_role(message.from_user.id))
+        "🔙 Asosiy menyu.", reply_markup=build_menu(message.from_user.id)
     )
 
 
@@ -365,7 +418,7 @@ async def menu_cancel_handler(message: Message) -> None:
         ai_users.discard(message.from_user.id)
 
     await message.answer(
-        "✅ Amal bekor qilindi.", reply_markup=build_menu(get_role(message.from_user.id))
+        "✅ Amal bekor qilindi.", reply_markup=build_menu(message.from_user.id)
     )
 
 
@@ -473,7 +526,7 @@ async def remove_user_handler(message: Message) -> None:
         return
 
     user_id = int(parts[1].strip())
-    if remove_user(user_id):
+    if remove_user(user_id, removed_by=message.from_user.id):
         await message.answer(f"✅ {user_id} ruxsat etilganlar ro‘yxatidan o‘chirildi.")
     else:
         await message.answer(f"ℹ️ {user_id} ro‘yxatda topilmadi.")

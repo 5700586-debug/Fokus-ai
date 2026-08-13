@@ -314,17 +314,28 @@ def register(dp: Dispatcher) -> None:
         branch: str | None
 
         if len(parts) > 1 and parts[1].strip():
+            requested_branch = parts[1].strip()
             if not permissions.has_any_permission(
                 message.from_user.id,
                 permissions.ACTION_VIEW_INVENTORY_SUMMARY,
                 permissions.ACTION_REVIEW_INVENTORY_VARIANCE,
             ):
+                await permissions.deny(message, permissions.ACTION_VIEW_INVENTORY_SUMMARY)
                 return
-            branch = parts[1].strip()
+            # Amal ruxsati (yuqorida) va filial ma'lumot chegarasi ATAYLAB
+            # alohida tekshiriladi — moliyachi/nazoratchi bundan mustasno,
+            # boshqa har qanday kelajakdagi rol ushbu amalga ruxsat olsa
+            # ham avtomatik boshqa filialni ko'ra olmasin.
+            if not permissions.can_access_branch(message.from_user.id, requested_branch):
+                permissions.log_cross_branch_attempt(message, requested_branch)
+                await permissions.deny(message, permissions.ACTION_VIEW_INVENTORY_SUMMARY)
+                return
+            branch = requested_branch
         elif permissions.has_permission(message.from_user.id, permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT):
             profile = get_profile(message.from_user.id)
             branch = profile.get("branch") if profile else None
         else:
+            await permissions.deny(message, permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT)
             return
 
         from repositories import inventory as inventory_repo

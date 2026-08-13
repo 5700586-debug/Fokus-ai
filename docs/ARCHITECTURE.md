@@ -191,9 +191,9 @@ qilinmaydi. Ikki daraja qoladi (ataylab, ikkalasi ham markazlashgan):
   qaysi rol qaysi amalga ruxsatli ekanini belgilaydi. Sof Founder-only
   buyruqlar (masalan `/setrule`, `/invite`) ham oddiy `ACTION_*`
   sifatida ro'yxatlangan — ularga hech qanday rol biriktirilmagani
-  uchun faqat Founder bypass orqali ishlaydi. `ensure_permission()`
-  mavjud "ruxsat yo'q bo'lsa jim rad et" konvensiyasini (xabarga javob
-  yo'q, callback'da bo'sh `answer()`) bitta joyga yig'adi.
+  uchun faqat Founder bypass orqali ishlaydi. Noma'lum/bo'sh/o'chirilgan
+  rol va ro'yxatga kiritilmagan amal — DEFAULT-DENY (`has_permission()`
+  docstringi).
 - **"Har qanday ro'yxatdan o'tgan foydalanuvchi"** (`roles.is_authorized`):
   asosiy menyu, `/mystars`, `/apellyatsiya` kabi rol farqi bo'lmagan
   komandalar uchun — bu ataylab alohida, chunki amal-jadvali kerak emas.
@@ -203,6 +203,68 @@ har doim ruxsatli, boshqasiniki uchun ikkinchi amal kerak" tarzida
 filiallanadi — bular uchun `has_any_permission()` (OR-kompozit
 tekshiruv) ishlatiladi, `ensure_permission()` emas (filiallanish
 handler ichida davom etadi).
+
+**Ruxsatsiz urinishga javob endi jim EMAS** (2026-08 yangilanishi):
+avval hech narsa yuborilmasdi, endi `ensure_permission()`/
+`ensure_any_permission()`/`deny()` markaziy "Saturncha" xabar
+katalogidan (`services/messages.py`) qisqa, hazilkash javob ko'rsatadi
+— xabar handlerlariga oddiy javob, callback handlerlariga toast
+(`show_alert=False`). Buning sababi: ruxsatli tugmalar ENDI umuman
+ko'rsatilmaydi (pastga qarang, `main.py` menyusi), shuning uchun bu
+javob faqat eski (keshlangan) tugma/callback/deep-link/qo'lda yozilgan
+buyruq orqali kirishga urinishda ko'rinadi.
+
+## 6.2. Ruxsat va ma'lumot chegarasi — ataylab ajratilgan (2026-08)
+
+`has_permission()` (amalni bajarish huquqi) va `can_access_branch()`
+(filial ma'lumot chegarasi) MUSTAQIL tekshiruvlar — birining ruxsati
+ikkinchisini avtomatik bermaydi. Founder va filiallararo rollar
+(`moliyachi`, `nazoratchi`) istalgan filialni ko'radi; boshqa har
+qanday rol faqat o'z profilidagi (`employees.get_profile()['branch']`)
+filialga tegishli ma'lumotni so'rashi mumkin. Hozircha faqat
+`inventory_bot.py`da (`/inventorysummary <filial>`) real hodisa sifatida
+ulangan — filial argumenti bilan chaqirilganda amal ruxsati (yuqorida)
+VA `can_access_branch()` ikkalasi ham tekshiriladi, ikkinchisi rad
+etsa `services/audit.EVENT_CROSS_BRANCH_ATTEMPT` yoziladi. Boshqa
+funksiyalarda (masalan `/mealplan`) filial tushunchasi umuman yo'q
+(kompaniya bo'yicha umumiy) — ularga sun'iy filial-cheklov qo'shilmadi.
+
+## 6.3. Xavfsizlik audit jurnali (2026-08, `services/audit.py`)
+
+`security_audit_log` jadvali (`schema/audit.py`) — rol berish/
+almashtirish, nazoratchi tayinlashga urinish (muvaffaqiyatli va rad
+etilgan), foydalanuvchini ro'yxatdan o'chirish, filiallararo kirishga
+urinish va Founder-only amalga (ro'yxatdan o'tgan, lekin Founder
+bo'lmagan foydalanuvchi tomonidan) ruxsatsiz urinish shu yerga yoziladi
+(`roles.set_role()`/`remove_user()`, `services/permissions.deny()`/
+`log_cross_branch_attempt()`). Oddiy operatsion amalning tasodifiy rad
+etilishi (masalan begona xato buyruq yozsa) AUDIT QILINMAYDI — faqat
+ro'yxatdan o'tgan-lekin-Founder-bo'lmagan foydalanuvchi + Founder-only
+amal birikmasida (audit hajmi shishmasin uchun). Token/parol/`.env`
+qiymati bu jurnalga hech qachon yozilmaydi. Audit yozuvi ikkinchi
+darajali amal — DB xatosi asosiy handler oqimini to'xtatmaydi (print +
+davom etish, mavjud loyiha konvensiyasi).
+
+## 6.4. `nazoratchi=1` — endi DB darajasida ham kafolatlangan (2026-08)
+
+Ilgari faqat `roles.set_role()`dagi Python check-then-act (`find_user_by_role`
++ `if existing: return False`) himoya qilardi — bu ikki JARAYON (masalan
+deploy paytida eski+yangi instance bir vaqtda ishlab qolsa) deyarli bir
+vaqtda tekshirsa, ikkalasi ham "bo'sh" deb topib, ikkalasi ham yozib
+qo'yishi mumkin edi (race condition; bitta jarayon ichida esa xavf yo'q,
+chunki `set_role()` sinxron va `await` nuqtasisiz ishlaydi). Endi
+`schema/core.py`da qisman UNIQUE indeks (`idx_allowed_users_single_slot_role`,
+`allowed_users(role_key) WHERE role_key IN ('nazoratchi','haydovchi',
+'taminotchi','moliyachi')`) — barcha 4 ta single-slot rol uchun — DB
+darajasida, atomik ravishda ikkinchi yozuvni rad etadi.
+`roles.set_role()` bu holatni (`db.IntegrityError`) ushlab xotiradagi
+keshni buzmasdan `False` qaytaradi va `services/audit.py`ga yozadi.
+**Cheklov:** bu himoya faqat `allowed_users` HAQIQIY DB jadvali
+ishlatilganda (production — `DATABASE_URL`/Postgres) amal qiladi; lokal
+SQLite-fayl rejimida (odatiy dev, `DATABASE_URL` yo'q) rollar
+`allowed_users.json` faylida saqlanadi va bu fayl yozuvi atomik emas —
+production yagona haqiqiy ko'p-jarayonli muhit bo'lgani uchun bu
+qabul qilingan cheklov.
 
 ## 7. Bilingan cheklovlar (qasddan tuzatilmagan)
 
@@ -230,12 +292,27 @@ o'qing:
   - `roles.py`dagi `SINGLE_SLOT_ROLES` ro'yxatida `"nazoratchi"` bor —
     `roles.set_role()`ning o'zi (Telegram qatlamidan mustaqil,
     ikkinchi himoya qatlami) ikkinchi nazoratchi tayinlanishini rad
-    etadi, mavjudini almashtirmaydi.
+    etadi, mavjudini almashtirmaydi. **2026-08:** endi UCHINCHI qatlam
+    ham bor — DB darajasidagi qisman UNIQUE indeks, qarang §6.4 (ikki
+    JARAYON bir vaqtda tekshirib ulgurgan race holatini ham yopadi,
+    Python-qatlam buni ko'ra olmaydi).
   - `/kunniyop`dagi "baholangan xodimlar soni" barcha nazoratchilar
     bo'yicha umumiy hisoblanadi (bittaga filtrlanmagan) — bitta
     nazoratchi bilan bu to'g'ri ishlaydi, muammo yo'q.
   - Test bilan qulflangan: `tests/test_bot_flows.py::test_only_founder_can_assign_nazoratchi`,
-    `::test_second_nazoratchi_assignment_is_rejected`, `tests/test_roles.py`.
+    `::test_second_nazoratchi_assignment_is_rejected`, `tests/test_roles.py`
+    (shu jumladan DB-race simulyatsiyasi), `tests/test_db_migration.py`
+    (UNIQUE indeksning o'zi).
+  - **Moliyaviy ma'lumot va nazoratchi — 2026-08 audit qarori:**
+    "Nazoratchi moliyaviy ma'lumotlarni ko'rmaydi" talabi bilan mavjud,
+    testlangan `ACTION_REVIEW_CASH_SHIFT`/`ACTION_REVIEW_INVENTORY_VARIANCE`
+    (kassir smenasi/ombor tafovutini tasdiqlash — shu ish uchun raqamlarni
+    ko'rish shart) o'rtasida ziddiyat bor edi. Xavfsizroq, mavjud
+    funksiyani buzmaydigan yo'l tanlandi: bu ikkala amal **operatsion
+    nazorat** deb hisoblanadi (moliyaviy dashboard/tarix EMAS) va
+    saqlanib qoldi — nazoratchiga hech qanday YANGI moliyaviy ko'rish
+    huquqi (masalan `ACTION_VIEW_CASH_SUMMARY`/`ACTION_VIEW_INVENTORY_SUMMARY`,
+    bular moliyachiga xos) berilmadi va berilmaydi.
 
   **Kelajak rejasi (hozir qilinmagan, faqat qayd etilgan):** agar
   kompaniya kelajakda ikkinchi nazoratchi qo'shishga qaror qilsa, kamida

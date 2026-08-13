@@ -15,12 +15,30 @@ tashqari hech kim ularga ruxsat ololmaydi.
 ular ``roles.is_authorized()`` orqali, alohida, allaqachon markazlashgan
 tarzda tekshiriladi (rol farqi yo'q, shuning uchun amal-jadvali kerak emas).
 
+Noma'lum, bo'sh yoki ro'yxatdan o'chirilgan rol — ``has_permission()``da
+DEFAULT-DENY (qarang funksiya docstringi).
+
+Amal bajarish huquqi (``has_permission``) va filial ma'lumot chegarasi
+(``can_access_branch``) ATAYLAB ikki mustaqil tekshiruv — birining
+ruxsati ikkinchisini avtomatik bermaydi (masalan savdo bo'limi boshlig'i
+``ACTION_SUBMIT_INVENTORY_SNAPSHOT``ga ruxsatli, lekin bu boshqa
+filialning hisobotini ko'rish huquqini bermaydi).
+
+Ruxsat berilmaganda ``deny()`` markaziy "Saturncha" xabar katalogidan
+(``services/messages.py``) qisqa javob ko'rsatadi va (Founder-only
+amalga ro'yxatdan o'tgan-lekin-Founder-bo'lmagan foydalanuvchi urinsa)
+``services/audit.py`` orqali audit yozadi.
+
 Founder har doim barcha amallarga ruxsatli.
 """
 
+import time
+
 from aiogram.types import CallbackQuery, Message
 
+from employees import get_profile
 from roles import get_role
+from services import audit, messages
 
 ACTION_SCORE_EMPLOYEE = "score_employee"
 ACTION_SET_RULE = "set_rule"
@@ -88,7 +106,27 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 }
 
 
+# Filiallararo (barcha filial) ko'rish huquqi tabiiy ravishda bor rollar
+# — ``can_access_branch()`` uchun, ``ROLE_PERMISSIONS``dan ALOHIDA:
+# amalni bajarish huquqi (has_permission) va filial ma'lumot chegarasi
+# (can_access_branch) ataylab ikki mustaqil tekshiruv, biri ikkinchisini
+# avtomatik bermaydi.
+_CROSS_BRANCH_ROLES = frozenset({"moliyachi", "nazoratchi"})
+
+# Foydalanuvchi bir necha daqiqa ichida qayta-qayta ruxsatsiz urinsa,
+# "yana ko'rdim" ohangidagi xabar ko'rsatiladi — bu jarayon xotirasida
+# (in-memory) saqlanadi, restart'da tozalanadi (ishonchli, lekin
+# vaqtinchalik signal; token/parol kabi sir emas).
+_RECENT_DENIALS: dict[int, float] = {}
+_REPEAT_WINDOW_SECONDS = 300
+
+
 def has_permission(user_id: int, action: str) -> bool:
+    """Noma'lum, bo'sh yoki ro'yxatdan o'chirilgan foydalanuvchi (``None``
+    rol) va ro'yxatdagi biror rolga biriktirilmagan amal — ikkalasi ham
+    standart holatda RAD ETILADI (default-deny): ``.get(role, set())``
+    bo'sh to'plam qaytaradi, ``in`` tekshiruvi ``False`` beradi.
+    """
     role = get_role(user_id)
     if role is None:
         return False
@@ -107,28 +145,118 @@ def has_any_permission(user_id: int, *actions: str) -> bool:
     return any(has_permission(user_id, action) for action in actions)
 
 
-async def ensure_permission(event: Message | CallbackQuery, action: str) -> bool:
-    """Handlerlarda takrorlanadigan "ruxsat yo'q bo'lsa jim rad et"
-    naqshini bitta joyga yig'adi: xabar handlerlariga hech narsa
-    yubormaydi (jim ``return``), callback handlerlarida esa bo'sh
-    ``answer()`` bilan Telegramdagi yuklanish indikatorini to'xtatadi —
-    bu ikkalasi ham mavjud, allaqachon test qilingan konvensiya, shu
-    sababli o'zgartirilmaydi.
+def can_access_branch(user_id: int, branch: str | None) -> bool:
+    """Amal bajarish huquqi (``has_permission``) filial ma'lumot
+    chegarasidan ATAYLAB alohida: Founder va filiallararo ko'rish huquqi
+    bor rollar (moliyachi, nazoratchi) istalgan filialni ko'radi, qolgan
+    HAR QANDAY rol faqat O'Z profilidagi filialga tegishli ma'lumotni
+    so'rashi mumkin — hatto tegishli ``ACTION_*``ga ruxsati bo'lsa ham.
+    Profili yo'q yoki filiali belgilanmagan foydalanuvchi uchun
+    default-deny.
     """
-    user = event.from_user
-    if user is not None and has_permission(user.id, action):
+    role = get_role(user_id)
+    if role is None:
+        return False
+    if role == "founder" or role in _CROSS_BRANCH_ROLES:
         return True
 
+    profile = get_profile(user_id)
+    own_branch = profile.get("branch") if profile else None
+    return own_branch is not None and own_branch == branch
+
+
+def _is_founder_only_action(action: str) -> bool:
+    return not any(action in actions for actions in ROLE_PERMISSIONS.values())
+
+
+def _is_repeat_offender(user_id: int) -> bool:
+    now = time.monotonic()
+    last = _RECENT_DENIALS.get(user_id)
+    _RECENT_DENIALS[user_id] = now
+    return last is not None and (now - last) <= _REPEAT_WINDOW_SECONDS
+
+
+def _event_chat_id(event: Message | CallbackQuery) -> int | None:
     if isinstance(event, CallbackQuery):
-        await event.answer()
+        return event.message.chat.id if event.message else None
+    return event.chat.id
+
+
+async def deny(event: Message | CallbackQuery, action: str) -> None:
+    """Ruxsat yo'q bo'lganda ko'rsatiladigan qisqa "Saturncha" javob —
+    xabar handlerlariga javob yuboradi, callback handlerlarida bo'sh
+    ``answer()`` o'rniga qisqa toast ko'rsatadi (Telegram yuklanish
+    indikatorini ham to'xtatadi). Bir xil foydalanuvchi Founder-only
+    amalga qayta-qayta (rol egasi bo'lmasa-da) urinsa, bu markaziy
+    audit jurnaliga ("muhim ruxsatsiz boshqaruv amali") yoziladi —
+    oddiy operatsion amalning tasodifiy rad etilishi (masalan begona
+    xato buyruq yozib qo'ysa) audit hajmini shishirmasin uchun faqat
+    ro'yxatdan o'tgan (ammo Founder bo'lmagan) foydalanuvchi va
+    Founder-only amal birikmasida yoziladi.
+    """
+    user = event.from_user
+    user_id = user.id if user is not None else None
+    role = get_role(user_id) if user_id is not None else None
+
+    repeat = _is_repeat_offender(user_id) if user_id is not None else False
+    text = messages.denial_text_for_action(action, repeat_offender=repeat)
+
+    if isinstance(event, CallbackQuery):
+        await event.answer(text, show_alert=False)
+    else:
+        await event.answer(text)
+
+    if role is not None and role != "founder" and _is_founder_only_action(action):
+        audit.log_event(
+            audit.EVENT_UNAUTHORIZED_PRIVILEGED_ACTION,
+            actor_id=user_id,
+            actor_role=role,
+            chat_id=_event_chat_id(event),
+            reason=action,
+        )
+
+
+def log_cross_branch_attempt(event: Message | CallbackQuery, requested_branch: str | None) -> None:
+    user = event.from_user
+    user_id = user.id if user is not None else None
+    role = get_role(user_id) if user_id is not None else None
+
+    audit.log_event(
+        audit.EVENT_CROSS_BRANCH_ATTEMPT,
+        actor_id=user_id,
+        actor_role=role,
+        chat_id=_event_chat_id(event),
+        new_value=requested_branch,
+    )
+
+
+async def ensure_permission(event: Message | CallbackQuery, action: str) -> bool:
+    """Handlerlarda takrorlanadigan ruxsat tekshiruvini bitta joyga
+    yig'adi: ruxsat bo'lsa ``True``, bo'lmasa ``deny()`` orqali qisqa
+    "Saturncha" javob ko'rsatib ``False`` qaytaradi.
+    """
+    user = event.from_user
+    if user is None:
+        if isinstance(event, CallbackQuery):
+            await event.answer()
+        return False
+
+    if has_permission(user.id, action):
+        return True
+
+    await deny(event, action)
     return False
 
 
 async def ensure_any_permission(event: Message | CallbackQuery, *actions: str) -> bool:
     user = event.from_user
-    if user is not None and has_any_permission(user.id, *actions):
+    if user is None:
+        if isinstance(event, CallbackQuery):
+            await event.answer()
+        return False
+
+    if has_any_permission(user.id, *actions):
         return True
 
-    if isinstance(event, CallbackQuery):
-        await event.answer()
+    await deny(event, actions[0] if actions else "")
     return False

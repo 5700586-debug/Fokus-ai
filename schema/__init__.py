@@ -13,6 +13,7 @@ jadvallari ``core.py`` da o'zgarishsiz saqlanadi.
 
 from . import (
     attendance,
+    audit,
     baselines,
     cash_shifts,
     checklists,
@@ -32,6 +33,7 @@ from . import (
 
 SCHEMA_STATEMENTS: list[str] = [
     core.SCHEMA,
+    audit.SCHEMA,
     performance.SCHEMA,
     checklists.SCHEMA,
     meal_plans.SCHEMA,

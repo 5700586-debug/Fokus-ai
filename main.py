@@ -305,6 +305,59 @@ def build_category_menu(commands: list[str]) -> ReplyKeyboardMarkup:
     rows.append([KeyboardButton(text=BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
+
+# Foydalanuvchi qurilmasida ESKI, hozirgi bot versiyasidan oldin
+# yuborilgan izohli tugma ("/invite — Yangi xodimga taklif havolasi")
+# hali ham Telegram klaviaturasida saqlanib qolgan bo'lishi mumkin —
+# /start yoki istalgan boshqa buyruq bosilib yangi (toza) klaviatura
+# ko'rsatilmaguncha, bosilsa aynan shu to'liq matn xabar sifatida
+# yuboriladi. Ro'yxat FAQAT hozirgi menyu ishlab chiqaradigan aniq
+# yorliqlardan (``_MENU_ENTRIES``/``_SHARED_COMMANDS``) hisoblanadi —
+# umumiy matn ko'r-ko'rona kesilmaydi, shuning uchun foydalanuvchi
+# qo'lda yozgan haqiqiy argumentlar ("/setrole 123 sotuvchi",
+# "/invite sotuvchi") hech qachon bu bilan aralashmaydi.
+_STALE_LABEL_TO_COMMAND: dict[str, str] = {
+    label: _bare_command(label) for _category, label, _action in _MENU_ENTRIES
+}
+_STALE_LABEL_TO_COMMAND.update({label: _bare_command(label) for label in _SHARED_COMMANDS})
+
+
+class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
+    """Eski (keshlangan) menyu tugmasidan kelgan to'liq izohli matnni
+    ("/invite — Yangi xodimga taklif havolasi") shu buyruqning toza
+    shakliga ("/invite") almashtiradi — ``Command`` filtri va
+    handlerlar ``message.text``ni to'g'ridan-to'g'ri (entities'ga
+    qaramasdan) ``split()`` qilgani uchun, aks holda " — izoh" qismi
+    argument sifatida noto'g'ri talqin qilinardi (qarang
+    ``_bare_command`` docstringi).
+
+    Faqat ``_STALE_LABEL_TO_COMMAND``dagi ANIQ (to'liq mos keluvchi)
+    yorliqlar almashtiriladi — foydalanuvchi qo'lda yozgan buyruqlar
+    (masalan "/setrole 123 sotuvchi") bu ro'yxatda yo'q, shuning uchun
+    o'zgarishsiz qoladi. ``_ClearStaleStateMiddleware`` bilan bir xil
+    sababga ko'ra ENG YUQORI ``dp.update`` darajasida ishlaydi — bu
+    marshrutlashdan (filtrlar ishga tushishidan) OLDIN bajarilishi
+    shart, aks holda ``Command`` filtri allaqachon eski matndan
+    argumentni noto'g'ri ajratib ulgurgan bo'ladi. ``Message``/``Update``
+    obyektlari o'zgarmas (frozen) bo'lgani uchun to'g'ridan-to'g'ri
+    mutatsiya qilinmaydi — ``model_copy(update=...)`` bilan yangi
+    nusxa yaratilib, pastga o'sha nusxa uzatiladi.
+    """
+
+    async def __call__(self, handler, event, data: dict):
+        message: Message | None = getattr(event, "message", None)
+        text = getattr(message, "text", None)
+
+        bare_command = _STALE_LABEL_TO_COMMAND.get(text) if text else None
+        if bare_command is not None:
+            new_message = message.model_copy(update={"text": bare_command})
+            event = event.model_copy(update={"message": new_message})
+
+        return await handler(event, data)
+
+
+dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
+
 onboarding.register(dp)
 approval.register(dp)
 performance_bot.register(dp)

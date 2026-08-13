@@ -219,6 +219,105 @@ async def test_every_role_category_buttons_are_description_free(bot_dp, role_key
     assert all(b == "🔙 Orqaga" or b.startswith("/") for b in buttons)
 
 
+# ------------------------- eski (Telegram'da keshlangan) izohli tugma --
+# Foydalanuvchi qurilmasida oldingi bot versiyasi yuborgan izohli tugma
+# ("/invite — Yangi xodimga taklif havolasi") hali ham saqlanib qolgan
+# bo'lishi mumkin — /start bilan yangi klaviatura ko'rsatilmaguncha,
+# bosilsa aynan shu to'liq matn xabar sifatida yuboriladi. Backend buni
+# ham xavfsiz qabul qilishi kerak (qarang ``_NormalizeStaleMenuButtonMiddleware``).
+
+
+def test_stale_label_map_covers_every_menu_entry_and_maps_to_bare_command():
+    import main
+
+    for _category, label, _action in main._MENU_ENTRIES:
+        assert label in main._STALE_LABEL_TO_COMMAND
+        assert main._STALE_LABEL_TO_COMMAND[label] == main._bare_command(label)
+
+    for label in main._SHARED_COMMANDS:
+        assert label in main._STALE_LABEL_TO_COMMAND
+        assert main._STALE_LABEL_TO_COMMAND[label] == main._bare_command(label)
+
+
+async def test_stale_cached_invite_button_text_is_normalized(bot_dp):
+    """Aniq xabar qilingan bug: eski tugma to'liq
+    "/invite — Yangi xodimga taklif havolasi" matnini yuboradi — bot
+    buni "/invite" sifatida qabul qilishi kerak, "Noto'g'ri rol kaliti: —"
+    emas.
+    """
+    main, bot = bot_dp
+
+    sent = await send(
+        main.dp, bot, FOUNDER_ID, text="/invite — Yangi xodimga taklif havolasi"
+    )
+
+    assert "Noto'g'ri rol kaliti" not in sent[0].text
+    assert "Foydalanish" in sent[0].text
+
+
+async def test_stale_cached_setrole_button_text_is_normalized(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(
+        main.dp, bot, FOUNDER_ID, text="/setrole — Foydalanuvchiga rol berish"
+    )
+
+    assert "Noto'g'ri rol kaliti" not in sent[0].text
+    assert "Foydalanish" in sent[0].text
+
+
+async def test_stale_cached_removeuser_button_works_with_founder(bot_dp):
+    main, bot = bot_dp
+    _set_role(222, "sotuvchi")
+
+    sent = await send(
+        main.dp, bot, FOUNDER_ID, text="/removeuser — Foydalanuvchini ro'yxatdan o'chirish"
+    )
+
+    assert "Foydalanish: /removeuser" in sent[0].text
+
+
+async def test_stale_cached_shared_command_button_is_normalized(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="/mystars — Mening yulduzlarim")
+
+    assert "Joriy yulduzlar" in sent[0].text
+
+
+async def test_stale_button_normalization_does_not_touch_real_user_arguments(bot_dp):
+    """Foydalanuvchi qo'lda yozgan haqiqiy argumentlar o'zgarishsiz
+    qolishi kerak — bu matnlar ``_STALE_LABEL_TO_COMMAND``da yo'q.
+    """
+    main, bot = bot_dp
+    from roles import get_role
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/invite sotuvchi")
+    assert "Foydalanish: /invite" in sent[0].text  # filial talab qilinadi, xato emas
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/removeuser 222")
+    assert "topilmadi" in sent[0].text  # 222 ro'yxatda yo'q, lekin argument to'g'ri o'qildi
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/setrole 333 sotuvchi")
+    assert "rnatildi" in sent[0].text.lower()
+    assert get_role(333) == "sotuvchi"
+
+
+async def test_start_after_stale_button_shows_fresh_description_free_menu(bot_dp):
+    """Eski keshlangan tugma matni bilan urinishdan keyin /start yangi
+    (toza) klaviaturani ko'rsatishi kerak — talab #6.
+    """
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="/invite — Yangi xodimga taklif havolasi")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+
+    buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
+    assert "👑 Asoschi" in buttons
+    assert not any("—" in b for b in buttons)
+
+
 async def test_category_command_button_triggers_real_command(bot_dp):
     """Bo'lim ichidagi tugma matni haqiqiy buyruq bilan boshlanadi va
     bosilganda o'zining mavjud handleri ishga tushishi kerak (yangi

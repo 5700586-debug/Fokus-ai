@@ -68,7 +68,30 @@ async def test_open_meteo_provider_returns_weather_info_on_success(monkeypatch):
     provider = OpenMeteoWeatherProvider(latitude=40.5, longitude=70.9)
     weather = await provider.get_today_weather("Qo'qon")
 
-    assert weather == WeatherInfo(description="Ochiq", temperature_c=18.4)
+    assert weather == WeatherInfo(description="Ochiq", temperature_c=18.4, weather_code=0)
+
+
+async def test_open_meteo_provider_captures_wind_speed_when_present(monkeypatch):
+    response = _FakeResponse(
+        200, {"current_weather": {"temperature": 12.0, "weathercode": 3, "windspeed": 42.5}}
+    )
+    _patch_session(monkeypatch, _FakeSession(response=response))
+
+    provider = OpenMeteoWeatherProvider(latitude=40.5, longitude=70.9)
+    weather = await provider.get_today_weather("Qo'qon")
+
+    assert weather.wind_speed_kmh == 42.5
+    assert weather.weather_code == 3
+
+
+async def test_open_meteo_provider_wind_speed_is_none_when_absent(monkeypatch):
+    response = _FakeResponse(200, {"current_weather": {"temperature": 12.0, "weathercode": 3}})
+    _patch_session(monkeypatch, _FakeSession(response=response))
+
+    provider = OpenMeteoWeatherProvider(latitude=40.5, longitude=70.9)
+    weather = await provider.get_today_weather("Qo'qon")
+
+    assert weather.wind_speed_kmh is None
 
 
 async def test_open_meteo_provider_maps_unknown_weather_code(monkeypatch):

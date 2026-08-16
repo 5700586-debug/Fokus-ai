@@ -1,9 +1,11 @@
 import io
+from datetime import date
 
 import pytest
 from PIL import Image
 
 from services import saturn_content, saturn_image
+from services import saturn_season, saturn_weather_scene
 
 pytestmark = pytest.mark.anyio
 
@@ -121,6 +123,84 @@ def test_saturn_mark_falls_back_to_text_when_logo_file_is_corrupt(monkeypatch, t
     data = saturn_image.render_morning_image("Test maslahat.")
     image = _open(data)
     assert image.size == (saturn_image.IMAGE_SIZE, saturn_image.IMAGE_SIZE)
+
+
+# ----------------------------------------- fasl/ob-havo sahna integratsiyasi --
+
+
+def test_morning_image_rendering_is_deterministic_for_the_same_date():
+    d = date(2026, 7, 4)
+    data1 = saturn_image.render_morning_image(
+        "Bugun tabassum bilan salomlashing.", season=saturn_season.SUMMER,
+        weather_category=saturn_weather_scene.CATEGORY_CLEAR, local_date=d,
+    )
+    data2 = saturn_image.render_morning_image(
+        "Bugun tabassum bilan salomlashing.", season=saturn_season.SUMMER,
+        weather_category=saturn_weather_scene.CATEGORY_CLEAR, local_date=d,
+    )
+    assert data1 == data2
+
+
+def test_night_image_rendering_is_deterministic_for_the_same_date():
+    d = date(2026, 1, 10)
+    data1 = saturn_image.render_night_image(
+        "Ish joyini tartibli qoldiring.", season=saturn_season.WINTER,
+        weather_category=saturn_weather_scene.CATEGORY_SNOW, local_date=d,
+    )
+    data2 = saturn_image.render_night_image(
+        "Ish joyini tartibli qoldiring.", season=saturn_season.WINTER,
+        weather_category=saturn_weather_scene.CATEGORY_SNOW, local_date=d,
+    )
+    assert data1 == data2
+
+
+def test_morning_image_background_does_not_repeat_on_consecutive_days():
+    """Bir xil fasl/ob-havo kategoriyasi ikki kun ketma-ket saqlanib
+    qolsa ham, fon rasm ketma-ket ikki kunda bir xil bo'lmasligi kerak
+    (deterministik variant tanlovi kunlar bo'yicha aylanadi)."""
+    day1 = date(2026, 3, 5)
+    day2 = date(2026, 3, 6)
+    data1 = saturn_image.render_morning_image(
+        "Xayrli kun.", season=saturn_season.SPRING,
+        weather_category=saturn_weather_scene.CATEGORY_RAIN, local_date=day1,
+    )
+    data2 = saturn_image.render_morning_image(
+        "Xayrli kun.", season=saturn_season.SPRING,
+        weather_category=saturn_weather_scene.CATEGORY_RAIN, local_date=day2,
+    )
+    assert data1 != data2
+
+
+def test_night_image_background_matches_the_given_season():
+    """Qish/qor kategoriyasidagi tungi rasm bilan yoz/ochiq kategoriyasidagi
+    tungi rasm sezilarli darajada farq qilishi kerak — fasl fon orqali
+    ko'rinib turishi kerak."""
+    d = date(2026, 1, 1)
+    winter_snow = saturn_image.render_night_image(
+        "Matn.", season=saturn_season.WINTER, weather_category=saturn_weather_scene.CATEGORY_SNOW, local_date=d,
+    )
+    summer_clear = saturn_image.render_night_image(
+        "Matn.", season=saturn_season.SUMMER, weather_category=saturn_weather_scene.CATEGORY_CLEAR, local_date=d,
+    )
+    assert winter_snow != summer_clear
+
+
+def test_all_render_functions_default_gracefully_without_optional_scene_args():
+    """Eski chaqiruv uslubi (faqat matn, ixtiyoriy ob-havo belgisi)
+    hali ham xatosiz ishlashi kerak — fasl/kategoriya avtomatik
+    tanlanadi."""
+    data = saturn_image.render_morning_image("Test matni.")
+    image = _open(data)
+    assert image.size == (saturn_image.IMAGE_SIZE, saturn_image.IMAGE_SIZE)
+
+
+def test_logo_weather_badge_and_signature_do_not_overlap_the_glass_card():
+    """Chapdagi logotip, o'ngdagi ob-havo belgisi va pastki o'ngdagi
+    'Fokus AI' yozuvi markazdagi glass card zonasidan (Y 350-900)
+    tashqarida joylashgan bo'lishi kerak."""
+    assert saturn_image._CARD_TOP > 180  # logotip/ob-havo belgisi balandligidan pastda
+    fokus_ai_top = saturn_image.IMAGE_SIZE - saturn_image._MARGIN - saturn_image._FOKUS_AI_SIZE
+    assert fokus_ai_top > saturn_image._CARD_BOTTOM
 
 
 def test_wrap_text_respects_max_lines():

@@ -17,21 +17,23 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+import company_time
 from config import SATURN_LOGO_PATH
+from services import saturn_scene
+from services import saturn_season
+from services import saturn_weather_scene
 
 logger = logging.getLogger(__name__)
 
-IMAGE_SIZE = 1080
+IMAGE_SIZE = saturn_scene.IMAGE_SIZE
 _MARGIN = 90
 _FONTS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
-_MORNING_TOP = (255, 226, 155)      # yumshoq oltin
-_MORNING_BOTTOM = (255, 145, 110)   # iliq to'q sariq/qizg'ish
-_NIGHT_TOP = (13, 27, 58)           # to'q ko'k
-_NIGHT_BOTTOM = (30, 45, 82)        # sokin tungi ko'k
+_MORNING_TEXT = (58, 32, 20)        # to'q jigarrang — glass card ustida o'qilishi uchun kontrast
+_NIGHT_TEXT = (235, 240, 250)       # deyarli oq — to'q glass card ustida kontrast
 
-_MORNING_TEXT = (58, 32, 20)        # to'q jigarrang — iliq fonda o'qilishi uchun kontrast
-_NIGHT_TEXT = (235, 240, 250)       # deyarli oq — to'q fonda kontrast
+_CARD_TOP = 370
+_CARD_BOTTOM = 850
 
 _TITLE_SIZE = 66
 _ADVICE_SIZE = 42
@@ -47,49 +49,17 @@ def _font(bold: bool, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(_FONTS_DIR / filename), size)
 
 
-def _vertical_gradient(top_rgb: tuple[int, int, int], bottom_rgb: tuple[int, int, int]) -> Image.Image:
-    image = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE), top_rgb)
-    draw = ImageDraw.Draw(image)
-    for y in range(IMAGE_SIZE):
-        ratio = y / (IMAGE_SIZE - 1)
-        row_color = tuple(
-            int(top_rgb[channel] + (bottom_rgb[channel] - top_rgb[channel]) * ratio) for channel in range(3)
-        )
-        draw.line([(0, y), (IMAGE_SIZE, y)], fill=row_color)
-    return image
-
-
-def _soft_glow(image: Image.Image, center: tuple[int, int], radius: int, color: tuple[int, int, int]) -> None:
-    """Iliq/quyoshli tuyg'u uchun yumshoq, shaffof doira — juda ko'p
-    bezaksiz, faqat bitta nozik urg'u."""
+def _draw_glass_card(image: Image.Image, top: int, bottom: int, light: bool) -> None:
+    """Sarlavha/maslahat matni ortidagi yarim shaffof "glass card" —
+    fon qanchalik "band"/to'q bo'lishidan qat'i nazar matn o'qilishini
+    kafolatlaydi (qarang talab: matn fonga cho'kib ketmasligi kerak)."""
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
-    for step in range(radius, 0, -6):
-        alpha = int(28 * (1 - step / radius))
-        overlay_draw.ellipse(
-            [center[0] - step, center[1] - step, center[0] + step, center[1] + step],
-            fill=(*color, alpha),
-        )
+    fill = (255, 255, 255, 165) if light else (8, 12, 26, 155)
+    overlay_draw.rounded_rectangle(
+        [_MARGIN - 20, top, IMAGE_SIZE - _MARGIN + 20, bottom], radius=36, fill=fill
+    )
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"), (0, 0))
-
-
-def _stars(image: Image.Image) -> None:
-    """Tungi fon uchun bir nechta kichik, xotirjam yulduzcha — ortiqcha
-    bezaksiz, minimal. Faqat sarlavha/maslahat matni joylashadigan
-    o'rta zonadan (taxminan Y 380-900) TASHQARIDA joylashtirilgan —
-    aks holda uzun (4 qatorli) maslahat matni bilan yulduzcha
-    ustma-ust tushib, o'qilishni buzishi mumkin edi.
-    """
-    draw = ImageDraw.Draw(image)
-    positions = [
-        # Yuqori zona (matn boshlanishidan oldin)
-        (120, 140), (940, 110), (860, 260), (180, 320), (1000, 220), (250, 90), (60, 250),
-        # Pastki zona (matn tugagandan keyin, "Fokus AI" yozuvidan yuqorida)
-        (960, 930), (140, 960), (1020, 970), (90, 920), (980, 890),
-    ]
-    for x, y in positions:
-        radius = 2 if (x + y) % 3 else 3
-        draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=(255, 255, 255))
 
 
 def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
@@ -181,9 +151,27 @@ def _draw_weather_badge(draw: ImageDraw.ImageDraw, badge_text: str, text_color: 
     draw.text((box_left + padding_x, box_top + padding_y - 2), badge_text, font=font, fill=(70, 45, 20))
 
 
-def render_morning_image(advice_text: str, weather_text: str | None = None) -> bytes:
-    image = _vertical_gradient(_MORNING_TOP, _MORNING_BOTTOM)
-    _soft_glow(image, center=(IMAGE_SIZE // 2, 260), radius=380, color=(255, 250, 210))
+def render_morning_image(
+    advice_text: str,
+    weather_text: str | None = None,
+    *,
+    season: str | None = None,
+    weather_category: str | None = None,
+    local_date=None,
+    variant: int | None = None,
+) -> bytes:
+    """Fasl/ob-havoga mos original fon (``services/saturn_scene.py``)
+    ustiga matn "glass card" orqali joylashtiriladi. ``season``/
+    ``weather_category``/``local_date``/``variant`` — ixtiyoriy
+    (berilmasa, joriy sana va fasl-standart sahna ishlatiladi; qarang
+    ``services/saturn_group.py`` ishlab chiqarish chaqiruvi)."""
+    local_date = local_date or company_time.today()
+    season = season or saturn_season.season_for_date(local_date)
+    weather_category = weather_category or saturn_weather_scene.CATEGORY_SEASON_DEFAULT
+    if variant is None:
+        variant = saturn_scene.variant_index(local_date, offset=0)
+
+    image = saturn_scene.render_background(season, weather_category, saturn_scene.TIME_MORNING, variant)
 
     draw = ImageDraw.Draw(image)
 
@@ -191,6 +179,9 @@ def render_morning_image(advice_text: str, weather_text: str | None = None) -> b
         _draw_weather_badge(draw, weather_text, _MORNING_TEXT)
 
     _draw_saturn_mark(draw, image, _MORNING_TEXT)
+
+    _draw_glass_card(image, _CARD_TOP, _CARD_BOTTOM, light=True)
+    draw = ImageDraw.Draw(image)
 
     title_font = _font(bold=True, size=_TITLE_SIZE)
     title_lines = _wrap_text(draw, "Xayrli tong, Saturn jamoasi!", title_font, IMAGE_SIZE - 2 * _MARGIN)
@@ -205,12 +196,31 @@ def render_morning_image(advice_text: str, weather_text: str | None = None) -> b
     return _encode_png(image)
 
 
-def render_night_image(advice_text: str) -> bytes:
-    image = _vertical_gradient(_NIGHT_TOP, _NIGHT_BOTTOM)
-    _stars(image)
+def render_night_image(
+    advice_text: str,
+    *,
+    season: str | None = None,
+    weather_category: str | None = None,
+    local_date=None,
+    variant: int | None = None,
+) -> bytes:
+    """``render_morning_image`` bilan bir xil sahna tizimi, lekin
+    ob-havo argumenti UMUMAN QABUL QILINMAYDI — bu tungi rasmda
+    hech qachon ob-havo matni ko'rsatilmasligi funksiya imzosining
+    o'zida kafolatlangan (qarang tegishli test)."""
+    local_date = local_date or company_time.today()
+    season = season or saturn_season.season_for_date(local_date)
+    weather_category = weather_category or saturn_weather_scene.CATEGORY_SEASON_DEFAULT
+    if variant is None:
+        variant = saturn_scene.variant_index(local_date, offset=1)
+
+    image = saturn_scene.render_background(season, weather_category, saturn_scene.TIME_NIGHT, variant)
 
     draw = ImageDraw.Draw(image)
     _draw_saturn_mark(draw, image, _NIGHT_TEXT)
+
+    _draw_glass_card(image, _CARD_TOP, _CARD_BOTTOM, light=False)
+    draw = ImageDraw.Draw(image)
 
     title_font = _font(bold=True, size=_TITLE_SIZE)
     title_lines = _wrap_text(draw, "Xayrli tun, Saturn jamoasi!", title_font, IMAGE_SIZE - 2 * _MARGIN)

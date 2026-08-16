@@ -166,6 +166,67 @@ async def test_night_advice_does_not_repeat_within_recent_history():
     assert len(set(seen_keys)) == len(seen_keys)
 
 
+# --------------------------------------------------- kengaytirilgan bank --
+
+
+def test_morning_bank_has_at_least_90_entries():
+    assert len(saturn_content.MORNING_ADVICE_BANK) >= 90
+
+
+def test_night_bank_has_at_least_90_entries():
+    assert len(saturn_content.NIGHT_ADVICE_BANK) >= 90
+
+
+def test_morning_and_night_bank_texts_never_overlap():
+    morning_texts = {text for _key, text in saturn_content.MORNING_ADVICE_BANK}
+    night_texts = {text for _key, text in saturn_content.NIGHT_ADVICE_BANK}
+    assert morning_texts.isdisjoint(night_texts)
+
+
+def test_morning_bank_covers_the_five_core_weekly_categories():
+    required = {"xizmat", "tozalik", "jamoa", "intizom", "rivojlanish"}
+    present = {saturn_content.morning_category_of(key) for key, _text in saturn_content.MORNING_ADVICE_BANK}
+    assert required.issubset(present)
+
+
+def test_night_bank_covers_the_five_core_weekly_categories():
+    required = {"xizmat", "tozalik", "jamoa", "intizom", "rivojlanish"}
+    present = {saturn_content.night_category_of(key) for key, _text in saturn_content.NIGHT_ADVICE_BANK}
+    assert required.issubset(present)
+
+
+async def test_morning_advice_same_category_does_not_repeat_on_consecutive_day():
+    key1, _ = await saturn_content.pick_morning_advice(None)
+    saturn_repo.log_post("morning_advice", "2026-04-01", "matn", tip_key=key1)
+    category1 = saturn_content.morning_category_of(key1)
+
+    key2, _ = await saturn_content.pick_morning_advice(None)
+    category2 = saturn_content.morning_category_of(key2)
+
+    assert category2 != category1
+
+
+async def test_night_advice_same_category_does_not_repeat_on_consecutive_day():
+    key1, _ = await saturn_content.pick_night_advice(None)
+    saturn_repo.log_post("night_advice", "2026-04-01", "matn", tip_key=key1)
+    category1 = saturn_content.night_category_of(key1)
+
+    key2, _ = await saturn_content.pick_night_advice(None)
+    category2 = saturn_content.night_category_of(key2)
+
+    assert category2 != category1
+
+
+async def test_morning_advice_does_not_repeat_within_90_days():
+    seen_keys = []
+    for day in range(1, 91):
+        key, _text = await saturn_content.pick_morning_advice(None)
+        seen_keys.append(key)
+        saturn_repo.log_post("morning_advice", f"2026-{(day // 28) % 12 + 1:02d}-{(day % 28) + 1:02d}", "matn", tip_key=key)
+
+    assert len(set(seen_keys)) == len(seen_keys) == 90
+
+
 async def test_morning_and_night_advice_histories_are_independent():
     """Tonggi va tungi banklar mustaqil — bittasining tarixi
     ikkinchisining tanlovini cheklamasligi kerak."""

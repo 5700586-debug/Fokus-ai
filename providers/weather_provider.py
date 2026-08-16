@@ -60,6 +60,8 @@ _WEATHER_CODE_DESCRIPTIONS: dict[int, str] = {
 class WeatherInfo:
     description: str
     temperature_c: float
+    weather_code: int | None = None
+    wind_speed_kmh: float | None = None
 
 
 class WeatherProvider(Protocol):
@@ -128,7 +130,13 @@ class OpenMeteoWeatherProvider:
             if weather_code is not None
             else "Noma'lum"
         )
-        return WeatherInfo(description=description, temperature_c=float(current["temperature"]))
+        wind_speed = current.get("windspeed")
+        return WeatherInfo(
+            description=description,
+            temperature_c=float(current["temperature"]),
+            weather_code=int(weather_code) if weather_code is not None else None,
+            wind_speed_kmh=float(wind_speed) if wind_speed is not None else None,
+        )
 
 
 def get_weather_provider() -> WeatherProvider:

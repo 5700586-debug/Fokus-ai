@@ -50,6 +50,14 @@ SATURN_WEATHER_CITY = os.getenv("SATURN_WEATHER_CITY", "Qo'qon")
 SATURN_WEATHER_LAT = float(os.getenv("SATURN_WEATHER_LAT") or "40.5286")
 SATURN_WEATHER_LON = float(os.getenv("SATURN_WEATHER_LON") or "70.9425")
 
+# Tonggi rasmdagi ob-havo "sahnasi" (fon) qaysi vizual kategoriyaga
+# tushishini aniqlashda ishlatiladigan chegaralar (qarang
+# services/saturn_weather_scene.py). O'zbekiston sharoiti uchun
+# muvozanatli standart qiymatlar — muhit o'zgaruvchisi orqali
+# sozlanadi, kodga hardcode qilinmaydi.
+SATURN_WIND_THRESHOLD_KMH = float(os.getenv("SATURN_WIND_THRESHOLD_KMH") or "30")
+SATURN_HOT_THRESHOLD_C = float(os.getenv("SATURN_HOT_THRESHOLD_C") or "33")
+
 # Saturn'ning ASL logotip fayli hali repoga qo'shilmagan. Fayl qo'shilsa,
 # shu yo'lga (masalan "assets/logo/saturn_logo.png", shaffof fon bilan)
 # ishora qilinadi. Bo'sh yoki fayl topilmasa, rasmda soxta logotip

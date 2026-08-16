@@ -16,12 +16,13 @@ from aiogram.types import BufferedInputFile
 from openai import AsyncOpenAI
 
 import company_time
-from config import SATURN_WEATHER_CITY
+from config import SATURN_HOT_THRESHOLD_C, SATURN_WEATHER_CITY, SATURN_WIND_THRESHOLD_KMH
 from providers.sales_data_provider import DailySales, get_sales_data_provider
 from providers.weather_provider import get_weather_provider
 from repositories import saturn_group as saturn_repo
 from services import notifications, saturn_content, saturn_image
 from services import rules as rules_service
+from services import saturn_season, saturn_weather_scene
 
 logger = logging.getLogger(__name__)
 
@@ -248,17 +249,31 @@ async def send_tip_message(bot, group_chat_id: int) -> None:
 # guruh chat_id — talabdagi "morning+local_date+chat_id" formatiga mos).
 
 
-async def _fetch_weather_badge() -> str | None:
+async def _fetch_weather():
+    """``WeatherInfo | None`` — API ishlamasa (tarmoq/timeout/xato)
+    ``None`` qaytadi, tonggi xabar HECH QACHON to'xtamaydi va
+    "Ma'lumot topilmadi" kabi matn ko'rsatilmaydi: chaqiruvchi kod
+    ob-havo qismini butunlay tashlab, fasl-standart sahnaga o'tadi
+    (qarang ``services/saturn_weather_scene.py``dagi
+    ``CATEGORY_SEASON_DEFAULT``)."""
     try:
         provider = get_weather_provider()
-        weather = await provider.get_today_weather(SATURN_WEATHER_CITY)
+        return await provider.get_today_weather(SATURN_WEATHER_CITY)
     except Exception as error:  # noqa: BLE001 - ob-havo xatosi tonggi xabarni to'xtatmasin
         logger.warning("Ob-havo olishda xato (Saturn tonggi rasm): %r", error)
         return None
 
+
+def _weather_badge_text(weather) -> str | None:
     if weather is None:
         return None
     return saturn_image.format_weather_badge(SATURN_WEATHER_CITY, weather.temperature_c, weather.description)
+
+
+def _weather_category(weather) -> str:
+    return saturn_weather_scene.category_for_weather_info(
+        weather, wind_threshold_kmh=SATURN_WIND_THRESHOLD_KMH, hot_threshold_c=SATURN_HOT_THRESHOLD_C
+    )
 
 
 async def _build_morning_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
@@ -269,15 +284,33 @@ async def _build_morning_content(client: AsyncOpenAI | None) -> tuple[str, str, 
     foydalanadi — ikkalasida ham AYNAN bir xil rasm ishlab chiqariladi.
     """
     advice_key, advice_text = await saturn_content.pick_morning_advice(client)
-    weather_badge = await _fetch_weather_badge()
-    photo_bytes = saturn_image.render_morning_image(advice_text, weather_badge)
+    weather = await _fetch_weather()
+    local_date = company_time.today()
+    photo_bytes = saturn_image.render_morning_image(
+        advice_text,
+        _weather_badge_text(weather),
+        season=saturn_season.season_for_date(local_date),
+        weather_category=_weather_category(weather),
+        local_date=local_date,
+    )
     return advice_key, advice_text, photo_bytes
 
 
 async def _build_night_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
-    """``_build_morning_content`` bilan bir xil mantiq, tungi rasm uchun."""
+    """``_build_morning_content`` bilan bir xil mantiq, tungi rasm uchun
+    — ob-havo matni HECH QACHON ishlatilmaydi (``render_night_image``
+    bunday argument qabul qilmaydi), lekin fasl+ob-havo KATEGORIYASI
+    fon sahnasini tanlashda ishlatiladi (masalan yomg'irli tunda derazaga
+    urayotgan tomchi tasviri)."""
     advice_key, advice_text = await saturn_content.pick_night_advice(client)
-    photo_bytes = saturn_image.render_night_image(advice_text)
+    weather = await _fetch_weather()
+    local_date = company_time.today()
+    photo_bytes = saturn_image.render_night_image(
+        advice_text,
+        season=saturn_season.season_for_date(local_date),
+        weather_category=_weather_category(weather),
+        local_date=local_date,
+    )
     return advice_key, advice_text, photo_bytes
 
 

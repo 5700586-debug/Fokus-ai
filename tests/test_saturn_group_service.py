@@ -219,6 +219,36 @@ async def test_send_morning_image_message_does_not_fail_when_weather_provider_er
     _last_sent_method(bot)  # baribir yuborildi
 
 
+async def test_weather_provider_failure_falls_back_to_season_default_scene(monkeypatch):
+    """Ob-havo API ishlamay qolganda, sahna fasl-standart kategoriyasiga
+    o'tishi kerak (bo'sh yoki 'Ma'lumot topilmadi' emas)."""
+    async def _boom(self, location):
+        raise ConnectionError("tarmoq xatosi")
+
+    from providers.weather_provider import NullWeatherProvider
+    from services import saturn_weather_scene
+
+    monkeypatch.setattr(NullWeatherProvider, "get_today_weather", _boom)
+    monkeypatch.setattr("services.saturn_group.get_weather_provider", lambda: NullWeatherProvider())
+
+    captured = {}
+    from services import saturn_image
+    original_render = saturn_image.render_morning_image
+
+    def _capture(advice_text, weather_text=None, **kwargs):
+        captured.update(kwargs)
+        captured["weather_text"] = weather_text
+        return original_render(advice_text, weather_text, **kwargs)
+
+    monkeypatch.setattr(saturn_image, "render_morning_image", _capture)
+
+    bot = _bot()
+    await saturn_group.send_morning_image_message(bot, None, group_chat_id=-100111)
+
+    assert captured["weather_text"] is None
+    assert captured["weather_category"] == saturn_weather_scene.CATEGORY_SEASON_DEFAULT
+
+
 async def test_send_morning_image_message_does_not_fail_when_ai_errors():
     class _FailingResponses:
         async def create(self, **kwargs):

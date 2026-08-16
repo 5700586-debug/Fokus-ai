@@ -86,6 +86,14 @@ ACTION_LIST_SUPPLIERS = "list_suppliers"
 ACTION_SUPPLIER_REPORT = "supplier_report"
 ACTION_COMPARE_SUPPLIERS = "compare_suppliers"
 
+# recruiting_bot.py — Fokus HR nomzod kartalarini ko'rish/qaror qilish
+# va vakansiyalarni boshqarish (Founder-only). Nomzodning o'zi bu
+# amallarga umuman kirmaydi — u alohida, RBAC'siz "tashqi" oqimda
+# (qarang ``recruiting_bot.py`` docstringi, ``supplier_chat_bot.py``
+# bilan bir xil naqsh).
+ACTION_RECRUITING_REVIEW = "recruiting_review"
+ACTION_MANAGE_VACANCIES = "manage_vacancies"
+
 # Founder-only amallar (masalan /setrule, /processmonth, /invite) shu
 # ro'yxatga kiritilmaydi — ularga faqat Founder ruxsatli (pastdagi
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol

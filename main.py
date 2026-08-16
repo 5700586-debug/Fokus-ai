@@ -47,6 +47,7 @@ import inventory_bot  # noqa: E402
 import invites  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
+import recruiting_bot  # noqa: E402
 import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
@@ -367,6 +368,7 @@ calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
 supplier_chat_bot.register(dp, openai_client)
 saturn_group_bot.register(dp, openai_client)
+recruiting_bot.register(dp, openai_client)
 
 
 @dp.message(CommandStart())
@@ -378,6 +380,15 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
     parts = (message.text or "").split(maxsplit=1)
     invite_token = parts[1].strip() if len(parts) > 1 else None
+
+    # Fokus HR (rekruting) uchun maxsus, sobit "apply" so'zi — tasodifiy
+    # taklif token bilan hech qachon mos kelmaydi (tokenlar tasodifiy
+    # generatsiya qilinadi), shuning uchun xodim/ta'minotchi taklif
+    # oqimlariga umuman ta'sir qilmaydi. Nomzod ichki menyularga
+    # kirmaydi — bu butunlay alohida, RBAC'siz "tashqi" oqim.
+    if invite_token == "apply":
+        await recruiting_bot.start_application_from_deeplink(message, state)
+        return
 
     # Ta'minotchi (tashqi hamkor) taklifi xodim onboarding'idan butunlay
     # mustaqil oqim — avval shu tekshiriladi, token mos kelmasa (odatiy

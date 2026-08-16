@@ -24,6 +24,17 @@ EVENT_USER_REMOVED = "user_removed"
 EVENT_CROSS_BRANCH_ATTEMPT = "cross_branch_attempt"
 EVENT_UNAUTHORIZED_PRIVILEGED_ACTION = "unauthorized_privileged_action"
 
+# Fokus HR (rekruting) — nomzod arizasi hayot aylanishi va Founder
+# qarorlari. ``target_id`` — ariza ID (nomzod Telegram ID emas, PII
+# kamaytirish uchun); ``reason``/``new_value``ga nomzod javob matni
+# yozilmaydi.
+EVENT_RECRUITING_APPLICATION_STARTED = "recruiting_application_started"
+EVENT_RECRUITING_APPLICATION_CANCELLED = "recruiting_application_cancelled"
+EVENT_RECRUITING_APPLICATION_SUBMITTED = "recruiting_application_submitted"
+EVENT_RECRUITING_ASSESSMENT_COMPLETED = "recruiting_assessment_completed"
+EVENT_RECRUITING_FOUNDER_DECISION = "recruiting_founder_decision"
+EVENT_RECRUITING_DATA_PURGED = "recruiting_data_purged"
+
 
 def _new_request_id() -> str:
     return uuid.uuid4().hex[:16]

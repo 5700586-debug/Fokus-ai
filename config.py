@@ -88,3 +88,16 @@ VISION_EXTRACTION_API_KEY = os.getenv("VISION_EXTRACTION_API_KEY")
 # Scheduler'lar (masalan kunlik kalibratsiya savollari) shu vaqt zonasiga
 # nisbatan ishlaydi — hardcode qilinmaydi, .env orqali o'zgartiriladi.
 COMPANY_TIMEZONE = os.getenv("COMPANY_TIMEZONE", "Asia/Tashkent")
+
+# Fokus HR (rekruting) — nomzod arizasi va javoblari standart bo'yicha
+# shu kunlar o'tgach saqlash muddati tugagan deb belgilanadi (qarang
+# services/recruiting_privacy.py). Hardcode emas — .env orqali sozlanadi.
+RECRUITING_RETENTION_DAYS = int(os.getenv("RECRUITING_RETENTION_DAYS") or "90")
+
+# Nomzod bitta ovozli javob yubora oladi — undan uzunroq ovozli xabar
+# rad etiladi (yozma javob so'raladi), butun ariza to'xtamaydi.
+RECRUITING_MAX_VOICE_SECONDS = int(os.getenv("RECRUITING_MAX_VOICE_SECONDS") or "60")
+
+# Bitta suhbatda AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
+# (adaptive follow-up) savollar soni chegarasi.
+RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "2")

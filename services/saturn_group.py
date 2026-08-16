@@ -21,6 +21,7 @@ from providers.sales_data_provider import DailySales, get_sales_data_provider
 from providers.weather_provider import get_weather_provider
 from repositories import saturn_group as saturn_repo
 from services import notifications, saturn_content, saturn_image
+from services import rules as rules_service
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +204,25 @@ async def send_dashboard_message(bot, client: AsyncOpenAI, group_chat_id: int, s
 
 
 async def send_evening_message(bot, client: AsyncOpenAI, group_chat_id: int) -> None:
+    """Eski matnli, MOLIYAVIY "Kun yakuni" xabari (reja/savdo/o'rtacha
+    chek). Xodimlar guruhiga (``saturn.group_chat_id``) hech qachon
+    yuborilmaydi — ne avtomatik tick, ne ``/saturntest`` bu funksiyani
+    endi chaqirmaydi (ikkalasi ham rasmli, moliyasiz
+    ``send_night_image_message``/``send_night_image_preview``ga
+    o'tkazilgan). Funksiya o'zi o'chirilmadi — kelajakda alohida,
+    aniq nomlangan, admin-only/rahbar-guruh funksiyasi sifatida qayta
+    ishlatilishi mumkin, shuning uchun KOD DARAJASIDA himoya: hatto
+    kimdir shu funksiyani xodimlar guruhi chat_id'si bilan to'g'ridan-
+    to'g'ri chaqirsa ham, pastdagi tekshiruv jim rad etadi.
+    """
+    if group_chat_id == rules_service.get_saturn_group_chat_id():
+        logger.warning(
+            "send_evening_message (eski moliyaviy hisobot) xodimlar guruhiga "
+            "(chat_id=%s) yuborishga urinildi — kod darajasidagi himoya rad etdi.",
+            group_chat_id,
+        )
+        return
+
     today = _today_str()
     provider = get_sales_data_provider()
     sales = await provider.get_daily_sales(today)
@@ -241,6 +261,26 @@ async def _fetch_weather_badge() -> str | None:
     return saturn_image.format_weather_badge(SATURN_WEATHER_CITY, weather.temperature_c, weather.description)
 
 
+async def _build_morning_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
+    """``(advice_key, advice_text, PNG bayt)`` — YON TA'SIRSIZ (DB'ga
+    yozmaydi, hech narsa yubormaydi). Production yuborish
+    (``send_morning_image_message``) va sinov ko'rinishi
+    (``send_morning_image_preview``) ikkalasi ham shu yerdan
+    foydalanadi — ikkalasida ham AYNAN bir xil rasm ishlab chiqariladi.
+    """
+    advice_key, advice_text = await saturn_content.pick_morning_advice(client)
+    weather_badge = await _fetch_weather_badge()
+    photo_bytes = saturn_image.render_morning_image(advice_text, weather_badge)
+    return advice_key, advice_text, photo_bytes
+
+
+async def _build_night_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
+    """``_build_morning_content`` bilan bir xil mantiq, tungi rasm uchun."""
+    advice_key, advice_text = await saturn_content.pick_night_advice(client)
+    photo_bytes = saturn_image.render_night_image(advice_text)
+    return advice_key, advice_text, photo_bytes
+
+
 async def send_morning_image_message(bot, client: AsyncOpenAI | None, group_chat_id: int) -> None:
     """Kunlik tonggi rasmli xabar — savdo/moliya ma'lumoti YO'Q, faqat
     salom va bitta qisqa foydali maslahat (+ ixtiyoriy ob-havo belgisi).
@@ -258,9 +298,7 @@ async def send_morning_image_message(bot, client: AsyncOpenAI | None, group_chat
         return
 
     try:
-        advice_key, advice_text = await saturn_content.pick_morning_advice(client)
-        weather_badge = await _fetch_weather_badge()
-        photo_bytes = saturn_image.render_morning_image(advice_text, weather_badge)
+        advice_key, advice_text, photo_bytes = await _build_morning_content(client)
         photo = BufferedInputFile(photo_bytes, filename=f"saturn_morning_{today}.png")
         await bot.send_photo(group_chat_id, photo)
     except Exception:
@@ -284,8 +322,7 @@ async def send_night_image_message(bot, client: AsyncOpenAI | None, group_chat_i
         return
 
     try:
-        advice_key, advice_text = await saturn_content.pick_night_advice(client)
-        photo_bytes = saturn_image.render_night_image(advice_text)
+        advice_key, advice_text, photo_bytes = await _build_night_content(client)
         photo = BufferedInputFile(photo_bytes, filename=f"saturn_night_{today}.png")
         await bot.send_photo(group_chat_id, photo)
     except Exception:
@@ -294,3 +331,29 @@ async def send_night_image_message(bot, client: AsyncOpenAI | None, group_chat_i
 
     notifications.mark_sent(job_key, group_chat_id)
     saturn_repo.log_post("night_advice", today, advice_text, tip_key=advice_key)
+
+
+# --------------------------------------------------------- /saturntest sinovi --
+# Sinov ko'rinishlari PRODUCTION reservation/rotation/tarixga HECH
+# QANDAY ta'sir qilmaydi (``try_reserve``/``mark_sent``/``log_post``
+# chaqirilmaydi) — shuning uchun admin istagancha marta qayta sinashi
+# mumkin va bu haqiqiy 08:00/21:00 xabarini to'xtatib yoki
+# "band qilib" qo'ymaydi. Har doim CHAQIRUVCHI ADMINISTRATORNING shaxsiy
+# chatiga yuboriladi ("chat_id" — xodimlar guruhi EMAS, buni belgilash
+# chaqiruvchi ``saturn_group_bot.py``ning mas'uliyati).
+
+
+async def send_morning_image_preview(bot, client: AsyncOpenAI | None, chat_id: int) -> None:
+    photo_bytes = (await _build_morning_content(client))[2]
+    photo = BufferedInputFile(photo_bytes, filename="saturn_morning_preview.png")
+    await bot.send_photo(
+        chat_id, photo, caption="🔍 Sinov: tonggi rasm (hech qanday yozuv band qilinmadi)"
+    )
+
+
+async def send_night_image_preview(bot, client: AsyncOpenAI | None, chat_id: int) -> None:
+    photo_bytes = (await _build_night_content(client))[2]
+    photo = BufferedInputFile(photo_bytes, filename="saturn_night_preview.png")
+    await bot.send_photo(
+        chat_id, photo, caption="🔍 Sinov: tungi rasm (hech qanday yozuv band qilinmadi)"
+    )

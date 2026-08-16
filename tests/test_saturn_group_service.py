@@ -111,6 +111,36 @@ async def test_send_evening_message_uses_non_blaming_fallback_when_ai_fails():
     assert "rahmat" in sent_text.lower() or "kun yakuni" in sent_text.lower()
 
 
+async def test_send_evening_message_refuses_to_send_to_configured_employee_group():
+    """Kod darajasidagi himoya: eski moliyaviy hisobot xodimlar guruhi
+    sifatida sozlangan (``saturn.group_chat_id``) chatga hech qachon
+    yuborilmasligi kerak — hatto to'g'ridan-to'g'ri shu funksiya
+    chaqirilsa ham."""
+    from config import FOUNDER_ID
+    from services import rules as rules_service
+
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+
+    bot = _bot()
+    await saturn_group.send_evening_message(bot, _FakeClient(), group_chat_id=-100999)
+
+    assert bot.sent == []
+
+
+async def test_send_evening_message_still_works_for_a_different_chat():
+    """Guard FAQAT sozlangan xodimlar guruhini bloklaydi — boshqa
+    (masalan rahbarning shaxsiy) chatga yuborish ishlab turishi kerak."""
+    from config import FOUNDER_ID
+    from services import rules as rules_service
+
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+
+    bot = _bot()
+    await saturn_group.send_evening_message(bot, _FakeClient(), group_chat_id=FOUNDER_ID)
+
+    assert len(bot.sent) == 1
+
+
 # ---------------------------------------------- tonggi/tungi rasmli xabar --
 
 
@@ -237,3 +267,86 @@ async def test_send_morning_image_message_second_parallel_call_is_a_no_op(monkey
     await saturn_group.send_morning_image_message(bot, None, group_chat_id=-100111)
 
     assert bot.sent == []  # ikkinchi chaqiruv hech narsa yubormadi
+
+
+# ------------------------------------------------------ /saturntest sinovi --
+
+
+async def test_send_morning_image_preview_sends_photo_to_given_chat():
+    from aiogram.methods import SendPhoto
+
+    bot = _bot()
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+
+    assert len(bot.sent) == 1
+    assert isinstance(bot.sent[0], SendPhoto)
+    assert bot.sent[0].chat_id == 555
+
+
+async def test_send_night_image_preview_sends_photo_to_given_chat():
+    from aiogram.methods import SendPhoto
+
+    bot = _bot()
+    await saturn_group.send_night_image_preview(bot, None, chat_id=555)
+
+    assert len(bot.sent) == 1
+    assert isinstance(bot.sent[0], SendPhoto)
+    assert bot.sent[0].chat_id == 555
+
+
+async def test_send_morning_image_preview_does_not_create_idempotency_record():
+    from services import notifications
+
+    bot = _bot()
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+
+    today = saturn_group._today_str()
+    # Production reservatsiya hali ham bo'sh (preview band qilmagan).
+    assert await notifications.try_reserve(f"saturn_morning_image_{today}", -100999) is True
+
+
+async def test_send_night_image_preview_does_not_create_idempotency_record():
+    from services import notifications
+
+    bot = _bot()
+    await saturn_group.send_night_image_preview(bot, None, chat_id=555)
+
+    today = saturn_group._today_str()
+    assert await notifications.try_reserve(f"saturn_night_image_{today}", -100999) is True
+
+
+async def test_send_morning_image_preview_does_not_consume_advice_rotation():
+    """Preview ``saturn_posts_log``ga yozmasligi kerak — aks holda
+    admin qayta-qayta sinasa, haqiqiy production xabarining maslahat
+    aylanishi (30 kunlik takrorlanmaslik) buzilib qolardi."""
+    from repositories import saturn_group as saturn_repo
+
+    bot = _bot()
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+
+    assert saturn_repo.get_recent_posts("morning_advice", limit=10) == []
+
+
+async def test_send_morning_image_preview_can_be_called_repeatedly():
+    from aiogram.methods import SendPhoto
+
+    bot = _bot()
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+    await saturn_group.send_morning_image_preview(bot, None, chat_id=555)
+
+    photos = [m for m in bot.sent if isinstance(m, SendPhoto)]
+    assert len(photos) == 3
+
+
+async def test_send_night_image_preview_has_no_weather_or_financial_caption():
+    bot = _bot()
+    await saturn_group.send_night_image_preview(bot, None, chat_id=555)
+
+    from aiogram.methods import SendPhoto
+
+    caption = next(m for m in bot.sent if isinstance(m, SendPhoto)).caption or ""
+    lowered = caption.lower()
+    for forbidden in ("°c", "reja", "savdo", "o'rtacha chek", "kun yakuni"):
+        assert forbidden not in lowered

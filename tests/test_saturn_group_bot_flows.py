@@ -235,36 +235,125 @@ async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached():
     assert all(isinstance(m, SendPhoto) for m in bot.sent)
 
 
-async def test_saturntest_morning_sends_new_image(bot_dp):
+async def test_saturntest_morning_sends_preview_to_admin_own_chat_not_group(bot_dp):
+    """Talab: sinov natijasi guruhga emas, administratorning shaxsiy
+    chatiga yuboriladi."""
     main, bot = bot_dp
     from aiogram.methods import SendPhoto
 
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
 
-    await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
 
-    assert any(isinstance(m, SendPhoto) for m in bot.sent)
+    photos = [m for m in sent if isinstance(m, SendPhoto)]
+    assert len(photos) == 1
+    assert photos[0].chat_id == FOUNDER_ID
+    assert photos[0].chat_id != -100999
 
 
-async def test_saturntest_night_sends_new_image(bot_dp):
+async def test_saturntest_night_sends_preview_to_admin_own_chat_not_group(bot_dp):
     main, bot = bot_dp
     from aiogram.methods import SendPhoto
 
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
 
-    await send(main.dp, bot, FOUNDER_ID, text="/saturntest night")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest night")
 
-    assert any(isinstance(m, SendPhoto) for m in bot.sent)
+    photos = [m for m in sent if isinstance(m, SendPhoto)]
+    assert len(photos) == 1
+    assert photos[0].chat_id == FOUNDER_ID
+    assert photos[0].chat_id != -100999
 
 
-async def test_saturntest_evening_still_available_for_manual_testing(bot_dp, monkeypatch):
-    """Eski moliyaviy "Kun yakuni" funksiyasi o'chirilmagan — endi avtomatik
-    yuborilmaydi, lekin qo'lda sinov/rahbarlik ehtiyoji uchun ishlab turadi."""
+async def test_saturntest_evening_is_now_an_alias_for_the_new_night_preview(bot_dp):
+    """Talab: ``/saturntest evening`` ENDI faqat yangi rasmli, moliyasiz
+    tungi xabarni sinaydi — eski moliyaviy "Kun yakuni" hisobotini EMAS."""
     main, bot = bot_dp
-    monkeypatch.setattr(main.openai_client.responses, "create", _FakeResponses().create)
+    from aiogram.methods import SendMessage, SendPhoto
+
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest evening")
 
-    texts_out = [m.text for m in sent]
-    assert any("yuborildi" in (t or "") for t in texts_out)
+    photos = [m for m in sent if isinstance(m, SendPhoto)]
+    assert len(photos) == 1
+    assert photos[0].chat_id == FOUNDER_ID
+    assert photos[0].chat_id != -100999
+    # Eski moliyaviy matnli hisobot (SendMessage guruhga) umuman yuborilmagan.
+    assert not any(
+        isinstance(m, SendMessage) and getattr(m, "chat_id", None) == -100999 for m in sent
+    )
+
+
+async def test_saturntest_evening_preview_has_no_financial_words():
+    """``send_night_image_preview`` (``/saturntest evening``ning
+    ishlatadigan funksiyasi) qaytaradigan caption/rasmda moliyaviy
+    so'z/ko'rsatkich umuman yo'qligini tekshiradi."""
+    bot = RecordingBot(token="123456:TEST-TOKEN")
+
+    await saturn_group_bot.saturn_group.send_night_image_preview(bot, None, chat_id=111)
+
+    from aiogram.methods import SendPhoto
+
+    photo_method = next(m for m in bot.sent if isinstance(m, SendPhoto))
+    caption = (photo_method.caption or "").lower()
+    forbidden = ("reja", "savdo", "o'rtacha chek", "foyda", "xarajat", "bajarilish foizi", "kun yakuni")
+    assert not any(word in caption for word in forbidden)
+
+
+async def test_saturntest_morning_and_evening_denied_for_non_founder(bot_dp):
+    main, bot = bot_dp
+
+    sent_morning = await send(main.dp, bot, 999999, text="/saturntest morning")
+    _assert_denied(sent_morning)
+
+    sent_evening = await send(main.dp, bot, 999999, text="/saturntest evening")
+    _assert_denied(sent_evening)
+
+
+async def test_saturntest_preview_never_reaches_the_employee_group(bot_dp):
+    """Talab: sinov xabari xodimlar guruhiga (guruh chat_id'siga)
+    umuman yuborilmasligi kerak — faqat administratorning shaxsiy
+    chatiga."""
+    main, bot = bot_dp
+
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
+    sent += await send(main.dp, bot, FOUNDER_ID, text="/saturntest night")
+    sent += await send(main.dp, bot, FOUNDER_ID, text="/saturntest evening")
+
+    assert not any(getattr(m, "chat_id", None) == -100999 for m in sent)
+
+
+async def test_saturntest_preview_does_not_touch_production_reservation(bot_dp):
+    """Talab: sinov buyrug'i kunlik production "yuborildi" yozuvini
+    band qilmasin — haqiqiy 08:00/21:00 xabari uchun reservatsiya
+    hali ham bo'sh (band qilinmagan) bo'lishi kerak."""
+    main, bot = bot_dp
+    from services import notifications
+
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+
+    await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
+    await send(main.dp, bot, FOUNDER_ID, text="/saturntest night")
+
+    today = saturn_group_bot.saturn_group._today_str()
+    assert await notifications.try_reserve(f"saturn_morning_image_{today}", -100999) is True
+    assert await notifications.try_reserve(f"saturn_night_image_{today}", -100999) is True
+
+
+async def test_saturntest_preview_can_be_repeated_freely(bot_dp):
+    """Sinov cheksiz qayta ishlatilishi mumkin — birinchi chaqiruv
+    ikkinchisini bloklamaydi (hech qanday idempotency yozuvi
+    yaratilmagani sababli)."""
+    main, bot = bot_dp
+    from aiogram.methods import SendPhoto
+
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+
+    sent1 = await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
+    sent2 = await send(main.dp, bot, FOUNDER_ID, text="/saturntest morning")
+
+    assert any(isinstance(m, SendPhoto) for m in sent1)
+    assert any(isinstance(m, SendPhoto) for m in sent2)

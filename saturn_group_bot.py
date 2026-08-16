@@ -44,13 +44,15 @@ async def _tick(bot, openai_client: AsyncOpenAI) -> None:
 
     try:
         # "Friendly phase": xodimlar guruhiga avtomatik boradigan tonggi/
-        # tungi xabar endi rasmli, moliyasiz salom (qarang
+        # tungi xabar rasmli, moliyasiz salom (qarang
         # ``services/saturn_group.send_morning_image_message``/
-        # ``send_night_image_message``) — eski matnli
+        # ``send_night_image_message``). Eski matnli
         # ``send_morning_message``/moliyaviy ``send_evening_message``
-        # ENDI shu yerdan avtomatik chaqirilmaydi (funksiyalarning o'zi
-        # olib tashlanmadi, faqat qo'lda `/saturntest evening` orqali
-        # sinov/rahbarlik ehtiyoji uchun qoldirildi).
+        # BU YERDAN HECH QACHON chaqirilmaydi va endi ``/saturntest``
+        # orqali ham xodimlar guruhiga chiqmaydi (funksiyalarning o'zi
+        # olib tashlanmadi — ichki, admin-only qayta ishlatish uchun
+        # qoldirildi, qarang ``send_evening_message``dagi guruh-chat_id
+        # himoyasi).
         if current_hm >= rules_service.get_saturn_morning_time() and rules_service.get_saturn_morning_image_enabled():
             await saturn_group.send_morning_image_message(bot, openai_client, group_chat_id)
 
@@ -105,21 +107,28 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             )
             await message.answer(
                 f"{captured_line}"
-                "Foydalanish: /saturntest <morning|night|dashboard|evening|tip>\n"
-                "morning/night — yangi rasmli (moliyasiz) xabar, hozir avtomatik "
-                "yuboriladigan aynan shu turi.\n"
-                "evening — eski matnli moliyaviy kun yakuni (endi avtomatik "
-                "yuborilmaydi, faqat qo'lda sinov/rahbarlik ehtiyoji uchun).\n"
+                "Foydalanish: /saturntest <morning|night|dashboard|tip>\n"
+                "morning/night (evening — night bilan bir xil) — yangi rasmli, "
+                "moliyasiz xabarning ONAYZI — SIZNING shaxsiy chatingizga "
+                "yuboriladi, xodimlar guruhiga EMAS va kunlik production "
+                "yozuvini band qilmaydi (istagancha qayta sinash mumkin).\n"
                 f"Joriy guruh ID: {group_chat_id}"
             )
             return
 
+        # morning/night(evening) — SINOV: natija xodimlar guruhiga emas,
+        # buyruq bergan administratorning shaxsiy chatiga yuboriladi va
+        # kunlik "yuborildi" yozuvini (idempotency/rotation) band
+        # qilmaydi — shuning uchun haqiqiy 08:00/21:00 xabari to'xtab
+        # qolmaydi va admin istagancha qayta sinashi mumkin (qarang
+        # ``services/saturn_group.send_morning_image_preview``/
+        # ``send_night_image_preview``).
+        admin_chat_id = message.from_user.id
+
         if post_type == "morning":
-            await saturn_group.send_morning_image_message(message.bot, openai_client, group_chat_id)
-        elif post_type == "night":
-            await saturn_group.send_night_image_message(message.bot, openai_client, group_chat_id)
-        elif post_type == "evening":
-            await saturn_group.send_evening_message(message.bot, openai_client, group_chat_id)
+            await saturn_group.send_morning_image_preview(message.bot, openai_client, admin_chat_id)
+        elif post_type in ("night", "evening"):
+            await saturn_group.send_night_image_preview(message.bot, openai_client, admin_chat_id)
         elif post_type == "tip":
             await saturn_group.send_tip_message(message.bot, group_chat_id)
         else:
@@ -128,9 +137,12 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             )
 
         captured_line = f"✅ Guruh ID saqlandi: {group_chat_id}\n" if captured_now else ""
-        await message.answer(
-            f"{captured_line}✅ '{post_type}' posti guruhga (ID: {group_chat_id}) yuborildi."
-        )
+        if post_type in ("morning", "night", "evening"):
+            await message.answer(f"{captured_line}✅ Sinov posti sizning shaxsiy chatingizga yuborildi.")
+        else:
+            await message.answer(
+                f"{captured_line}✅ '{post_type}' posti guruhga (ID: {group_chat_id}) yuborildi."
+            )
 
 
 def start_scheduler(bot, openai_client: AsyncOpenAI):

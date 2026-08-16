@@ -118,7 +118,22 @@ def get_saturn_group_chat_id() -> int | None:
 
 def get_saturn_morning_time() -> str:
     value = performance_repo.get_rule("saturn.morning_time")
-    return value if value else "07:00"
+    return value if value else "08:00"
+
+
+def get_saturn_morning_image_enabled() -> bool:
+    """Standart: yoqilgan. Founder ``/setrule saturn.morning_image_enabled 0``
+    bilan tonggi rasmli xabarni o'chirishi mumkin (qayta deploy shart
+    emas)."""
+    value = performance_repo.get_rule("saturn.morning_image_enabled")
+    return value != "0"
+
+
+def get_saturn_night_image_enabled() -> bool:
+    """Standart: yoqilgan. Founder ``/setrule saturn.night_image_enabled 0``
+    bilan tungi rasmli xabarni o'chirishi mumkin."""
+    value = performance_repo.get_rule("saturn.night_image_enabled")
+    return value != "0"
 
 
 def get_saturn_dashboard_times() -> list[str]:

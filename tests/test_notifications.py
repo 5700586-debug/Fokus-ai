@@ -45,3 +45,49 @@ async def test_send_once_allows_different_targets_for_same_job():
 
     assert sent_to_other is True
     assert (456, "Salom") in bot.sent
+
+
+# --------------------------------------------- RESERVE-FIRST idempotency --
+
+
+async def test_try_reserve_succeeds_once():
+    reserved = await notifications.try_reserve("job-2", 111)
+    assert reserved is True
+
+
+async def test_try_reserve_blocks_second_parallel_call():
+    """Ikkinchi (parallel) chaqiruv reservatsiyani yuta olmasligi kerak —
+    hatto birinchisi hali ``mark_sent()`` chaqirmagan bo'lsa ham (qimmat
+    ish davom etayotgan holatni simulyatsiya qiladi)."""
+    first = await notifications.try_reserve("job-3", 111)
+    second = await notifications.try_reserve("job-3", 111)
+
+    assert first is True
+    assert second is False
+
+
+async def test_try_reserve_allows_different_targets():
+    first = await notifications.try_reserve("job-4", 111)
+    other_target = await notifications.try_reserve("job-4", 222)
+
+    assert first is True
+    assert other_target is True
+
+
+async def test_release_reservation_allows_retry_after_failure():
+    """Yuborish xato bilan tugasa (``release_reservation``), keyingi
+    urinish qayta reservatsiya qila olishi kerak — imkoniyat butunlay
+    yopilib qolmaydi."""
+    await notifications.try_reserve("job-5", 111)
+    notifications.release_reservation("job-5", 111)
+
+    retried = await notifications.try_reserve("job-5", 111)
+    assert retried is True
+
+
+async def test_mark_sent_does_not_allow_further_reservation():
+    await notifications.try_reserve("job-6", 111)
+    notifications.mark_sent("job-6", 111)
+
+    again = await notifications.try_reserve("job-6", 111)
+    assert again is False

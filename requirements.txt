@@ -4,3 +4,4 @@ openai
 APScheduler==3.11.3
 tzdata
 psycopg2-binary
+Pillow==12.3.0

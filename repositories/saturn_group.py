@@ -37,12 +37,23 @@ def get_recent_posts(post_type: str, limit: int = 7) -> list[dict]:
 
 
 def get_recent_tip_keys(limit: int = 7) -> list[str]:
+    return get_recent_content_keys("tip", limit=limit)
+
+
+def get_recent_content_keys(post_type: str, limit: int = 30) -> list[str]:
+    """``get_recent_tip_keys``ning umumlashtirilgan varianti — istalgan
+    ``post_type`` uchun (masalan tonggi/tungi rasmli xabar maslahati)
+    oxirgi ``limit`` ta postning ``tip_key`` ustunidagi qiymatini
+    qaytaradi. ``tip_key`` ustuni nomi tarixiy sababli ("tip"dan qolgan),
+    lekin har qanday post turi uchun umumiy "kontent kaliti" sifatida
+    ishlatiladi — yangi ustun/jadval shart emas.
+    """
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT tip_key FROM saturn_posts_log WHERE post_type = 'tip' "
+            "SELECT tip_key FROM saturn_posts_log WHERE post_type = ? "
             "AND tip_key IS NOT NULL ORDER BY id DESC LIMIT ?",
-            (limit,),
+            (post_type, limit),
         ).fetchall()
         return [row["tip_key"] for row in rows]
     finally:

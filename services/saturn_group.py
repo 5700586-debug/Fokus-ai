@@ -12,12 +12,15 @@ deb aniq ko'rsatiladi.
 
 import logging
 
+from aiogram.types import BufferedInputFile
 from openai import AsyncOpenAI
 
 import company_time
+from config import SATURN_WEATHER_CITY
 from providers.sales_data_provider import DailySales, get_sales_data_provider
+from providers.weather_provider import get_weather_provider
 from repositories import saturn_group as saturn_repo
-from services import notifications
+from services import notifications, saturn_content, saturn_image
 
 logger = logging.getLogger(__name__)
 
@@ -216,3 +219,78 @@ async def send_tip_message(bot, group_chat_id: int) -> None:
     sent = await notifications.send_once(bot, f"saturn_tip_{today}", group_chat_id, text)
     if sent:
         saturn_repo.log_post("tip", today, text, tip_key=tip_key)
+
+
+# --------------------------------------------------- tonggi/tungi rasmli xabar --
+# "Friendly phase": faqat mehribon, foydali, moliyasiz mazmun. Bitta
+# kunga bitta rasm — idempotentlik ``notifications.send_photo_once``
+# orqali (job_key = ``saturn_{morning|night}_image_<sana>``, target =
+# guruh chat_id — talabdagi "morning+local_date+chat_id" formatiga mos).
+
+
+async def _fetch_weather_badge() -> str | None:
+    try:
+        provider = get_weather_provider()
+        weather = await provider.get_today_weather(SATURN_WEATHER_CITY)
+    except Exception as error:  # noqa: BLE001 - ob-havo xatosi tonggi xabarni to'xtatmasin
+        logger.warning("Ob-havo olishda xato (Saturn tonggi rasm): %r", error)
+        return None
+
+    if weather is None:
+        return None
+    return saturn_image.format_weather_badge(SATURN_WEATHER_CITY, weather.temperature_c, weather.description)
+
+
+async def send_morning_image_message(bot, client: AsyncOpenAI | None, group_chat_id: int) -> None:
+    """Kunlik tonggi rasmli xabar — savdo/moliya ma'lumoti YO'Q, faqat
+    salom va bitta qisqa foydali maslahat (+ ixtiyoriy ob-havo belgisi).
+
+    Idempotency RESERVE-FIRST: ``job_key``+``target`` AI/ob-havo/rasm
+    tayyorlashdan OLDIN atomik band qilinadi — shu orqali ikkita
+    parallel chaqiruv (masalan ikkita worker yoki qayta-tushgan tick)
+    ikkalasi ham qimmat ishni bajarib, ikkalasi ham yuborib
+    yubormasligi kafolatlanadi (qarang ``services/notifications.try_reserve``).
+    """
+    today = _today_str()
+    job_key = f"saturn_morning_image_{today}"
+
+    if not await notifications.try_reserve(job_key, group_chat_id):
+        return
+
+    try:
+        advice_key, advice_text = await saturn_content.pick_morning_advice(client)
+        weather_badge = await _fetch_weather_badge()
+        photo_bytes = saturn_image.render_morning_image(advice_text, weather_badge)
+        photo = BufferedInputFile(photo_bytes, filename=f"saturn_morning_{today}.png")
+        await bot.send_photo(group_chat_id, photo)
+    except Exception:
+        notifications.release_reservation(job_key, group_chat_id)
+        raise
+
+    notifications.mark_sent(job_key, group_chat_id)
+    saturn_repo.log_post("morning_advice", today, advice_text, tip_key=advice_key)
+
+
+async def send_night_image_message(bot, client: AsyncOpenAI | None, group_chat_id: int) -> None:
+    """Kunlik tungi rasmli xabar — moliyaviy hisobot YO'Q (eski
+    ``send_evening_message``dan farqli), faqat tinch salom va bitta
+    qisqa foydali fikr/ertangi kunga tayyorgarlik maslahati. Idempotency
+    — qarang ``send_morning_image_message`` docstringi.
+    """
+    today = _today_str()
+    job_key = f"saturn_night_image_{today}"
+
+    if not await notifications.try_reserve(job_key, group_chat_id):
+        return
+
+    try:
+        advice_key, advice_text = await saturn_content.pick_night_advice(client)
+        photo_bytes = saturn_image.render_night_image(advice_text)
+        photo = BufferedInputFile(photo_bytes, filename=f"saturn_night_{today}.png")
+        await bot.send_photo(group_chat_id, photo)
+    except Exception:
+        notifications.release_reservation(job_key, group_chat_id)
+        raise
+
+    notifications.mark_sent(job_key, group_chat_id)
+    saturn_repo.log_post("night_advice", today, advice_text, tip_key=advice_key)

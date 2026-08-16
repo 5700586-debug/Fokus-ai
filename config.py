@@ -39,6 +39,33 @@ SMS_API_KEY = os.getenv("SMS_API_KEY")
 WEATHER_PROVIDER_ENABLED = os.getenv("WEATHER_PROVIDER_ENABLED", "false").lower() == "true"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
+# Saturn tonggi rasmli xabaridagi kichik ob-havo belgisi uchun — Open-Meteo
+# (keyingi WEATHER_PROVIDER_ENABLED=true bo'lganda ishlatiladi) shahar
+# nomini emas, lat/lon so'raydi, shuning uchun koordinata ham kerak.
+# Standart qiymat — Qo'qon. Hech qanday maxfiy API kalit talab qilinmaydi
+# (Open-Meteo ochiq/bepul), shuning uchun WEATHER_API_KEY bu yerga
+# aloqador emas — kelajakda kalit talab qiladigan provayderga
+# almashtirilsa, o'sha payt ishlatiladi.
+SATURN_WEATHER_CITY = os.getenv("SATURN_WEATHER_CITY", "Qo'qon")
+SATURN_WEATHER_LAT = float(os.getenv("SATURN_WEATHER_LAT") or "40.5286")
+SATURN_WEATHER_LON = float(os.getenv("SATURN_WEATHER_LON") or "70.9425")
+
+# Saturn'ning ASL logotip fayli hali repoga qo'shilmagan. Fayl qo'shilsa,
+# shu yo'lga (masalan "assets/logo/saturn_logo.png", shaffof fon bilan)
+# ishora qilinadi. Bo'sh yoki fayl topilmasa, rasmda soxta logotip
+# o'ylab topilmaydi — oddiy "SATURN" yozuvi ishlatiladi (qarang
+# services/saturn_image.py).
+SATURN_LOGO_PATH = os.getenv("SATURN_LOGO_PATH")
+
+# "Friendly phase" — Saturn guruhiga hozircha faqat mehribon/foydali
+# mazmun yuboriladi (moliyaviy ko'rsatkich, KPI tanqidi, jarima YO'Q).
+# Keyingi, qattiqroq nazorat bosqichi HALI QURILMAGAN — bu flag shu
+# bosqichga o'tish qaroriga tayyor joy sifatida saqlanadi (hozircha
+# faqat hujjatlashtirish/kelajak uchun o'qiladi, chunki "qattiqroq"
+# muqobil kontent hali mavjud emas — uni o'zboshimchalik bilan yaratish
+# so'ralmagan).
+SATURN_FRIENDLY_PHASE = os.getenv("SATURN_FRIENDLY_PHASE", "true").lower() == "true"
+
 # Kassa/ombor rasmlaridan raqam o'qish (OCR/vision) hali ulanmagan —
 # NullVisionExtractionProvider ishlatiladi, bot doim qo'lda kiritishni
 # so'raydi (providers/vision_extraction_provider.py).

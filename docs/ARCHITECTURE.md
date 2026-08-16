@@ -266,6 +266,39 @@ SQLite-fayl rejimida (odatiy dev, `DATABASE_URL` yo'q) rollar
 production yagona haqiqiy ko'p-jarayonli muhit bo'lgani uchun bu
 qabul qilingan cheklov.
 
+## 6.5. Saturn kunlik rasmli salom — RESERVE-FIRST idempotency (2026-08)
+
+`services/saturn_group.py`dagi `send_morning_image_message`/
+`send_night_image_message` (2026-08, `feature/saturn-daily-greetings`)
+`services/notifications.send_once()`dan farqli, KUCHLIROQ idempotency
+naqshidan foydalanadi: `try_reserve(job_key, target)` — atomik
+`INSERT OR IGNORE ... status='pending'` — AI/ob-havo/rasm generatsiyasi
+kabi QIMMAT (`await`li) ishlardan OLDIN chaqiriladi, keyin `mark_sent()`
+(muvaffaqiyatli) yoki `release_reservation()` (xato — keyingi urinishga
+ochiq qoldiradi).
+
+Bu farq muhim: `send_once()`da tekshiruv ("yuborilganmi?") va yuborish
+orasida `await` yo'q edi (matn tayyor holda keladi), shuning uchun
+race deyarli imkonsiz edi. Rasmli xabarda esa tekshiruv bilan haqiqiy
+yuborish orasida bir nechta `await` nuqtasi bor (AI chaqiruvi, ob-havo
+so'rovi, rasm chizish) — shu oraliqda ikkinchi parallel chaqiruv
+(masalan qayta-tushgan scheduler tick'i) ham "hali yuborilmagan" deb
+ko'rishi va ikkalasi ham yuborib yuborishi mumkin edi. RESERVE-FIRST
+buni yopadi: ikkinchi chaqiruv `try_reserve()`dan `False` oladi va
+darhol to'xtaydi, qimmat ishni umuman boshlamaydi.
+
+Rasm generatsiyasi (`services/saturn_image.py`, Pillow) butunlay
+xotirada (`io.BytesIO`) — vaqtinchalik faylga yozish/tozalash shart
+emas, aiogram `BufferedInputFile` orqali to'g'ridan-to'g'ri baytlardan
+yuboradi. Matn AI-generatsiya qilingan rasmning ichiga yozdirilmaydi —
+sarlavha/maslahat/ob-havo/logotip hammasi dastur orqali (`ImageDraw`)
+aniq koordinatada chiziladi, shuning uchun imlo/logotip buzilish xavfi
+yo'q. Maslahat matni (`services/saturn_content.py`) qo'lda yozilgan,
+tekshirilgan banklardan (35 tonggi + 31 tungi) keladi — AI faqat
+TANLANGAN matnni ixtiyoriy ravishda qayta ifodalaydi (yangi mavzu
+o'ylab topmaydi), natija uzunlik bo'yicha tekshiriladi, mos kelmasa
+original bank matni ishlatiladi.
+
 ## 7. Bilingan cheklovlar (qasddan tuzatilmagan)
 
 Bular audit paytida topildi, lekin hozircha **ataylab** tegilmagan —

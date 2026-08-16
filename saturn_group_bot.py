@@ -43,11 +43,19 @@ async def _tick(bot, openai_client: AsyncOpenAI) -> None:
     current_hm = company_time.now().strftime("%H:%M")
 
     try:
-        if current_hm >= rules_service.get_saturn_morning_time():
-            await saturn_group.send_morning_message(bot, openai_client, group_chat_id)
+        # "Friendly phase": xodimlar guruhiga avtomatik boradigan tonggi/
+        # tungi xabar endi rasmli, moliyasiz salom (qarang
+        # ``services/saturn_group.send_morning_image_message``/
+        # ``send_night_image_message``) — eski matnli
+        # ``send_morning_message``/moliyaviy ``send_evening_message``
+        # ENDI shu yerdan avtomatik chaqirilmaydi (funksiyalarning o'zi
+        # olib tashlanmadi, faqat qo'lda `/saturntest evening` orqali
+        # sinov/rahbarlik ehtiyoji uchun qoldirildi).
+        if current_hm >= rules_service.get_saturn_morning_time() and rules_service.get_saturn_morning_image_enabled():
+            await saturn_group.send_morning_image_message(bot, openai_client, group_chat_id)
 
-        if current_hm >= rules_service.get_saturn_evening_time():
-            await saturn_group.send_evening_message(bot, openai_client, group_chat_id)
+        if current_hm >= rules_service.get_saturn_evening_time() and rules_service.get_saturn_night_image_enabled():
+            await saturn_group.send_night_image_message(bot, openai_client, group_chat_id)
 
         if current_hm >= rules_service.get_saturn_tip_time():
             await saturn_group.send_tip_message(bot, group_chat_id)
@@ -91,19 +99,25 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 return
 
         post_type = parts[1].strip() if len(parts) > 1 else ""
-        if post_type not in ("morning", "dashboard", "evening", "tip"):
+        if post_type not in ("morning", "night", "dashboard", "evening", "tip"):
             captured_line = (
                 f"✅ Guruh ID saqlandi: {group_chat_id}\n" if captured_now else ""
             )
             await message.answer(
                 f"{captured_line}"
-                "Foydalanish: /saturntest <morning|dashboard|evening|tip>\n"
+                "Foydalanish: /saturntest <morning|night|dashboard|evening|tip>\n"
+                "morning/night — yangi rasmli (moliyasiz) xabar, hozir avtomatik "
+                "yuboriladigan aynan shu turi.\n"
+                "evening — eski matnli moliyaviy kun yakuni (endi avtomatik "
+                "yuborilmaydi, faqat qo'lda sinov/rahbarlik ehtiyoji uchun).\n"
                 f"Joriy guruh ID: {group_chat_id}"
             )
             return
 
         if post_type == "morning":
-            await saturn_group.send_morning_message(message.bot, openai_client, group_chat_id)
+            await saturn_group.send_morning_image_message(message.bot, openai_client, group_chat_id)
+        elif post_type == "night":
+            await saturn_group.send_night_image_message(message.bot, openai_client, group_chat_id)
         elif post_type == "evening":
             await saturn_group.send_evening_message(message.bot, openai_client, group_chat_id)
         elif post_type == "tip":

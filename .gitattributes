@@ -1,0 +1,9 @@
+# Shrift va rasm fayllari BINARY — git'ning avtomatik LF/CRLF
+# o'zgartirishi (core.autocrlf) ularni buzib qo'ymasligi uchun aniq
+# belgilangan (heuristik aniqlashga tayanilmaydi).
+*.ttf binary
+*.otf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary

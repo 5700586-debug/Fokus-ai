@@ -36,12 +36,19 @@ _CARD_TOP = 370
 _CARD_BOTTOM = 730
 
 _TITLE_SIZE = 66
-_ADVICE_SIZE = 30  # 100 belgigacha bo'lgan matn ham 2 qatorga kesilmasdan sig'ishi uchun
+_ADVICE_SIZE = 42
+_MIN_ADVICE_SIZE = 38
 _BADGE_SIZE = 28
-_WORDMARK_SIZE = 30
+_WORDMARK_SIZE = 36
 _FOKUS_AI_SIZE = 24
 
 _MAX_ADVICE_LINES = 2
+
+# Brand lockup ("[AIM logotipi]  SATURN", yuqori chap burchak).
+_LOGO_HEIGHT = 84
+_LOGO_TEXT_GAP = 18
+_LOCKUP_PADDING = 14
+_BRAND_RED = (246, 4, 3)  # manba logotipdan aniq o'lchangan qizil
 
 
 def _font(bold: bool, size: int) -> ImageFont.FreeTypeFont:
@@ -101,28 +108,64 @@ def _draw_multiline_centered(
     return int(y)
 
 
-def _draw_saturn_mark(draw: ImageDraw.ImageDraw, image: Image.Image, text_color: tuple[int, int, int]) -> None:
-    """Asl logotip fayli (``SATURN_LOGO_PATH``) mavjud va ochilsa —
-    o'sha ishlatiladi. Aks holda (fayl yo'q/hali qo'shilmagan) — soxta
-    logotip o'ylab topilmaydi, oddiy "SATURN" yozuvi chiziladi.
+def _load_logo() -> Image.Image | None:
+    """Asl logotip faylini (``SATURN_LOGO_PATH``) ochib, belgilangan
+    balandlikka moslab qaytaradi. Fayl yo'q/buzilgan bo'lsa ``None``
+    qaytaradi — soxta logotip HECH QACHON o'ylab topilmaydi."""
+    if not SATURN_LOGO_PATH:
+        return None
+    try:
+        logo_path = Path(SATURN_LOGO_PATH)
+        if not logo_path.is_file():
+            return None
+        logo = Image.open(logo_path).convert("RGBA")
+        ratio = _LOGO_HEIGHT / logo.height
+        return logo.resize((max(1, int(logo.width * ratio)), _LOGO_HEIGHT), Image.LANCZOS)
+    except Exception as error:  # noqa: BLE001 - logotip yuklanmasa ham rasm yaratilishi to'xtamasin
+        logger.warning("Saturn logotipini yuklab bo'lmadi (%s): %r", SATURN_LOGO_PATH, error)
+        return None
+
+
+def _draw_saturn_mark(draw: ImageDraw.ImageDraw, image: Image.Image) -> None:
+    """Yuqori chap burchakda bitta brand lockup: ``[AIM logotipi]  SATURN``,
+    ikkalasi vertikal markazlangan, orqasida kichik yarim shaffof
+    "frosted" kartochka (qorong'i/qorli/rang-barang fonda ham matn va
+    logotip aniq o'qilishi uchun — barcha rasmlarda bir xil joy va
+    o'lchamda). ``SATURN`` yozuvi doim logotipning asl qizil rangida
+    (``_BRAND_RED``) chiziladi — tonggi/tungi fonga qarab o'zgarmaydi.
+    Logotip fayli topilmasa/buzilgan bo'lsa, faqat "SATURN" yozuvi
+    (soxta logotipsiz) chiziladi.
     """
-    corner_x, corner_y = _MARGIN, _MARGIN
-
-    if SATURN_LOGO_PATH:
-        try:
-            logo_path = Path(SATURN_LOGO_PATH)
-            if logo_path.is_file():
-                logo = Image.open(logo_path).convert("RGBA")
-                target_height = 90
-                ratio = target_height / logo.height
-                logo = logo.resize((max(1, int(logo.width * ratio)), target_height))
-                image.paste(logo, (corner_x, corner_y), logo)
-                return
-        except Exception as error:  # noqa: BLE001 - logotip yuklanmasa ham rasm yaratilishi to'xtamasin
-            logger.warning("Saturn logotipini yuklab bo'lmadi (%s): %r", SATURN_LOGO_PATH, error)
-
+    logo = _load_logo()
     font = _font(bold=True, size=_WORDMARK_SIZE)
-    draw.text((corner_x, corner_y), "SATURN", font=font, fill=text_color)
+    text = "SATURN"
+    text_bbox = font.getbbox(text)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
+
+    logo_w = logo.width if logo else 0
+    gap = _LOGO_TEXT_GAP if logo else 0
+    content_w = logo_w + gap + text_w
+    content_h = max(_LOGO_HEIGHT if logo else 0, text_h)
+
+    card_left = _MARGIN - _LOCKUP_PADDING
+    card_top = _MARGIN - _LOCKUP_PADDING
+    card_right = _MARGIN + content_w + _LOCKUP_PADDING
+    card_bottom = _MARGIN + content_h + _LOCKUP_PADDING
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rounded_rectangle(
+        [card_left, card_top, card_right, card_bottom], radius=20, fill=(255, 255, 255, 190)
+    )
+    image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"), (0, 0))
+
+    if logo:
+        logo_y = _MARGIN + (content_h - _LOGO_HEIGHT) // 2
+        image.paste(logo, (_MARGIN, logo_y), logo)
+
+    text_x = _MARGIN + logo_w + gap
+    text_y = _MARGIN + (content_h - text_h) // 2 - text_bbox[1]
+    draw.text((text_x, text_y), text, font=font, fill=_BRAND_RED)
 
 
 def _draw_fokus_ai_wordmark(draw: ImageDraw.ImageDraw, text_color: tuple[int, int, int]) -> None:
@@ -149,6 +192,39 @@ def _draw_weather_badge(draw: ImageDraw.ImageDraw, badge_text: str, text_color: 
         [box_left, box_top, box_right, box_bottom], radius=18, fill=(255, 255, 255, 235)
     )
     draw.text((box_left + padding_x, box_top + padding_y - 2), badge_text, font=font, fill=(70, 45, 20))
+
+
+_ADVICE_WRAP_WIDTH = IMAGE_SIZE - 2 * _MARGIN - 10
+_ADVICE_FONT_SIZES = (_ADVICE_SIZE, 40, _MIN_ADVICE_SIZE)  # 42 -> 40 -> 38, hech qachon pastroq emas
+
+
+def _advice_lines_at(draw: ImageDraw.ImageDraw, text: str, size: int) -> list[str]:
+    font = _font(bold=False, size=size)
+    return _wrap_text(draw, text, font, _ADVICE_WRAP_WIDTH)
+
+
+def fits_within_advice_lines(text: str) -> bool:
+    """``text`` eng kichik ruxsat etilgan shriftda (``_MIN_ADVICE_SIZE``)
+    ham ``_MAX_ADVICE_LINES`` qatordan oshmasdan, KESILMASDAN sig'ishini
+    tekshiradi. Mos kelmasa, chaqiruvchi kod (``services/saturn_content.py``)
+    bu matnni rad etib, qisqaroq zaxira matn tanlashi kerak — matn hech
+    qachon shriftni yanada kichraytirib majburan siqilmaydi."""
+    canvas = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(canvas)
+    lines = _advice_lines_at(draw, text, _MIN_ADVICE_SIZE)
+    return " ".join(lines) == text
+
+
+def _advice_font_size(draw: ImageDraw.ImageDraw, text: str) -> int:
+    """42px'dan boshlab, sig'maguncha 40, so'ng 38px'gacha pasaytiradi
+    (hech qachon pastroq emas). Chaqiruvchi kod bu funksiyaga yetguncha
+    ``fits_within_advice_lines`` orqali matn allaqachon tekshirilgan
+    bo'lishi kerak — shuning uchun bu yerda 38px doim mos keladi."""
+    for size in _ADVICE_FONT_SIZES:
+        lines = _advice_lines_at(draw, text, size)
+        if " ".join(lines) == text:
+            return size
+    return _MIN_ADVICE_SIZE
 
 
 def render_morning_image(
@@ -178,7 +254,7 @@ def render_morning_image(
     if weather_text:
         _draw_weather_badge(draw, weather_text, _MORNING_TEXT)
 
-    _draw_saturn_mark(draw, image, _MORNING_TEXT)
+    _draw_saturn_mark(draw, image)
 
     _draw_glass_card(image, _CARD_TOP, _CARD_BOTTOM, light=True)
     draw = ImageDraw.Draw(image)
@@ -187,8 +263,9 @@ def render_morning_image(
     title_lines = _wrap_text(draw, "Xayrli tong, Saturn jamoasi!", title_font, IMAGE_SIZE - 2 * _MARGIN)
     next_y = _draw_multiline_centered(draw, title_lines, title_font, top_y=400, fill=_MORNING_TEXT, line_spacing=10)
 
-    advice_font = _font(bold=False, size=_ADVICE_SIZE)
-    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 10)
+    advice_size = _advice_font_size(draw, advice_text)
+    advice_font = _font(bold=False, size=advice_size)
+    advice_lines = _advice_lines_at(draw, advice_text, advice_size)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_MORNING_TEXT)
 
     _draw_fokus_ai_wordmark(draw, _MORNING_TEXT)
@@ -217,7 +294,7 @@ def render_night_image(
     image = saturn_scene.render_background(season, weather_category, saturn_scene.TIME_NIGHT, variant)
 
     draw = ImageDraw.Draw(image)
-    _draw_saturn_mark(draw, image, _NIGHT_TEXT)
+    _draw_saturn_mark(draw, image)
 
     _draw_glass_card(image, _CARD_TOP, _CARD_BOTTOM, light=False)
     draw = ImageDraw.Draw(image)
@@ -226,8 +303,9 @@ def render_night_image(
     title_lines = _wrap_text(draw, "Xayrli tun, Saturn jamoasi!", title_font, IMAGE_SIZE - 2 * _MARGIN)
     next_y = _draw_multiline_centered(draw, title_lines, title_font, top_y=420, fill=_NIGHT_TEXT, line_spacing=10)
 
-    advice_font = _font(bold=False, size=_ADVICE_SIZE)
-    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 10)
+    advice_size = _advice_font_size(draw, advice_text)
+    advice_font = _font(bold=False, size=advice_size)
+    advice_lines = _advice_lines_at(draw, advice_text, advice_size)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_NIGHT_TEXT)
 
     _draw_fokus_ai_wordmark(draw, _NIGHT_TEXT)

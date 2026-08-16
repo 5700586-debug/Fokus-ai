@@ -21,6 +21,7 @@ import logging
 from openai import AsyncOpenAI
 
 from repositories import saturn_group as saturn_repo
+from services import saturn_image
 
 logger = logging.getLogger(__name__)
 
@@ -266,14 +267,19 @@ def night_category_of(key: str) -> str:
 
 
 def is_valid_advice(text: str | None) -> bool:
-    """Uzun yoki bo'sh matnni rad etadi — bunday holatda chaqiruvchi
-    original (tayyor bank) matnini ishlatishi kerak. Matn AVTOMATIK
-    QISQARTIRILMAYDI (noqulay yarim jumla chiqmasligi uchun) — yoki
-    to'liq mos, yoki butunlay rad etiladi.
+    """Uzun, bo'sh yoki rasmda ikki qatorga (eng kichik ruxsat etilgan
+    38px shriftda ham) sig'maydigan matnni rad etadi — bunday holatda
+    chaqiruvchi original (tayyor bank) matnini ishlatishi kerak. Matn
+    AVTOMATIK QISQARTIRILMAYDI va shrift majburan kichraytirilmaydi
+    (noqulay yarim jumla yoki o'qib bo'lmas kichik matn chiqmasligi
+    uchun) — yoki to'liq mos, yoki butunlay rad etiladi.
     """
     if not text or not text.strip():
         return False
-    return len(text.strip()) <= _MAX_ADVICE_LENGTH
+    stripped = text.strip()
+    if len(stripped) > _MAX_ADVICE_LENGTH:
+        return False
+    return saturn_image.fits_within_advice_lines(stripped)
 
 
 def _pick_from_bank(
@@ -295,12 +301,24 @@ def _pick_from_bank(
     recent_keys = set(recent_keys_list)
     previous_category = category_of(recent_keys_list[0]) if recent_keys_list else None
 
-    candidates = [(key, text) for key, text in bank if key not in recent_keys]
+    # Rasmda ikki qatorga (38px'da ham) sig'maydigan yozuv bank ichida
+    # bo'lishi amalda deyarli mumkin emas (hammasi qisqa yozilgan), lekin
+    # himoya sifatida shu yerda ham tekshiriladi — "sig'masa, qisqaroq
+    # zaxira maslahat tanlansin" talabi.
+    candidates = [
+        (key, text)
+        for key, text in bank
+        if key not in recent_keys and saturn_image.fits_within_advice_lines(text)
+    ]
     if not candidates:
         # Bank tugagan (hammasi oxirgi ``lookback`` postda ishlatilgan) —
         # xabar yuborish hech qachon to'xtamasligi kerak, shuning uchun
-        # butun bank qayta ochiladi.
-        candidates = bank
+        # butun bank (sig'adigan yozuvlar) qayta ochiladi.
+        candidates = [(key, text) for key, text in bank if saturn_image.fits_within_advice_lines(text)]
+    if not candidates:
+        # Nazariy jihatdan yetib bo'lmaydigan zaxira — bank yozuvlari doim
+        # qisqa yozilgan, lekin xabar yuborish baribir to'xtamasligi kerak.
+        candidates = bank[:1]
 
     # Kecha (oxirgi post)dan boshqa mavzu (kategoriya) tanlashga
     # harakat qilamiz — bir xil mavzu ketma-ket kunlarda takrorlanmasin.

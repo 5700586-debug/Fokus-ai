@@ -12,3 +12,7 @@ __pycache__/
 *.py c
 .venv/
 .claude/settings.local.json
+
+# Telefon interfeysi bilan olingan xom logotip skrinshoti — faqat
+# tozalangan asset (assets/branding/saturn_logo.png) commit qilinadi.
+saturn_logo_source.jpg

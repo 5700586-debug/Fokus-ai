@@ -98,6 +98,40 @@ def test_is_valid_advice_accepts_normal_text():
     assert saturn_content.is_valid_advice("Bugun kimgadir yordam bering.") is True
 
 
+def test_is_valid_advice_rejects_exactly_101_chars():
+    text = "a" * 101
+    assert saturn_content.is_valid_advice(text) is False
+
+
+def test_is_valid_advice_rejects_text_that_does_not_fit_two_lines_at_min_font():
+    """100 belgidan kam bo'lsa ham, uzun so'zli gap eng kichik shriftda
+    (38px) ikki qatorga sig'masligi mumkin — bunday matn ham rad
+    etilishi kerak (shrift kichraytirilib majburan siqilmaydi)."""
+    long_shaped_text = (
+        "Xaridorlar bilan muomalada doimo xushmuomala, samimiy va professional tarzda ish yuriting."
+    )
+    assert len(long_shaped_text) <= 100
+    assert saturn_content.is_valid_advice(long_shaped_text) is False
+
+
+def test_is_valid_advice_accepts_all_real_bank_entries():
+    for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
+        assert saturn_content.is_valid_advice(text) is True, text
+
+
+async def test_pick_morning_advice_falls_back_when_ai_response_does_not_fit_two_lines(monkeypatch):
+    """AI 100 belgidan kam, lekin ikki qatorga sig'maydigan uzun so'zli
+    matn qaytarsa ham, original qisqa bank matni ishlatiladi."""
+    client = _FakeClient(
+        output_text="Xaridorlar bilan muomalada doimo xushmuomala, samimiy va professional tarzda ish yuriting."
+    )
+
+    key, text = await saturn_content.pick_morning_advice(client)
+
+    original = dict(saturn_content.MORNING_ADVICE_BANK)[key]
+    assert text == original
+
+
 # --------------------------------------------------------------- pick_* --
 
 

@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 # Konsol kodировkasi muhitga qarab turlicha bo'ladi (masalan ba'zi Windows
 # konsollari cp1251/cp866) — shuning uchun log/print'dagi emoji va
@@ -58,12 +59,16 @@ SATURN_WEATHER_LON = float(os.getenv("SATURN_WEATHER_LON") or "70.9425")
 SATURN_WIND_THRESHOLD_KMH = float(os.getenv("SATURN_WIND_THRESHOLD_KMH") or "30")
 SATURN_HOT_THRESHOLD_C = float(os.getenv("SATURN_HOT_THRESHOLD_C") or "33")
 
-# Saturn'ning ASL logotip fayli hali repoga qo'shilmagan. Fayl qo'shilsa,
-# shu yo'lga (masalan "assets/logo/saturn_logo.png", shaffof fon bilan)
-# ishora qilinadi. Bo'sh yoki fayl topilmasa, rasmda soxta logotip
-# o'ylab topilmaydi — oddiy "SATURN" yozuvi ishlatiladi (qarang
-# services/saturn_image.py).
-SATURN_LOGO_PATH = os.getenv("SATURN_LOGO_PATH")
+# Saturn'ning asl (AIM) logotipi — manba fotosuratdan fon olib
+# tashlangan, shaffof PNG holida repoga qo'shilgan (qarang
+# assets/branding/saturn_logo.png). ``SATURN_LOGO_PATH`` muhit
+# o'zgaruvchisi orqali boshqa asl logotip fayliga almashtirish
+# imkoniyati saqlanadi. Fayl topilmasa/buzilgan bo'lsa, rasmda soxta
+# logotip o'ylab topilmaydi — oddiy "SATURN" yozuvi ishlatiladi
+# (qarang services/saturn_image.py), xato bot ishga tushishini
+# to'xtatmaydi.
+_DEFAULT_SATURN_LOGO_PATH = str(Path(__file__).resolve().parent / "assets" / "branding" / "saturn_logo.png")
+SATURN_LOGO_PATH = os.getenv("SATURN_LOGO_PATH") or _DEFAULT_SATURN_LOGO_PATH
 
 # "Friendly phase" — Saturn guruhiga hozircha faqat mehribon/foydali
 # mazmun yuboriladi (moliyaviy ko'rsatkich, KPI tanqidi, jarima YO'Q).

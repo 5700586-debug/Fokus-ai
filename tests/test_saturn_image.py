@@ -2,7 +2,7 @@ import io
 from datetime import date
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from services import saturn_content, saturn_image
 from services import saturn_season, saturn_weather_scene
@@ -206,8 +206,6 @@ def test_logo_weather_badge_and_signature_do_not_overlap_the_glass_card():
 def test_wrap_text_respects_max_lines():
     """Juda uzun matn ham cheksiz qatorga bo'linib ketmaydi — belgilangan
     maksimal qator sonidan oshmaydi."""
-    from PIL import ImageDraw
-
     canvas = Image.new("RGB", (10, 10))
     draw = ImageDraw.Draw(canvas)
     font = saturn_image._font(bold=False, size=30)
@@ -216,3 +214,57 @@ def test_wrap_text_respects_max_lines():
     lines = saturn_image._wrap_text(draw, very_long_text, font, max_width=500)
 
     assert len(lines) <= saturn_image._MAX_ADVICE_LINES
+
+
+# ------------------------------------------------------- moslashuvchan shrift --
+
+
+def test_max_advice_lines_is_two():
+    assert saturn_image._MAX_ADVICE_LINES == 2
+
+
+def test_min_advice_size_is_38():
+    assert saturn_image._MIN_ADVICE_SIZE == 38
+
+
+def test_advice_font_sizes_never_go_below_the_minimum():
+    assert min(saturn_image._ADVICE_FONT_SIZES) == saturn_image._MIN_ADVICE_SIZE
+    assert saturn_image._ADVICE_SIZE == 42
+
+
+def test_advice_font_size_uses_primary_size_for_short_text():
+    canvas = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(canvas)
+    size = saturn_image._advice_font_size(draw, "Bugun kimgadir yordam bering.")
+    assert size == saturn_image._ADVICE_SIZE
+
+
+def test_advice_font_size_never_returns_below_minimum_for_any_real_bank_entry():
+    canvas = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(canvas)
+    for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
+        size = saturn_image._advice_font_size(draw, text)
+        assert size >= saturn_image._MIN_ADVICE_SIZE
+
+
+def test_fits_within_advice_lines_accepts_all_real_bank_entries():
+    for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
+        assert saturn_image.fits_within_advice_lines(text) is True, text
+
+
+def test_fits_within_advice_lines_rejects_long_unwrappable_text():
+    long_shaped_text = (
+        "Xaridorlar bilan muomalada doimo xushmuomala, samimiy va professional tarzda ish yuriting."
+    )
+    assert saturn_image.fits_within_advice_lines(long_shaped_text) is False
+
+
+def test_rendered_advice_text_is_never_smaller_than_min_size_visually():
+    """Uzun (lekin qabul qilingan) matn ham rasmda 38px'dan kichik
+    shriftda chiqmaydi — ``render_morning_image`` real chaqiruvi orqali
+    tekshiriladi."""
+    longest = max(saturn_content.MORNING_ADVICE_BANK, key=lambda kv: len(kv[1]))
+    canvas = Image.new("RGB", (10, 10))
+    draw = ImageDraw.Draw(canvas)
+    size = saturn_image._advice_font_size(draw, longest[1])
+    assert size >= saturn_image._MIN_ADVICE_SIZE

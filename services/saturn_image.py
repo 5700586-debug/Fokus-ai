@@ -33,15 +33,15 @@ _MORNING_TEXT = (58, 32, 20)        # to'q jigarrang — glass card ustida o'qil
 _NIGHT_TEXT = (235, 240, 250)       # deyarli oq — to'q glass card ustida kontrast
 
 _CARD_TOP = 370
-_CARD_BOTTOM = 850
+_CARD_BOTTOM = 730
 
 _TITLE_SIZE = 66
-_ADVICE_SIZE = 42
+_ADVICE_SIZE = 30  # 100 belgigacha bo'lgan matn ham 2 qatorga kesilmasdan sig'ishi uchun
 _BADGE_SIZE = 28
 _WORDMARK_SIZE = 30
 _FOKUS_AI_SIZE = 24
 
-_MAX_ADVICE_LINES = 4
+_MAX_ADVICE_LINES = 2
 
 
 def _font(bold: bool, size: int) -> ImageFont.FreeTypeFont:
@@ -188,7 +188,7 @@ def render_morning_image(
     next_y = _draw_multiline_centered(draw, title_lines, title_font, top_y=400, fill=_MORNING_TEXT, line_spacing=10)
 
     advice_font = _font(bold=False, size=_ADVICE_SIZE)
-    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 40)
+    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 10)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_MORNING_TEXT)
 
     _draw_fokus_ai_wordmark(draw, _MORNING_TEXT)
@@ -227,7 +227,7 @@ def render_night_image(
     next_y = _draw_multiline_centered(draw, title_lines, title_font, top_y=420, fill=_NIGHT_TEXT, line_spacing=10)
 
     advice_font = _font(bold=False, size=_ADVICE_SIZE)
-    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 40)
+    advice_lines = _wrap_text(draw, advice_text, advice_font, IMAGE_SIZE - 2 * _MARGIN - 10)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_NIGHT_TEXT)
 
     _draw_fokus_ai_wordmark(draw, _NIGHT_TEXT)

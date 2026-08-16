@@ -52,7 +52,18 @@ def test_night_bank_has_at_least_30_unique_entries():
 
 def test_all_bank_entries_are_within_length_limit():
     for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
-        assert len(text) <= 120, text
+        assert len(text) <= 100, text
+
+
+def test_all_bank_entries_are_a_single_sentence():
+    """Har bir maslahat — bitta amaliy harakat yoki foydali fikr: bitta
+    yakunlovchi tinish belgisi (., !, ?) bilan tugaydigan, o'rtada
+    qo'shimcha gap ulanmagan matn."""
+    for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
+        stripped = text.rstrip(".!?")
+        assert stripped.count(". ") == 0, text
+        assert stripped.count("! ") == 0, text
+        assert stripped.count("? ") == 0, text
 
 
 def test_all_bank_entries_avoid_forbidden_topics():

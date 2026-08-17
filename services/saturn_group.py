@@ -276,27 +276,35 @@ def _weather_category(weather) -> str:
     )
 
 
-async def _build_morning_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
-    """``(advice_key, advice_text, PNG bayt)`` — YON TA'SIRSIZ (DB'ga
-    yozmaydi, hech narsa yubormaydi). Production yuborish
-    (``send_morning_image_message``) va sinov ko'rinishi
+async def _build_morning_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes, str | None]:
+    """``(advice_key, advice_text, PNG bayt, foto krediti yoki None)`` —
+    YON TA'SIRSIZ (DB'ga yozmaydi, hech narsa yubormaydi). Production
+    yuborish (``send_morning_image_message``) va sinov ko'rinishi
     (``send_morning_image_preview``) ikkalasi ham shu yerdan
     foydalanadi — ikkalasida ham AYNAN bir xil rasm ishlab chiqariladi.
+    Kredit faqat HAQIQIY kataloglangan foto ishlatilganda mavjud bo'ladi
+    (qarang ``services/saturn_image.get_background_credit``) — vektor
+    sahna ishlatilsa ``None``.
     """
     advice_key, advice_text = await saturn_content.pick_morning_advice(client)
     weather = await _fetch_weather()
     local_date = company_time.today()
+    season = saturn_season.season_for_date(local_date)
+    weather_category = _weather_category(weather)
     photo_bytes = saturn_image.render_morning_image(
         advice_text,
         _weather_badge_text(weather),
-        season=saturn_season.season_for_date(local_date),
-        weather_category=_weather_category(weather),
+        season=season,
+        weather_category=weather_category,
         local_date=local_date,
     )
-    return advice_key, advice_text, photo_bytes
+    credit = saturn_image.get_background_credit(
+        season=season, weather_category=weather_category, time_of_day="morning", local_date=local_date
+    )
+    return advice_key, advice_text, photo_bytes, credit
 
 
-async def _build_night_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes]:
+async def _build_night_content(client: AsyncOpenAI | None) -> tuple[str, str, bytes, str | None]:
     """``_build_morning_content`` bilan bir xil mantiq, tungi rasm uchun
     — ob-havo matni HECH QACHON ishlatilmaydi (``render_night_image``
     bunday argument qabul qilmaydi), lekin fasl+ob-havo KATEGORIYASI
@@ -305,13 +313,18 @@ async def _build_night_content(client: AsyncOpenAI | None) -> tuple[str, str, by
     advice_key, advice_text = await saturn_content.pick_night_advice(client)
     weather = await _fetch_weather()
     local_date = company_time.today()
+    season = saturn_season.season_for_date(local_date)
+    weather_category = _weather_category(weather)
     photo_bytes = saturn_image.render_night_image(
         advice_text,
-        season=saturn_season.season_for_date(local_date),
-        weather_category=_weather_category(weather),
+        season=season,
+        weather_category=weather_category,
         local_date=local_date,
     )
-    return advice_key, advice_text, photo_bytes
+    credit = saturn_image.get_background_credit(
+        season=season, weather_category=weather_category, time_of_day="night", local_date=local_date
+    )
+    return advice_key, advice_text, photo_bytes, credit
 
 
 async def send_morning_image_message(bot, client: AsyncOpenAI | None, group_chat_id: int) -> None:
@@ -331,9 +344,9 @@ async def send_morning_image_message(bot, client: AsyncOpenAI | None, group_chat
         return
 
     try:
-        advice_key, advice_text, photo_bytes = await _build_morning_content(client)
+        advice_key, advice_text, photo_bytes, credit = await _build_morning_content(client)
         photo = BufferedInputFile(photo_bytes, filename=f"saturn_morning_{today}.png")
-        await bot.send_photo(group_chat_id, photo)
+        await bot.send_photo(group_chat_id, photo, caption=credit)
     except Exception:
         notifications.release_reservation(job_key, group_chat_id)
         raise
@@ -355,9 +368,9 @@ async def send_night_image_message(bot, client: AsyncOpenAI | None, group_chat_i
         return
 
     try:
-        advice_key, advice_text, photo_bytes = await _build_night_content(client)
+        advice_key, advice_text, photo_bytes, credit = await _build_night_content(client)
         photo = BufferedInputFile(photo_bytes, filename=f"saturn_night_{today}.png")
-        await bot.send_photo(group_chat_id, photo)
+        await bot.send_photo(group_chat_id, photo, caption=credit)
     except Exception:
         notifications.release_reservation(job_key, group_chat_id)
         raise
@@ -376,17 +389,19 @@ async def send_night_image_message(bot, client: AsyncOpenAI | None, group_chat_i
 # chaqiruvchi ``saturn_group_bot.py``ning mas'uliyati).
 
 
+def _with_credit(base_caption: str, credit: str | None) -> str:
+    return f"{base_caption}\n\n{credit}" if credit else base_caption
+
+
 async def send_morning_image_preview(bot, client: AsyncOpenAI | None, chat_id: int) -> None:
-    photo_bytes = (await _build_morning_content(client))[2]
+    _key, _text, photo_bytes, credit = await _build_morning_content(client)
     photo = BufferedInputFile(photo_bytes, filename="saturn_morning_preview.png")
-    await bot.send_photo(
-        chat_id, photo, caption="🔍 Sinov: tonggi rasm (hech qanday yozuv band qilinmadi)"
-    )
+    caption = _with_credit("🔍 Sinov: tonggi rasm (hech qanday yozuv band qilinmadi)", credit)
+    await bot.send_photo(chat_id, photo, caption=caption)
 
 
 async def send_night_image_preview(bot, client: AsyncOpenAI | None, chat_id: int) -> None:
-    photo_bytes = (await _build_night_content(client))[2]
+    _key, _text, photo_bytes, credit = await _build_night_content(client)
     photo = BufferedInputFile(photo_bytes, filename="saturn_night_preview.png")
-    await bot.send_photo(
-        chat_id, photo, caption="🔍 Sinov: tungi rasm (hech qanday yozuv band qilinmadi)"
-    )
+    caption = _with_credit("🔍 Sinov: tungi rasm (hech qanday yozuv band qilinmadi)", credit)
+    await bot.send_photo(chat_id, photo, caption=caption)

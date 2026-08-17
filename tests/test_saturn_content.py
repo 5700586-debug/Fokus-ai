@@ -103,6 +103,54 @@ def test_is_valid_advice_rejects_exactly_101_chars():
     assert saturn_content.is_valid_advice(text) is False
 
 
+# ------------------------------------------------------ ikki qismli gaplar --
+
+
+def test_is_single_actionable_fact_rejects_em_dash_explanation():
+    text = "Kuniga yetarlicha suv iching — diqqat susaymasin."
+    assert saturn_content.is_single_actionable_fact(text) is False
+    assert saturn_content.is_valid_advice(text) is False
+
+
+def test_is_single_actionable_fact_rejects_en_dash():
+    assert saturn_content.is_single_actionable_fact("Bugun ishga keling – kechikmang.") is False
+
+
+def test_is_single_actionable_fact_rejects_semicolon():
+    assert saturn_content.is_single_actionable_fact("Ishni tugating; keyin ketishingiz mumkin.") is False
+
+
+def test_is_single_actionable_fact_rejects_spaced_hyphen_as_dash():
+    assert saturn_content.is_single_actionable_fact("Vaqtida keling - bu muhim.") is False
+
+
+def test_is_single_actionable_fact_accepts_shortened_single_clause_versions():
+    assert saturn_content.is_single_actionable_fact("Kun davomida suv ichishni unutmang.") is True
+    assert saturn_content.is_single_actionable_fact("Norozi xaridorni avval to'liq tinglang.") is True
+    assert saturn_content.is_single_actionable_fact("Ish joyingizni tartibli qoldiring.") is True
+
+
+def test_all_bank_entries_are_single_actionable_facts():
+    for _key, text in saturn_content.MORNING_ADVICE_BANK + saturn_content.NIGHT_ADVICE_BANK:
+        assert saturn_content.is_single_actionable_fact(text) is True, text
+
+
+async def test_pick_morning_advice_falls_back_when_ai_response_has_em_dash_explanation():
+    from types import SimpleNamespace
+
+    class _FakeResponses:
+        async def create(self, **kwargs):
+            return SimpleNamespace(output_text="Kuniga yetarlicha suv iching — diqqat susaymasin.")
+
+    class _FakeClient:
+        responses = _FakeResponses()
+
+    key, text = await saturn_content.pick_morning_advice(_FakeClient())
+
+    original = dict(saturn_content.MORNING_ADVICE_BANK)[key]
+    assert text == original
+
+
 def test_is_valid_advice_rejects_text_that_does_not_fit_two_lines_at_min_font():
     """100 belgidan kam bo'lsa ham, uzun so'zli gap eng kichik shriftda
     (38px) ikki qatorga sig'masligi mumkin — bunday matn ham rad

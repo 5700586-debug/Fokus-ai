@@ -105,6 +105,12 @@ RECRUITING_RETENTION_DAYS = int(os.getenv("RECRUITING_RETENTION_DAYS") or "90")
 # rad etiladi (yozma javob so'raladi), butun ariza to'xtamaydi.
 RECRUITING_MAX_VOICE_SECONDS = int(os.getenv("RECRUITING_MAX_VOICE_SECONDS") or "60")
 
-# Bitta suhbatda AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
-# (adaptive follow-up) savollar soni chegarasi.
+# BITTA javobga AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
+# (adaptive follow-up) savollar soni chegarasi — har bir asosiy savol
+# qayta boshlanganda hisoblagich reset qilinadi (qarang recruiting_bot.py).
 RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "2")
+
+# Qonuniy minimal ishga qabul yoshi — faqat shu yosh talabini tekshirish
+# uchun ishlatiladi, ballga HECH QACHON ta'sir qilmaydi (qarang
+# recruiting_bot.py va services/recruiting_scoring.py).
+RECRUITING_MIN_AGE = int(os.getenv("RECRUITING_MIN_AGE") or "18")

@@ -83,6 +83,27 @@ def _redact_dsn(url: str) -> str:
 _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("employees", "prior_employer_reference_consent", "INTEGER"),
     ("employees", "prior_employer_contact", "TEXT"),
+    ("recruiting_vacancies", "required_shift", "TEXT"),
+    ("recruiting_vacancies", "requires_weekends", "INTEGER NOT NULL DEFAULT 0"),
+    ("recruiting_applications", "birth_year", "INTEGER"),
+    ("recruiting_applications", "residence_area", "TEXT"),
+    ("recruiting_applications", "preferred_branch", "TEXT"),
+    ("recruiting_applications", "shift_preference", "TEXT"),
+    ("recruiting_applications", "unavailable_days_text", "TEXT"),
+    ("recruiting_applications", "holiday_available", "INTEGER"),
+    ("recruiting_applications", "expected_salary", "TEXT"),
+    ("recruiting_applications", "commute_issue", "INTEGER"),
+    ("recruiting_applications", "accommodation_needed", "INTEGER"),
+    ("recruiting_applications", "accommodation_text", "TEXT"),
+    ("recruiting_applications", "fit_result", "TEXT"),
+    ("recruiting_applications", "fit_reason", "TEXT"),
+    ("recruiting_applications", "prev_employer_text", "TEXT"),
+    ("recruiting_applications", "experience_duration_text", "TEXT"),
+    ("recruiting_applications", "pos_experience", "INTEGER"),
+    ("recruiting_applications", "cash_handling_text", "TEXT"),
+    ("recruiting_applications", "reference_check_consent", "INTEGER"),
+    ("recruiting_assessments", "red_flags_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
 ]
 
 

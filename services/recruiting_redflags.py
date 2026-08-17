@@ -1,0 +1,164 @@
+"""Fokus HR — kritik xavf (red flag) aniqlash: muddati o'tgan mahsulot,
+kamomaddan javobgarlikni bo'yniga olmaslik, login/kassa ulashish,
+xaridor bilan mojaro kuchaytirish.
+
+REAL TELEGRAM SINOVIDA topilgan asosiy kamchilik: eski baholash faqat
+javob UZUNLIGIGA qarab ball berardi (``_score_by_length``), shu sabab
+"muddati o'tgan mahsulotni sotsam bo'ladi, hech kim bilmaydi" kabi
+xavfli, lekin uzun/aniq javob YAXSHI baholanardi. Bu modul MAZMUNGA
+qarab uch holatni ajratadi:
+
+- ``RED``   — aniq xavfli signal (masalan sotish niyati, yashirish).
+- ``GREEN`` — aniq to'g'ri harakat (masalan rahbarga xabar berish).
+- ``UNCLEAR`` — ikkalasi ham aniq emas: bu holatda BALL BERILMAYDI va
+  chaqiruvchi kod (``recruiting_bot.py``) aniqlashtiruvchi savol so'raydi
+  — AI/deterministik tizim hech qachon nomzod o'rniga ma'no o'ylab
+  topmaydi (qarang loyihaning rekruting talab hujjati).
+
+Faqat kalit so'z asosidagi (deterministik) tahlil — AI mavjud bo'lmasa
+ham har doim ishlaydi, xatosiz va tarmoqqa chiqmasdan."""
+
+RED = "red"
+GREEN = "green"
+UNCLEAR = "unclear"
+
+EXPIRED_PRODUCT = "expired_product"
+SHORTAGE_COVERUP = "shortage_coverup"
+CREDENTIAL_SHARING = "credential_sharing"
+CUSTOMER_CONFLICT = "customer_conflict"
+
+_RED_FLAG_LABELS: dict[str, str] = {
+    EXPIRED_PRODUCT: "Muddati o'tgan mahsulotni sotishga tayyor",
+    SHORTAGE_COVERUP: "Kamomadni yashiradi yoki javobgarlikdan qochadi",
+    CREDENTIAL_SHARING: "Login/kassa ma'lumotini boshqaga beradi",
+    CUSTOMER_CONFLICT: "Xaridor bilan mojaroni kuchaytiradi",
+}
+
+
+def label_for(red_flag_key: str) -> str:
+    return _RED_FLAG_LABELS.get(red_flag_key, red_flag_key)
+
+
+def _normalize(text: str) -> str:
+    return (text or "").strip().lower().replace("‘", "'").replace("’", "'")
+
+
+def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
+    return any(phrase in text for phrase in phrases)
+
+
+# ------------------------------------------------------- muddati o'tgan --
+
+_EXPIRED_SELL_INTENT = (
+    "sotaman", "sotib yuboraman", "sota beraman", "sotsam bo'ladi",
+    "sotish mumkin", "sotsa bo'ladi", "hech kim bilmaydi", "hech kim bilmasa",
+    "muammo emas", "ahamiyati yo'q", "baribir sotiladi", "kim bilibdi",
+    "sezmaydi", "shunchaki sotib yuboraman", "arzonlashtirib sotaman",
+    "chegirma qilib sotaman",
+)
+_EXPIRED_CORRECT_ACTION = (
+    "olib tashlayman", "javondan olib", "javondan chiqarib", "chetga olib",
+    "ajratib qo'yaman", "ajratib qoyaman", "rahbarga aytaman", "rahbarga xabar",
+    "qaytarib beraman", "hisobdan chiqaraman", "sotmayman", "sotib bo'lmaydi",
+    "sotilmaydi", "utilizatsiya", "menejerga aytaman", "yo'q qilaman",
+    "chiqarib tashlayman",
+)
+
+
+def check_expired_product(answer_text: str) -> str:
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    sell = _contains_any(text, _EXPIRED_SELL_INTENT)
+    correct = _contains_any(text, _EXPIRED_CORRECT_ACTION)
+    if sell and not correct:
+        return RED
+    if correct and not sell:
+        return GREEN
+    if sell and correct:
+        # Ikkalasi ham bor — masalan "olib tashlayman, lekin arzon
+        # bo'lsa sotib yuboraman" — bu ham xavfli, sotish niyati ustun.
+        return RED
+    return UNCLEAR
+
+
+# ------------------------------------------------------------- kamomad --
+
+_SHORTAGE_AVOIDANCE = (
+    "hech kimga aytmayman", "aytmayman", "yashiraman", "sir saqlayman",
+    "o'zim to'ldirib qo'yaman", "o'zim qoplayman", "jim turaman",
+    "e'tibor bermayman", "ahamiyat bermayman", "boshqasining aybi",
+    "mening aybim emas", "menga aloqasi yo'q", "bilmayman kim qilgan",
+    "hech narsa qilmayman",
+)
+_SHORTAGE_REPORTING = (
+    "rahbarga aytaman", "rahbarga xabar", "hisobotga yozaman",
+    "hisobga olaman", "tekshiraman", "menejerga aytaman", "darhol aytaman",
+    "qayta sanayman", "kamerani ko'raman", "yozib qo'yaman", "xabar beraman",
+)
+
+
+def check_shortage_response(answer_text: str) -> str:
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    avoids = _contains_any(text, _SHORTAGE_AVOIDANCE)
+    reports = _contains_any(text, _SHORTAGE_REPORTING)
+    if avoids and not reports:
+        return RED
+    if reports:
+        return GREEN
+    return UNCLEAR
+
+
+# --------------------------------------------------- login/kassa ulashish --
+
+_CREDENTIAL_SHARE_INTENT = (
+    "kassamni beraman", "kassani beraman", "loginimni beraman", "login beraman",
+    "parolimni beraman", "parolni beraman", "hisobimni beraman",
+    "kirish ma'lumotlarimni beraman", "beraman albatta", "ha, beraman",
+)
+_CREDENTIAL_REFUSE = (
+    "bermayman", "hech kimga bermayman", "hech qachon bermayman",
+    "faqat o'zim ishlataman", "yo'q, bera olmayman",
+)
+
+
+def check_credential_sharing(answer_text: str) -> str:
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    shares = _contains_any(text, _CREDENTIAL_SHARE_INTENT)
+    refuses = _contains_any(text, _CREDENTIAL_REFUSE)
+    if shares and not refuses:
+        return RED
+    if refuses:
+        return GREEN
+    return UNCLEAR
+
+
+# --------------------------------------------------------- xaridor mojaro --
+
+_CONFLICT_ESCALATION = (
+    "men ham baqiraman", "javob qaytaraman", "haqorat qilaman", "janjallashaman",
+    "chiqib ket deyman", "kerak emassiz desam bo'ladi", "gap qaytaraman",
+    "unga ham qattiq gapiraman", "jerkillayman",
+)
+_CONFLICT_DEESCALATION = (
+    "xotirjam", "tinchlantiraman", "tinglayman", "kechirim so'rayman",
+    "yechim topaman", "rahbarga chaqiraman", "muloyimlik bilan",
+    "sabr bilan", "tushunishga harakat",
+)
+
+
+def check_customer_conflict(answer_text: str) -> str:
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    escalates = _contains_any(text, _CONFLICT_ESCALATION)
+    deescalates = _contains_any(text, _CONFLICT_DEESCALATION)
+    if escalates and not deescalates:
+        return RED
+    if deescalates:
+        return GREEN
+    return UNCLEAR

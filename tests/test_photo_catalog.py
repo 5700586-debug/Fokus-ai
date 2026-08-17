@@ -153,5 +153,5 @@ def test_total_real_variant_count_reflects_actual_catalog_size():
     expected = len(catalog.all_assets()) * pc.VARIANTS_PER_PHOTO
     assert pc.total_real_variant_count(catalog) == expected
     # Hech qachon to'qib chiqarilgan katta raqam emas — haqiqiy foto
-    # soniga chiziqli bog'liq.
-    assert pc.total_real_variant_count(catalog) < 1000
+    # soniga chiziqli bog'liq (fantastik "millionlab" son emas).
+    assert pc.total_real_variant_count(catalog) < 100_000

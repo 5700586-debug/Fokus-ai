@@ -1,18 +1,18 @@
 01_bahor_ochiq_tong: 📷 Bonnie Moreland (free images) / openverse
 02_bahor_yomgir: 📷 Wonderlane / openverse
 03_yoz_ochiq_tong: 📷 eberhard grossgasteiger / openverse
-04_yoz_juda_issiq_tong: 📷 Burst / openverse
-05_kuz_ochiq_tong: 📷 Free Nature Stock / openverse
-06_kuz_shamolli: 📷 Noma'lum (Wikimedia orqali, rawpixel manbasi) / openverse
-07_kuz_yomgir: 📷 azxa661 / openverse
-08_qish_ochiq_tong: (vektor sahna fallback — kataloglangan foto mos kelmadi)
-09_qorli_tong: 📷 Bonnie Moreland (free images) / openverse
-10_tumanli_tong: 📷 Bonnie Moreland (free images) / openverse
-11_momaqaldiroqli_tong: 📷 National Park Service / openverse
-12_obhavo_mavjud_emas_fasl_standart: (vektor sahna fallback — kataloglangan foto mos kelmadi)
-13_bahor_tun: 📷 Brandon Morgan / openverse
-14_yoz_tun: 📷 Brandon Morgan / openverse
-15_kuz_yomgirli_tun: 📷 Terry Kearney / openverse
-16_qish_qorli_tun: (vektor sahna fallback — kataloglangan foto mos kelmadi)
+04_yoz_juda_issiq_tong: 📷 Dubang chang / pexels
+05_kuz_ochiq_tong: 📷 USFWSAlaska / wikimedia_commons
+06_kuz_shamolli: 📷 ebru ün / pexels
+07_kuz_yomgir: 📷 Nick Holden from England / wikimedia_commons
+08_qish_ochiq_tong: 📷 Curioso Photography / pexels
+09_qorli_tong: 📷 Sam Ferrara samferrara / wikimedia_commons
+10_tumanli_tong: 📷 USFWS Mountain Prairie / wikimedia_commons
+11_momaqaldiroqli_tong: 📷 Bonnie Moreland from Oregon, United States / wikimedia_commons
+12_obhavo_mavjud_emas_fasl_standart: 📷 Unknown authorUnknown author / wikimedia_commons
+13_bahor_tun: 📷 W.carter / wikimedia_commons
+14_yoz_tun: 📷 cristian rossa / pexels
+15_kuz_yomgirli_tun: 📷 Nils Rotura / pexels
+16_qish_qorli_tun: 📷 Plato Terentev / pexels
 17_eng_uzun_tonggi_maslahat: 📷 Bonnie Moreland (free images) / openverse
-18_eng_uzun_tungi_maslahat: 📷 Brandon Morgan / openverse
+18_eng_uzun_tungi_maslahat: 📷 W.carter / wikimedia_commons

@@ -266,18 +266,41 @@ def night_category_of(key: str) -> str:
     return _NIGHT_CATEGORY_BUCKETS.get(_key_prefix(key), "boshqa")
 
 
+_DASH_CHARS = ("—", "–")  # em dash, en dash
+
+
+def is_single_actionable_fact(text: str) -> bool:
+    """"Harakat — izoh/sabab" ko'rinishidagi ikki qismli gaplarni rad
+    etadi. Har bir maslahat FAQAT bitta amaliy fikr bo'lishi kerak —
+    em dash/en dash, nuqtali vergul yoki bo'shliqli defis (" - ")
+    odatda ikkinchi, izohli qism borligidan dalolat beradi (masalan
+    "Kuniga yetarlicha suv iching — diqqat susaymasin." ikkita alohida
+    fikr, faqat "Kun davomida suv ichishni unutmang." kabi versiyasi
+    qabul qilinadi)."""
+    if any(ch in text for ch in _DASH_CHARS):
+        return False
+    if ";" in text:
+        return False
+    if " - " in text:
+        return False
+    return True
+
+
 def is_valid_advice(text: str | None) -> bool:
-    """Uzun, bo'sh yoki rasmda ikki qatorga (eng kichik ruxsat etilgan
-    38px shriftda ham) sig'maydigan matnni rad etadi — bunday holatda
-    chaqiruvchi original (tayyor bank) matnini ishlatishi kerak. Matn
-    AVTOMATIK QISQARTIRILMAYDI va shrift majburan kichraytirilmaydi
-    (noqulay yarim jumla yoki o'qib bo'lmas kichik matn chiqmasligi
-    uchun) — yoki to'liq mos, yoki butunlay rad etiladi.
+    """Uzun, bo'sh, ikki qismli (qarang ``is_single_actionable_fact``)
+    yoki rasmda ikki qatorga (eng kichik ruxsat etilgan 38px shriftda
+    ham) sig'maydigan matnni rad etadi — bunday holatda chaqiruvchi
+    original (tayyor bank) matnini ishlatishi kerak. Matn AVTOMATIK
+    QISQARTIRILMAYDI va shrift majburan kichraytirilmaydi (noqulay
+    yarim jumla yoki o'qib bo'lmas kichik matn chiqmasligi uchun) —
+    yoki to'liq mos, yoki butunlay rad etiladi.
     """
     if not text or not text.strip():
         return False
     stripped = text.strip()
     if len(stripped) > _MAX_ADVICE_LENGTH:
+        return False
+    if not is_single_actionable_fact(stripped):
         return False
     return saturn_image.fits_within_advice_lines(stripped)
 
@@ -308,13 +331,16 @@ def _pick_from_bank(
     candidates = [
         (key, text)
         for key, text in bank
-        if key not in recent_keys and saturn_image.fits_within_advice_lines(text)
+        if key not in recent_keys and is_single_actionable_fact(text) and saturn_image.fits_within_advice_lines(text)
     ]
     if not candidates:
         # Bank tugagan (hammasi oxirgi ``lookback`` postda ishlatilgan) —
         # xabar yuborish hech qachon to'xtamasligi kerak, shuning uchun
         # butun bank (sig'adigan yozuvlar) qayta ochiladi.
-        candidates = [(key, text) for key, text in bank if saturn_image.fits_within_advice_lines(text)]
+        candidates = [
+            (key, text) for key, text in bank
+            if is_single_actionable_fact(text) and saturn_image.fits_within_advice_lines(text)
+        ]
     if not candidates:
         # Nazariy jihatdan yetib bo'lmaydigan zaxira — bank yozuvlari doim
         # qisqa yozilgan, lekin xabar yuborish baribir to'xtamasligi kerak.

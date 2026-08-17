@@ -40,6 +40,13 @@ SMS_API_KEY = os.getenv("SMS_API_KEY")
 WEATHER_PROVIDER_ENABLED = os.getenv("WEATHER_PROVIDER_ENABLED", "false").lower() == "true"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
+# Saturn fotoreal fon katalogini to'ldirish uchun (qarang
+# providers/pexels_provider.py, services/photo_catalog.py). Kalit yo'q
+# bo'lsa Pexels manbasi shunchaki bo'sh natija qaytaradi — hech qachon
+# xato bilan to'xtamaydi (Openverse kalitsiz zaxira manba sifatida
+# ishlatiladi). Kodga, logga yoki testga HECH QACHON yozilmaydi.
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+
 # Saturn tonggi rasmli xabaridagi kichik ob-havo belgisi uchun — Open-Meteo
 # (keyingi WEATHER_PROVIDER_ENABLED=true bo'lganda ishlatiladi) shahar
 # nomini emas, lat/lon so'raydi, shuning uchun koordinata ham kerak.

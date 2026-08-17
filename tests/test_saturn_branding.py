@@ -114,9 +114,9 @@ def test_saturn_wordmark_pixel_color_matches_brand_red_in_rendered_image():
     # "SATURN" matni logotipdan o'ngda, lockup ichida — shu hududni
     # skanerlab, brend qizil rangidagi piksel borligini tasdiqlaymiz.
     found = False
-    search_top = saturn_image._MARGIN
-    search_bottom = saturn_image._MARGIN + saturn_image._LOGO_HEIGHT
-    search_left = saturn_image._MARGIN + saturn_image._LOGO_HEIGHT
+    search_top = saturn_image._BRAND_MARGIN
+    search_bottom = saturn_image._BRAND_MARGIN + saturn_image._LOGO_HEIGHT
+    search_left = saturn_image._BRAND_MARGIN + saturn_image._LOGO_HEIGHT
     search_right = search_left + 250
     for y in range(search_top, min(search_bottom, image.height), 3):
         for x in range(search_left, min(search_right, image.width), 3):

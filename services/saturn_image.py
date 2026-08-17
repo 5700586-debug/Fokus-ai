@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import company_time
 from config import SATURN_LOGO_PATH
+from services import photo_catalog, photo_scene
 from services import saturn_scene
 from services import saturn_season
 from services import saturn_weather_scene
@@ -40,9 +41,14 @@ _ADVICE_SIZE = 42
 _MIN_ADVICE_SIZE = 38
 _BADGE_SIZE = 28
 _WORDMARK_SIZE = 36
-_FOKUS_AI_SIZE = 24
+_FOKUS_AI_SIZE = 38
 
 _MAX_ADVICE_LINES = 2
+
+# Burchak elementlari (brand lockup, ob-havo belgisi, "Fokus AI" imzosi)
+# uchun chetga yaqinroq, ixcham margin — asosiy glass card (``_MARGIN``)
+# dan ATAYLAB kichikroq.
+_BRAND_MARGIN = 28
 
 # Brand lockup ("[AIM logotipi]  SATURN", yuqori chap burchak).
 _LOGO_HEIGHT = 84
@@ -148,10 +154,10 @@ def _draw_saturn_mark(draw: ImageDraw.ImageDraw, image: Image.Image) -> None:
     content_w = logo_w + gap + text_w
     content_h = max(_LOGO_HEIGHT if logo else 0, text_h)
 
-    card_left = _MARGIN - _LOCKUP_PADDING
-    card_top = _MARGIN - _LOCKUP_PADDING
-    card_right = _MARGIN + content_w + _LOCKUP_PADDING
-    card_bottom = _MARGIN + content_h + _LOCKUP_PADDING
+    card_left = _BRAND_MARGIN - _LOCKUP_PADDING
+    card_top = _BRAND_MARGIN - _LOCKUP_PADDING
+    card_right = _BRAND_MARGIN + content_w + _LOCKUP_PADDING
+    card_bottom = _BRAND_MARGIN + content_h + _LOCKUP_PADDING
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     overlay_draw.rounded_rectangle(
@@ -160,21 +166,43 @@ def _draw_saturn_mark(draw: ImageDraw.ImageDraw, image: Image.Image) -> None:
     image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"), (0, 0))
 
     if logo:
-        logo_y = _MARGIN + (content_h - _LOGO_HEIGHT) // 2
-        image.paste(logo, (_MARGIN, logo_y), logo)
+        logo_y = _BRAND_MARGIN + (content_h - _LOGO_HEIGHT) // 2
+        image.paste(logo, (_BRAND_MARGIN, logo_y), logo)
 
-    text_x = _MARGIN + logo_w + gap
-    text_y = _MARGIN + (content_h - text_h) // 2 - text_bbox[1]
+    text_x = _BRAND_MARGIN + logo_w + gap
+    text_y = _BRAND_MARGIN + (content_h - text_h) // 2 - text_bbox[1]
     draw.text((text_x, text_y), text, font=font, fill=_BRAND_RED)
 
 
-def _draw_fokus_ai_wordmark(draw: ImageDraw.ImageDraw, text_color: tuple[int, int, int]) -> None:
-    font = _font(bold=False, size=_FOKUS_AI_SIZE)
+def _draw_fokus_ai_wordmark(draw: ImageDraw.ImageDraw, image: Image.Image) -> None:
+    """Pastki o'ng burchakda, brend qizil rangida (logotip bilan bir
+    xil), orqasida kichik frosted kartochka — do'kon shakli yoki
+    markazdagi matn bilan hech qachon kesishmaydi (qarang
+    ``services/saturn_scene.py``dagi ``_CARD_CLEAR_Y`` va do'kon
+    joylashuvi, ular bu burchakdan chetlab o'tadigan qilib
+    loyihalangan)."""
+    font = _font(bold=True, size=_FOKUS_AI_SIZE)
     text = "Fokus AI"
-    width = draw.textlength(text, font=font)
-    x = IMAGE_SIZE - _MARGIN - width
-    y = IMAGE_SIZE - _MARGIN - _FOKUS_AI_SIZE
-    draw.text((x, y), text, font=font, fill=text_color)
+    text_bbox = font.getbbox(text)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
+
+    padding = 14
+    card_right = IMAGE_SIZE - _BRAND_MARGIN
+    card_bottom = IMAGE_SIZE - _BRAND_MARGIN
+    card_left = card_right - text_w - padding * 2
+    card_top = card_bottom - text_h - padding * 2
+
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rounded_rectangle(
+        [card_left, card_top, card_right, card_bottom], radius=16, fill=(255, 255, 255, 190)
+    )
+    image.paste(Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB"), (0, 0))
+
+    text_x = card_left + padding
+    text_y = card_top + padding - text_bbox[1]
+    draw.text((text_x, text_y), text, font=font, fill=_BRAND_RED)
 
 
 def _draw_weather_badge(draw: ImageDraw.ImageDraw, badge_text: str, text_color: tuple[int, int, int]) -> None:
@@ -183,9 +211,11 @@ def _draw_weather_badge(draw: ImageDraw.ImageDraw, badge_text: str, text_color: 
     font = _font(bold=False, size=_BADGE_SIZE)
     width = draw.textlength(badge_text, font=font)
     padding_x, padding_y = 20, 12
-    box_right = IMAGE_SIZE - _MARGIN
+    box_right = IMAGE_SIZE - _BRAND_MARGIN
     box_left = box_right - width - padding_x * 2
-    box_top = _MARGIN
+    # Chap tarafdagi brand lockup kartochkasi bilan AYNAN bir xil
+    # balandlikda boshlanishi uchun ("xuddi shu balandlikda" talabi).
+    box_top = _BRAND_MARGIN - _LOCKUP_PADDING
     box_bottom = box_top + _BADGE_SIZE + padding_y * 2
 
     draw.rounded_rectangle(
@@ -227,6 +257,46 @@ def _advice_font_size(draw: ImageDraw.ImageDraw, text: str) -> int:
     return _MIN_ADVICE_SIZE
 
 
+def _select_background(season: str, weather_category: str, time_of_day: str, local_date, variant: int):
+    """Kataloglangan HAQIQIY foto mos kelsa — shundan foydalanadi
+    (``services/photo_scene.py``). Mos foto topilmasa (katalog hali
+    kichik yoki bo'sh), avvalgi dasturiy vektor sahnaga (``services/saturn_scene.py``)
+    qaytadi — rasm hech qachon "bo'sh"/xatoli chiqmaydi."""
+    catalog = photo_catalog.get_default_catalog()
+    selection = photo_catalog.select_photo(
+        catalog, season, weather_category, time_of_day, local_date, recent_photo_ids=[]
+    )
+    if selection is not None:
+        asset, variant_id = selection
+        return photo_scene.render_photo_background(asset, weather_category, time_of_day, variant_id)
+
+    return saturn_scene.render_background(season, weather_category, time_of_day, variant)
+
+
+def get_background_credit(
+    season: str | None = None,
+    weather_category: str | None = None,
+    time_of_day: str = saturn_scene.TIME_MORNING,
+    local_date=None,
+) -> str | None:
+    """Agar shu parametrlar uchun HAQIQIY kataloglangan foto
+    ishlatilgan bo'lsa, Telegram caption'ga qo'shiladigan qisqa kredit
+    matnini qaytaradi (masalan ``"📷 Bonnie Moreland / openverse"``).
+    Vektor sahna ishlatilgan bo'lsa (foto topilmagan) — ``None``."""
+    local_date = local_date or company_time.today()
+    season = season or saturn_season.season_for_date(local_date)
+    weather_category = weather_category or saturn_weather_scene.CATEGORY_SEASON_DEFAULT
+
+    catalog = photo_catalog.get_default_catalog()
+    selection = photo_catalog.select_photo(
+        catalog, season, weather_category, time_of_day, local_date, recent_photo_ids=[]
+    )
+    if selection is None:
+        return None
+    asset, _variant_id = selection
+    return f"📷 {asset.photographer} / {asset.source}"
+
+
 def render_morning_image(
     advice_text: str,
     weather_text: str | None = None,
@@ -247,7 +317,7 @@ def render_morning_image(
     if variant is None:
         variant = saturn_scene.variant_index(local_date, offset=0)
 
-    image = saturn_scene.render_background(season, weather_category, saturn_scene.TIME_MORNING, variant)
+    image = _select_background(season, weather_category, saturn_scene.TIME_MORNING, local_date, variant)
 
     draw = ImageDraw.Draw(image)
 
@@ -268,7 +338,7 @@ def render_morning_image(
     advice_lines = _advice_lines_at(draw, advice_text, advice_size)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_MORNING_TEXT)
 
-    _draw_fokus_ai_wordmark(draw, _MORNING_TEXT)
+    _draw_fokus_ai_wordmark(draw, image)
 
     return _encode_png(image)
 
@@ -291,7 +361,7 @@ def render_night_image(
     if variant is None:
         variant = saturn_scene.variant_index(local_date, offset=1)
 
-    image = saturn_scene.render_background(season, weather_category, saturn_scene.TIME_NIGHT, variant)
+    image = _select_background(season, weather_category, saturn_scene.TIME_NIGHT, local_date, variant)
 
     draw = ImageDraw.Draw(image)
     _draw_saturn_mark(draw, image)
@@ -308,7 +378,7 @@ def render_night_image(
     advice_lines = _advice_lines_at(draw, advice_text, advice_size)
     _draw_multiline_centered(draw, advice_lines, advice_font, top_y=next_y + 40, fill=_NIGHT_TEXT)
 
-    _draw_fokus_ai_wordmark(draw, _NIGHT_TEXT)
+    _draw_fokus_ai_wordmark(draw, image)
 
     return _encode_png(image)
 

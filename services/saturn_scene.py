@@ -119,9 +119,9 @@ def _paint_shop_silhouette(image: Image.Image, rng: random.Random, dark: bool) -
     roof_apex_y = _CARD_CLEAR_Y + 20
     wall_top_y = roof_apex_y + 24
     wall_bottom_y = wall_top_y + 75
-    # O'ng chetdan biroz ichkariroq — pastki-o'ng burchakdagi "Fokus AI"
-    # yozuvi bilan gorizontal kesishmasligi uchun.
-    left = IMAGE_SIZE - width - 200
+    # O'ng chetdan sezilarli ichkariroq — pastki-o'ng burchakdagi kattalashtirilgan
+    # "Fokus AI" yozuvi/kartochkasi bilan gorizontal kesishmasligi uchun.
+    left = IMAGE_SIZE - width - 280
 
     wall_color = (58, 46, 40) if dark else (150, 118, 96)
     roof_color = (40, 32, 28) if dark else (110, 80, 62)

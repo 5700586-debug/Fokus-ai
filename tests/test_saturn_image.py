@@ -196,11 +196,17 @@ def test_all_render_functions_default_gracefully_without_optional_scene_args():
 
 def test_logo_weather_badge_and_signature_do_not_overlap_the_glass_card():
     """Chapdagi logotip, o'ngdagi ob-havo belgisi va pastki o'ngdagi
-    'Fokus AI' yozuvi markazdagi glass card zonasidan (Y 350-900)
-    tashqarida joylashgan bo'lishi kerak."""
+    'Fokus AI' yozuvi markazdagi glass card zonasidan tashqarida
+    joylashgan bo'lishi kerak."""
     assert saturn_image._CARD_TOP > 180  # logotip/ob-havo belgisi balandligidan pastda
-    fokus_ai_top = saturn_image.IMAGE_SIZE - saturn_image._MARGIN - saturn_image._FOKUS_AI_SIZE
-    assert fokus_ai_top > saturn_image._CARD_BOTTOM
+
+    font = saturn_image._font(bold=True, size=saturn_image._FOKUS_AI_SIZE)
+    text_bbox = font.getbbox("Fokus AI")
+    text_h = text_bbox[3] - text_bbox[1]
+    padding = 14
+    card_bottom = saturn_image.IMAGE_SIZE - saturn_image._BRAND_MARGIN
+    fokus_ai_card_top = card_bottom - text_h - padding * 2
+    assert fokus_ai_card_top > saturn_image._CARD_BOTTOM
 
 
 def test_wrap_text_respects_max_lines():
@@ -268,3 +274,41 @@ def test_rendered_advice_text_is_never_smaller_than_min_size_visually():
     draw = ImageDraw.Draw(canvas)
     size = saturn_image._advice_font_size(draw, longest[1])
     assert size >= saturn_image._MIN_ADVICE_SIZE
+
+
+# --------------------------------------------------------- fotoreal fon --
+
+
+def test_get_background_credit_returns_none_for_uncovered_combo():
+    """Katalogda mos foto yo'q bo'lgan kombinatsiya uchun kredit
+    ``None`` bo'lishi kerak (vektor sahna ishlatilgan degani)."""
+    credit = saturn_image.get_background_credit(
+        season="qish", weather_category="drizzle", time_of_day="morning", local_date=date(2026, 1, 1)
+    )
+    assert credit is None
+
+
+def test_get_background_credit_returns_text_for_covered_combo():
+    credit = saturn_image.get_background_credit(
+        season="bahor", weather_category="clear", time_of_day="morning", local_date=date(2026, 5, 1)
+    )
+    assert credit is not None
+    assert credit.startswith("📷")
+
+
+def test_morning_image_renders_with_real_photo_background_without_error():
+    data = saturn_image.render_morning_image(
+        "Test.", season="bahor", weather_category="clear", local_date=date(2026, 5, 1)
+    )
+    image = _open(data)
+    assert image.size == (saturn_image.IMAGE_SIZE, saturn_image.IMAGE_SIZE)
+
+
+def test_night_image_falls_back_to_vector_scene_for_uncovered_combo():
+    """Katalogda mos foto bo'lmasa ham, rasm hech qachon xato bermaydi
+    — dasturiy vektor sahnaga qaytadi."""
+    data = saturn_image.render_night_image(
+        "Test.", season="qish", weather_category="drizzle", local_date=date(2026, 1, 1)
+    )
+    image = _open(data)
+    assert image.size == (saturn_image.IMAGE_SIZE, saturn_image.IMAGE_SIZE)

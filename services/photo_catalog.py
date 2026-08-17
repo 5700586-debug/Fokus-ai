@@ -2,12 +2,13 @@
 metadata'si (``assets/photos/manifest.json``) va deterministik
 tanlov mantiqi.
 
-HOZIRGI HOLAT: katalog to'liq bo'sh emas, lekin "10 yil" yoki
-"60-100 ta" maqsadga hali YETMAGAN — qarang loyiha ildizidagi
-final hisobotdagi ``PHOTO_SOURCE_REQUIRED`` bo'limi aniq sonlar
-uchun. Bu modul katalog hajmidan qat'i nazar TO'G'RI ishlaydi —
-bo'sh katalogda ham xato bermaydi, faqat ``None``/bo'sh natija
-qaytaradi (chaqiruvchi kod dasturiy sahna fallback'iga o'tadi).
+HOZIRGI HOLAT: 123 ta haqiqiy, litsenziyasi tekshirilgan foto
+(Wikimedia Commons CC0/PDM + Pexels License) — 15 ta fasl/ob-havo/
+kun-vaqti kombinatsiyasini qamrab oladi. Aniq sonlar va manba
+tafsilotlari uchun qarang ``assets/photos/LICENSE_MANIFEST.md``.
+Bu modul katalog hajmidan qat'i nazar TO'G'RI ishlaydi — bo'sh
+katalogda ham xato bermaydi, faqat ``None``/bo'sh natija qaytaradi
+(chaqiruvchi kod dasturiy sahna fallback'iga o'tadi).
 
 Har bir katalog yozuvi manba, litsenziya va checksum'ni saqlaydi —
 fayl manifestdagi checksum bilan mos kelmasa (masalan qo'lda
@@ -27,14 +28,18 @@ logger = logging.getLogger(__name__)
 _ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "photos"
 _MANIFEST_PATH = _ASSETS_DIR / "manifest.json"
 
-# Bitta asosiy fotodan xavfsiz olinadigan variant transformatsiyalari
-# soni (crop/pan pozitsiyasi x rang ishlovi kombinatsiyasi). ``variant_id``
-# sana bilan birga hash qilingani uchun, kunlar davomida haqiqiy
-# takrorlanmaslik sana oralig'idan kelib chiqadi (qarang
-# ``variant_id_for``) — bu son shunchaki bitta fotoning necha "ko'rinishi"
-# borligini ifodalaydi, deterministik tanlovning o'zi cheksiz sana
-# oralig'ida takrorlanmaydigan hash'ga asoslangan.
-VARIANTS_PER_PHOTO = 10
+# Bitta asosiy fotodan olinadigan, ko'z bilan farqlanadigan variant
+# transformatsiyalari soni — quyidagi mustaqil o'lchamlarning
+# (``services/photo_scene.py``da amalga oshirilgan) konservativ
+# ko'paytmasi:
+#   zoom darajasi (3) x gorizontal mirror (2) x pan joylashuvi
+#   (~4 farqlanadigan hudud: original kvadratning to'rt burchagiga
+#   og'gan kesim) x yorug'lik/kontrast/rang ohangi (~3 farqlanadigan
+#   band: yumshoq/neytral/quyuq) = 3 x 2 x 4 x 3 = 72.
+# ``variant_id`` sana bilan birga hash qilingani uchun, kunlar
+# davomida haqiqiy takrorlanmaslik sana oralig'idan kelib chiqadi
+# (qarang ``variant_id_for``).
+VARIANTS_PER_PHOTO = 72
 
 # Bir xil asosiy foto kamida shuncha kun ichida qaytarilmasin.
 MIN_DAYS_BETWEEN_SAME_PHOTO = 30

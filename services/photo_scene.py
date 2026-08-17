@@ -12,11 +12,16 @@ xil ishlaydi.
 import hashlib
 import random
 
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
 
 from services import photo_catalog, saturn_scene
 
 IMAGE_SIZE = saturn_scene.IMAGE_SIZE
+
+# Bitta asosiy fotodan kesib olinadigan "zoom" darajalari — kattaroq
+# qiymat markazga yaqinroq/torroq kesim degani (qarang
+# ``photo_catalog.VARIANTS_PER_PHOTO`` docstringidagi hisob-kitob).
+_ZOOM_LEVELS = (1.0, 1.1, 1.22)
 
 
 def _seed(photo_id: str, variant_id: str) -> random.Random:
@@ -27,21 +32,27 @@ def _seed(photo_id: str, variant_id: str) -> random.Random:
 
 def _deterministic_square_crop(photo: Image.Image, rng: random.Random) -> Image.Image:
     """Fotoni deterministik (lekin variant bo'yicha xilma-xil) tarzda
-    kvadrat qilib kesadi — original nisbatga qarab yon yoki tepa-past
-    joylashuv tasodifiy (lekin seed'ga bog'liq) tanlanadi."""
+    kvadrat qilib kesadi — pan joylashuvi, zoom darajasi va gorizontal
+    aylantirish (mirror) seed'ga bog'liq tanlanadi (qarang
+    ``photo_catalog.VARIANTS_PER_PHOTO``)."""
     width, height = photo.size
-    side = min(width, height)
+    base_side = min(width, height)
+    zoom = rng.choice(_ZOOM_LEVELS)
+    side = max(int(base_side / zoom), 64)
     max_x = width - side
     max_y = height - side
     offset_x = rng.randint(0, max_x) if max_x > 0 else 0
     offset_y = rng.randint(0, max_y) if max_y > 0 else 0
-    return photo.crop((offset_x, offset_y, offset_x + side, offset_y + side))
+    cropped = photo.crop((offset_x, offset_y, offset_x + side, offset_y + side))
+    if rng.random() < 0.5:
+        cropped = ImageOps.mirror(cropped)
+    return cropped
 
 
 def _apply_grade(image: Image.Image, time_of_day: str, rng: random.Random) -> Image.Image:
-    brightness = rng.uniform(0.95, 1.05)
-    contrast = rng.uniform(0.97, 1.07)
-    saturation = rng.uniform(0.98, 1.08)
+    brightness = rng.uniform(0.90, 1.10)
+    contrast = rng.uniform(0.93, 1.10)
+    saturation = rng.uniform(0.92, 1.12)
     image = ImageEnhance.Brightness(image).enhance(brightness)
     image = ImageEnhance.Contrast(image).enhance(contrast)
     image = ImageEnhance.Color(image).enhance(saturation)

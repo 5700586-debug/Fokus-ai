@@ -102,6 +102,13 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("recruiting_applications", "pos_experience", "INTEGER"),
     ("recruiting_applications", "cash_handling_text", "TEXT"),
     ("recruiting_applications", "reference_check_consent", "INTEGER"),
+    ("recruiting_applications", "prev_salary_text", "TEXT"),
+    ("recruiting_applications", "retention_intent", "TEXT"),
+    ("recruiting_applications", "retention_intent_reason", "TEXT"),
+    ("recruiting_applications", "attendance_barrier_text", "TEXT"),
+    ("recruiting_applications", "substance_policy_agree", "INTEGER"),
+    ("recruiting_applications", "criminal_record", "INTEGER"),
+    ("recruiting_applications", "candidate_photo_file_id", "TEXT"),
     ("recruiting_assessments", "red_flags_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
 ]

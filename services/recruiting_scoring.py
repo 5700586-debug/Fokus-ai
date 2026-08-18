@@ -57,18 +57,21 @@ _REDFLAG_CRITERIA_QUESTIONS: dict[str, dict[str, tuple[str, ...]]] = {
     "muddat_xavfsizligi": {"kassir": ("kassir_muddat",), "sotuvchi": ("sotuvchi_muddat",)},
     "javobgarlik": {"kassir": ("kassir_kamomad", "kassir_javobgarlik")},
     "muomala": {"kassir": ("kassir_janjal",), "sotuvchi": ("sotuvchi_norozilik",)},
+    "halollik": {"kassir": ("umumiy_ogirlik_guvoh",), "sotuvchi": ("umumiy_ogirlik_guvoh",)},
 }
 _REDFLAG_CHECKER: dict[str, "callable[[str], str]"] = {
     "kassa_xavfsizlik": recruiting_redflags.check_credential_sharing,
     "muddat_xavfsizligi": recruiting_redflags.check_expired_product,
     "javobgarlik": recruiting_redflags.check_shortage_response,
     "muomala": recruiting_redflags.check_customer_conflict,
+    "halollik": recruiting_redflags.check_theft_witness,
 }
 _REDFLAG_FLAG_KEY: dict[str, str] = {
     "kassa_xavfsizlik": recruiting_redflags.CREDENTIAL_SHARING,
     "muddat_xavfsizligi": recruiting_redflags.EXPIRED_PRODUCT,
     "javobgarlik": recruiting_redflags.SHORTAGE_COVERUP,
     "muomala": recruiting_redflags.CUSTOMER_CONFLICT,
+    "halollik": recruiting_redflags.THEFT_COVERUP,
 }
 
 _KASSIR_CRITERION_QUESTIONS: dict[str, list[str]] = {

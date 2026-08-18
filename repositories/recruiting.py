@@ -151,6 +151,13 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "pos_experience",
     "cash_handling_text",
     "reference_check_consent",
+    "prev_salary_text",
+    "retention_intent",
+    "retention_intent_reason",
+    "attendance_barrier_text",
+    "substance_policy_agree",
+    "criminal_record",
+    "candidate_photo_file_id",
 }
 
 

@@ -42,7 +42,13 @@ from aiogram.types import (
 )
 from openai import AsyncOpenAI
 
-from config import FOUNDER_ID, RECRUITING_MAX_FOLLOW_UPS, RECRUITING_MAX_VOICE_SECONDS, RECRUITING_MIN_AGE
+from config import (
+    FOUNDER_ID,
+    RECRUITING_BRANCH_NAMES,
+    RECRUITING_MAX_FOLLOW_UPS,
+    RECRUITING_MAX_VOICE_SECONDS,
+    RECRUITING_MIN_AGE,
+)
 from repositories import recruiting as recruiting_repo
 from services import (
     audit,
@@ -69,20 +75,16 @@ class RecruitingStates(StatesGroup):
     follow_up = State()
     math_question = State()
     motivation = State()
+    candidate_photo = State()
 
 
-_ALL_STATES = tuple(RecruitingStates.__all_states__)
-
-# ATAYLAB ``main.py``dagi umumiy ``CANCEL_TEXT``/``BACK_TEXT``dan FARQLI
-# matn: main.py'da ``_ClearStaleStateMiddleware`` xuddi shu matnlarni
-# ko'rib, HAR QANDAY oqim uchun FSM holatini yo'nalishga yetib
-# borishidan OLDIN tozalab yuboradi (global "qochish" mexanizmi). Agar
-# bu yerda ham AYNAN o'sha matn ishlatilsa, rekruting arizasini DB'da
-# "bekor qilindi" deb belgilaydigan handler HECH QACHON ishga
-# tushmaydi — chunki state allaqachon ``None``ga aylantirilgan bo'ladi.
-_CANCEL_TEXT = "🚫 Arizani bekor qilish"
-_CANCEL_KB = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=_CANCEL_TEXT)]], resize_keyboard=True)
-
+# Real Telegram sinovida topilgan muammo: doimiy "❌ Bekor qilish"
+# tugmasi tasodifan bosilib, suhbat yo'qolib qolardi. Endi bekor qilish
+# FAQAT ataylab yozilgan ``/cancel`` buyrug'i orqali — tasodifan bosib
+# bo'lmaydi (qarang ``handle_cancel`` — ``/cancel`` uchun FSM holatiga
+# emas, to'g'ridan-to'g'ri DB'ga tayanadi, chunki main.py'dagi global
+# middleware "/" bilan boshlangan xabarlar uchun holatni handler
+# ishga tushishidan OLDIN allaqachon tozalab yuboradi).
 _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 
 _NO_VACANCY_TEXT = "Hozircha faol vakansiya mavjud emas. Murojaatingiz uchun rahmat."
@@ -93,7 +95,7 @@ _CONSENT_TEXT = (
     "shuning uchun har safar bittadan savol beraman.\n\n"
     "• Javoblaringiz FAQAT ishga qabul jarayonida ishlatiladi.\n"
     "• Yakuniy qarorni FAQAT inson (Saturn jamoasi vakili) qabul qiladi.\n"
-    "• Istalgan vaqtda jarayonni bekor qilishingiz mumkin.\n\n"
+    "• Istalgan vaqtda /cancel buyrug'i bilan to'xtatishingiz mumkin.\n\n"
     "Boshlaymizmi?"
 )
 
@@ -124,7 +126,11 @@ _STEPS_B_C: list[dict] = [
     },
     {"key": "phone", "kind": "phone", "prompt": "Telefon raqamingizni yuboring (tugma orqali yoki yozib):", "column": "phone"},
     {"key": "residence_area", "kind": "text", "prompt": "Qaysi hudud yoki tumanda yashaysiz?", "column": "residence_area"},
-    {"key": "preferred_branch", "kind": "text", "prompt": "Qaysi filialimizga kelish sizga qulayroq?", "column": "preferred_branch"},
+    {
+        "key": "preferred_branch", "kind": "choice", "prompt": "Qaysi filialda ishlamoqchisiz?",
+        "column": "preferred_branch",
+        "options": [(name, name) for name in RECRUITING_BRANCH_NAMES],
+    },
     {"key": "start_date", "kind": "text", "prompt": "Ishni qachondan boshlay olasiz?", "column": "start_date_text"},
     {
         "key": "shift_preference", "kind": "choice", "prompt": "Qaysi smenada ishlay olasiz?", "column": "shift_preference",
@@ -139,7 +145,16 @@ _STEPS_B_C: list[dict] = [
         "key": "holiday_available", "kind": "choice", "prompt": "Dam olish va bayram kunlarida ishlay olasizmi?",
         "column": "holiday_available", "options": [("yes", "✅ Ha"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
     },
-    {"key": "expected_salary", "kind": "text", "prompt": "Kutayotgan oyligingiz qancha?", "column": "expected_salary"},
+    {
+        "key": "prev_salary", "kind": "text",
+        "prompt": "Oldingi ishingizda oyiga taxminan qancha olardingiz?",
+        "column": "prev_salary_text",
+    },
+    {
+        "key": "expected_salary", "kind": "text",
+        "prompt": "Bizda ishlasangiz, qancha oylik kutyapsiz?",
+        "column": "expected_salary",
+    },
     {
         "key": "commute_issue", "kind": "choice", "prompt": "Filialgacha yetib kelishda muammo bormi?",
         "column": "commute_issue", "options": [("yes", "✅ Ha, bor"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
@@ -176,6 +191,31 @@ _STEPS_D: list[dict] = [
         "prompt": "Oldingi ish joyingizdan siz haqingizda so'rab bog'lanishimiz mumkinmi?",
         "column": "reference_check_consent", "options": [("yes", "✅ Mumkin"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
     },
+    {
+        "key": "retention_intent", "kind": "choice",
+        "prompt": "Taxminan biz bilan qancha vaqt ishlashni rejalashtiryapsiz?",
+        "column": "retention_intent",
+        "options": [("6oygacha", "6 oygacha"), ("6_12oy", "6-12 oy"), ("1yil_plus", "1 yil va undan ko'p")],
+    },
+    {
+        "key": "attendance_barrier", "kind": "text",
+        "prompt": "Bizning ish jadvalimizga muntazam kelishingizga xalaqit berishi mumkin bo'lgan holat bormi? (bo'lmasa \"yo'q\" deb yozing)",
+        "column": "attendance_barrier_text",
+    },
+    {
+        "key": "substance_policy", "kind": "choice",
+        "prompt": (
+            "Bizda ish vaqtida spirtli ichimlik, mast holatda kelish va ish joyida "
+            "chekish mumkin emas. Bu qoidalar sizga to'g'ri keladimi?"
+        ),
+        "column": "substance_policy_agree", "options": [("yes", "✅ Ha, to'g'ri keladi"), ("no", "❌ Yo'q")],
+        "value_map": _YES_NO_MAP,
+    },
+    {
+        "key": "criminal_record", "kind": "choice",
+        "prompt": "Yana bir savol, iltimos hurmat bilan qarang: sudlanganlik tarixingiz bormi?",
+        "column": "criminal_record", "options": [("yes", "✅ Ha, bor"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
+    },
 ]
 
 _ALL_STEPS: list[dict] = _STEPS_B_C + _STEPS_D
@@ -185,6 +225,15 @@ _ACCOMMODATION_TEXT_STEP = {
     "prompt": "Qanday qulaylik kerak bo'lishini qisqacha yozib bera olasizmi?",
     "column": "accommodation_text",
 }
+_RETENTION_REASON_STEP = {
+    "key": "retention_intent_reason", "kind": "text",
+    "prompt": "Tushunarli 🙂 Bunga biror alohida sabab bormi?",
+    "column": "retention_intent_reason",
+}
+_PHOTO_PROMPT = (
+    "So'nggi savol 🙂 Hozirgi oddiy bir rasmingizni yubora olasizmi? "
+    "(Yubormoqchi bo'lmasangiz, \"yo'q\" deb yozing)"
+)
 
 _MOTIVATION_PROMPT = (
     "Oxirgi savol: nega aynan Saturn jamoasida ishlashni xohlaysiz?\n"
@@ -203,10 +252,7 @@ _MISMATCH_CLOSING_TEXT = (
 
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)],
-            [KeyboardButton(text=_CANCEL_TEXT)],
-        ],
+        keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
         resize_keyboard=True,
     )
 
@@ -330,16 +376,24 @@ async def handle_vacancy_choice(callback: CallbackQuery, state: FSMContext) -> N
 
 
 async def handle_cancel(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    application_id = data.get("application_id")
-    if application_id:
-        recruiting_repo.cancel_application(application_id)
-        audit.log_event(
-            audit.EVENT_RECRUITING_APPLICATION_CANCELLED,
-            actor_id=message.from_user.id if message.from_user else None,
-            target_id=application_id,
-        )
+    # ``/cancel`` — main.py'dagi ``_ClearStaleStateMiddleware`` "/"
+    # bilan boshlangan HAR QANDAY xabar uchun FSM holatini bu handler
+    # ishga tushishidan OLDIN allaqachon tozalab yuboradi — shuning
+    # uchun ariza ID'sini FSM ma'lumotidan emas, to'g'ridan-to'g'ri
+    # DB'dan (nomzod Telegram ID'si bo'yicha) olamiz.
     await state.clear()
+    candidate_id = message.from_user.id if message.from_user else None
+    application = recruiting_repo.get_in_progress_application(candidate_id) if candidate_id else None
+    if application is None:
+        await message.answer("Hozircha faol arizangiz yo'q.")
+        return
+
+    recruiting_repo.cancel_application(application["id"])
+    audit.log_event(
+        audit.EVENT_RECRUITING_APPLICATION_CANCELLED,
+        actor_id=candidate_id,
+        target_id=application["id"],
+    )
     await message.answer(
         "Ariza bekor qilindi. Xohlasangiz, /apply orqali qaytadan boshlashingiz mumkin.",
         reply_markup=ReplyKeyboardRemove(),
@@ -403,7 +457,7 @@ async def _send_step_prompt(message: Message, state: FSMContext, step: dict) -> 
         await message.answer(step["prompt"], reply_markup=_choice_kb(step["key"], step["options"]))
         return
     await state.set_state(RecruitingStates.collecting_text)
-    await message.answer(step["prompt"], reply_markup=_CANCEL_KB)
+    await message.answer(step["prompt"])
 
 
 async def _advance_after_step(message: Message, state: FSMContext, data: dict) -> None:
@@ -477,6 +531,10 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
         recruiting_repo.update_application(data["application_id"], accommodation_text=text)
         await _advance_after_step(message, state, data)
         return
+    if step_key == "retention_intent_reason":
+        recruiting_repo.update_application(data["application_id"], retention_intent_reason=text)
+        await _advance_after_step(message, state, data)
+        return
 
     step = _STEP_BY_KEY.get(step_key)
     if step is None:
@@ -523,7 +581,13 @@ async def handle_choice_step_answer(callback: CallbackQuery, state: FSMContext) 
     if step_key == "accommodation_needed" and raw_value == "yes" and callback.message:
         await state.update_data(step_key="accommodation_text")
         await state.set_state(RecruitingStates.collecting_text)
-        await callback.message.answer(_ACCOMMODATION_TEXT_STEP["prompt"], reply_markup=_CANCEL_KB)
+        await callback.message.answer(_ACCOMMODATION_TEXT_STEP["prompt"])
+        return
+
+    if step_key == "retention_intent" and raw_value == "6oygacha" and callback.message:
+        await state.update_data(step_key="retention_intent_reason")
+        await state.set_state(RecruitingStates.collecting_text)
+        await callback.message.answer(_RETENTION_REASON_STEP["prompt"])
         return
 
     if callback.message:
@@ -539,7 +603,7 @@ async def _advance_role_questions(message: Message, state: FSMContext, data: dic
     await state.update_data(question_index=index, follow_up_attempt=0)
     await state.set_state(RecruitingStates.role_question)
     if index < len(questions):
-        await message.answer(questions[index][1], reply_markup=_CANCEL_KB)
+        await message.answer(questions[index][1])
     else:
         await _finish_role_questions(message, state, data)
 
@@ -583,7 +647,7 @@ async def _maybe_ask_follow_up(
                 follow_up_question_text=follow_up_question,
             )
             await state.set_state(RecruitingStates.follow_up)
-            await message.answer(follow_up_question, reply_markup=_CANCEL_KB)
+            await message.answer(follow_up_question)
             return
 
     await _advance_role_questions(message, state, data, index + 1)
@@ -659,7 +723,7 @@ async def handle_math_choice(callback: CallbackQuery, state: FSMContext) -> None
 
 async def _ask_motivation(message: Message, state: FSMContext) -> None:
     await state.set_state(RecruitingStates.motivation)
-    await message.answer(_MOTIVATION_PROMPT, reply_markup=_CANCEL_KB)
+    await message.answer(_MOTIVATION_PROMPT)
 
 
 async def handle_motivation_voice(
@@ -683,29 +747,53 @@ async def handle_motivation_voice(
         )
         return
 
-    await _finish_application(message, state, transcript, answer_source="voice", openai_client=openai_client)
+    await _ask_for_photo(message, state, transcript, answer_source="voice")
 
 
-async def handle_motivation_text(
-    message: Message, state: FSMContext, openai_client: AsyncOpenAI | None
-) -> None:
+async def handle_motivation_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
         await message.answer("❌ Iltimos, javob yozing yoki ovozli xabar yuboring.")
         return
 
-    await _finish_application(message, state, text, answer_source="text", openai_client=openai_client)
+    await _ask_for_photo(message, state, text, answer_source="text")
+
+
+# -------------------------------------------------------------------- rasm --
+# Real Telegram sinovidan keyingi qo'shimcha: suhbat oxirida nomzoddan
+# oddiy rasm so'raladi. AI rasmni HECH QACHON tahlil qilmaydi — faqat
+# ``file_id`` saqlanadi va Founder kartasida alohida yuboriladi, ballga
+# yoki qarorga umuman ta'sir qilmaydi (qarang ``_run_assessment_and_notify_founder``).
+
+
+async def _ask_for_photo(message: Message, state: FSMContext, motivation_text: str, answer_source: str) -> None:
+    await state.update_data(motivation_text=motivation_text, motivation_source=answer_source)
+    await state.set_state(RecruitingStates.candidate_photo)
+    await message.answer(_PHOTO_PROMPT)
+
+
+async def handle_candidate_photo(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    photo_file_id = message.photo[-1].file_id if message.photo else None
+    await _finish_application(
+        message, state, data["motivation_text"], data["motivation_source"], photo_file_id
+    )
 
 
 async def _finish_application(
-    message: Message, state: FSMContext, motivation_text: str, answer_source: str, openai_client: AsyncOpenAI | None
+    message: Message, state: FSMContext, motivation_text: str, answer_source: str, photo_file_id: str | None
 ) -> None:
     data = await state.get_data()
     application_id = data["application_id"]
     position_key = data["position_key"]
+    openai_client = _CURRENT_OPENAI_CLIENT.get()
 
     recruiting_repo.update_application(
-        application_id, motivation_text=motivation_text, current_step="submitted", status="awaiting_review"
+        application_id,
+        motivation_text=motivation_text,
+        candidate_photo_file_id=photo_file_id,
+        current_step="submitted",
+        status="awaiting_review",
     )
     recruiting_repo.add_answer(
         application_id, "motivation", _MOTIVATION_QUESTION_TEXT, motivation_text, answer_source=answer_source
@@ -812,6 +900,10 @@ async def _run_assessment_and_notify_founder(
     card_text = recruiting_card.format_candidate_card(
         application, vacancy, assessment, rubric_version, follow_up_questions
     )
+    if application.get("candidate_photo_file_id"):
+        await message.bot.send_photo(
+            FOUNDER_ID, application["candidate_photo_file_id"], caption=f"📷 {application.get('full_name') or '-'}"
+        )
     await message.bot.send_message(
         FOUNDER_ID, card_text, reply_markup=recruiting_card.candidate_review_keyboard(application_id)
     )
@@ -963,7 +1055,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def apply_handler(message: Message, state: FSMContext) -> None:
         await cmd_apply(message, state)
 
-    @dp.message(StateFilter(*_ALL_STATES), F.text == _CANCEL_TEXT)
+    @dp.message(Command("cancel"))
     async def cancel_handler(message: Message, state: FSMContext) -> None:
         await handle_cancel(message, state)
 
@@ -1005,7 +1097,11 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(StateFilter(RecruitingStates.motivation))
     async def motivation_text_handler(message: Message, state: FSMContext) -> None:
-        await handle_motivation_text(message, state, openai_client)
+        await handle_motivation_text(message, state)
+
+    @dp.message(StateFilter(RecruitingStates.candidate_photo))
+    async def candidate_photo_handler(message: Message, state: FSMContext) -> None:
+        await handle_candidate_photo(message, state)
 
     @dp.message(Command("vacancies"))
     async def vacancies_handler(message: Message) -> None:

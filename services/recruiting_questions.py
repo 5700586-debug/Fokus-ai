@@ -16,13 +16,28 @@ xususiyat (din, millat, oilaviy holat va h.k.) haqida HECH QACHON
 savol yo'q.
 """
 
-QUESTION_BANK_VERSION = 2
+QUESTION_BANK_VERSION = 3
 
 # Ikkala lavozim uchun umumiy — real testda "ishga kech qolish" holati
-# hech qachon so'ralmagani aniqlangan edi.
+# hech qachon so'ralmagani aniqlangan edi. Keyingi uchtasi — qadriyat/
+# real vaziyat savollari (real Telegram sinovidan keyingi qo'shimcha).
 COMMON_QUESTIONS: list[tuple[str, str]] = [
     ("umumiy_kech_qolish", "Ishga kech qolishingiz yoki kelolmasligingiz aniq bo'lsa, nima qilasiz?"),
+    (
+        "umumiy_hamkasb_telefon",
+        "Rahbar yo'q paytda sherigingiz telefonga berilib ketdi, ish esa turibdi. Siz nima qilardingiz?",
+    ),
+    (
+        "umumiy_ogirlik_guvoh",
+        "Rahbar yo'q, sherigingiz do'kondagi mahsulotni yashirib yedi yoki olib qo'ydi. "
+        "Siz buni ko'rib qolsangiz nima qilardingiz?",
+    ),
+    ("umumiy_bosh_vaqt", "Xaridor kam, sizga hozircha vazifa berilmagan. O'sha paytda nima qilasiz?"),
 ]
+
+# "umumiy_ogirlik_guvoh" — kritik: o'g'irlikni yashirish yoki unga
+# qo'shilish qizil xavf (qarang services/recruiting_redflags.check_theft_witness).
+THEFT_QUESTION_KEYS = {"umumiy_ogirlik_guvoh"}
 
 KASSIR_QUESTIONS: list[tuple[str, str]] = [
     ("kassir_kamomad", "Smena oxirida kassada pul kam chiqsa, nima qilasiz va kimga aytasiz?"),

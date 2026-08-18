@@ -114,3 +114,11 @@ RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "2")
 # uchun ishlatiladi, ballga HECH QACHON ta'sir qilmaydi (qarang
 # recruiting_bot.py va services/recruiting_scoring.py).
 RECRUITING_MIN_AGE = int(os.getenv("RECRUITING_MIN_AGE") or "18")
+
+# Nomzod filial tanlashda ko'radigan tugmalar — vergul bilan ajratilgan
+# ro'yxat (.env orqali). Standart qiymat faqat PLACEHOLDER — ishga
+# tushirishdan oldin haqiqiy filial nomlari bilan almashtirilishi kerak
+# (qarang recruiting_bot.py: "preferred_branch" qadami).
+RECRUITING_BRANCH_NAMES = [
+    name.strip() for name in (os.getenv("RECRUITING_BRANCH_NAMES") or "Filial-1,Filial-2").split(",") if name.strip()
+]

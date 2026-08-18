@@ -26,12 +26,14 @@ EXPIRED_PRODUCT = "expired_product"
 SHORTAGE_COVERUP = "shortage_coverup"
 CREDENTIAL_SHARING = "credential_sharing"
 CUSTOMER_CONFLICT = "customer_conflict"
+THEFT_COVERUP = "theft_coverup"
 
 _RED_FLAG_LABELS: dict[str, str] = {
     EXPIRED_PRODUCT: "Muddati o'tgan mahsulotni sotishga tayyor",
     SHORTAGE_COVERUP: "Kamomadni yashiradi yoki javobgarlikdan qochadi",
     CREDENTIAL_SHARING: "Login/kassa ma'lumotini boshqaga beradi",
     CUSTOMER_CONFLICT: "Xaridor bilan mojaroni kuchaytiradi",
+    THEFT_COVERUP: "O'g'irlikni yashiradi yoki unga qo'shiladi",
 }
 
 
@@ -167,5 +169,36 @@ def check_customer_conflict(answer_text: str) -> str:
     if escalates and not deescalates:
         return RED
     if deescalates:
+        return GREEN
+    return UNCLEAR
+
+
+# ---------------------------------------------------------------- o'g'irlik --
+
+_THEFT_COVERUP = (
+    "hech kimga aytmayman", "sezmaganman deyman", "indamayman", "jim turaman",
+    "yashiraman", "men ham olib qolaman", "menga nima", "aralashmayman",
+    "ko'rmaganga olaman", "bilmasman deyman", "aybini ochib qo'ymayman",
+)
+_THEFT_REPORTING = (
+    "rahbarga aytaman", "rahbarga xabar", "menejerga aytaman", "darhol xabar beraman",
+    "ogohlantiraman", "to'xtataman", "yo'l qo'ymayman", "kamerani ko'raman",
+    "xabar beraman", "aytmasdan qolmayman", "jim turmayman",
+)
+
+
+def check_theft_witness(answer_text: str) -> str:
+    """Hamkasb o'g'irlik qilganini ko'rib qolish vaziyati — yashirish
+    yoki unga qo'shilish KRITIK xavf (qarang loyihaning rekruting talab
+    hujjati: "O'g'irlikni yashirish yoki unga qo'shilish — kritik red
+    flag bo'lsin")."""
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    covers = _contains_any(text, _THEFT_COVERUP)
+    reports = _contains_any(text, _THEFT_REPORTING)
+    if covers and not reports:
+        return RED
+    if reports:
         return GREEN
     return UNCLEAR

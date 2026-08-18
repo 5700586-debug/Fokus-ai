@@ -53,6 +53,8 @@ def _redflag_checker_for(question_key: str | None):
         return recruiting_redflags.check_credential_sharing
     if question_key in rq.CUSTOMER_CONFLICT_QUESTION_KEYS:
         return recruiting_redflags.check_customer_conflict
+    if question_key in rq.THEFT_QUESTION_KEYS:
+        return recruiting_redflags.check_theft_witness
     return None
 
 
@@ -119,6 +121,8 @@ def _redflag_clarifying_question(question_key: str | None) -> str:
         return "Aniqlik uchun so'rayman — login yoki kassangizni hech kimga bermaysiz, to'g'rimi?"
     if question_key in rq.CUSTOMER_CONFLICT_QUESTION_KEYS:
         return "Xaridor sizni haqorat qilsa ham, xotirjam yo'l tutasizmi?"
+    if question_key in rq.THEFT_QUESTION_KEYS:
+        return "Tushunmadim — buni ko'rib qolsangiz, rahbarga aytasizmi?"
     return "Tushunmadim, birrov aniqroq aytib bera olasizmi?"
 
 

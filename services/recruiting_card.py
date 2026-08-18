@@ -32,6 +32,12 @@ _FIT_LABELS = {
 
 _YES_NO = {1: "ha", 0: "yo'q", None: "-"}
 
+_RETENTION_LABELS = {
+    "6oygacha": "6 oygacha",
+    "6_12oy": "6-12 oy",
+    "1yil_plus": "1 yil va undan ko'p",
+}
+
 
 def _score_bar(score: int | None) -> str:
     return {0: "❌", 1: "◐", 2: "✅", None: "➖"}.get(score, "?")
@@ -83,13 +89,20 @@ def format_candidate_card(
         f"🕒 Smena: {application.get('shift_preference') or '-'}   "
         f"Ishlay olmaydigan kunlar: {_sanitize(application.get('unavailable_days_text'), 40)}   "
         f"Bayramda: {_YES_NO.get(application.get('holiday_available'), '-')}",
-        f"💰 Kutilayotgan oylik: {application.get('expected_salary') or '-'}   📅 Boshlash sanasi: {application.get('start_date_text') or '-'}",
+        f"💰 Oldingi oylik: {application.get('prev_salary_text') or '-'}   "
+        f"Kutilayotgan oylik: {application.get('expected_salary') or '-'}",
+        f"📅 Boshlash sanasi: {application.get('start_date_text') or '-'}   "
+        f"Ishlash niyati: {_RETENTION_LABELS.get(application.get('retention_intent'), '-')}",
     ]
 
+    if application.get("retention_intent") == "6oygacha" and application.get("retention_intent_reason"):
+        lines.append(f"   ↳ Sababi: {_sanitize(application.get('retention_intent_reason'), 80)}")
     if application.get("commute_issue"):
         lines.append("🚌 Filialgacha qatnovda muammo bor deb belgiladi.")
     if application.get("accommodation_needed"):
         lines.append(f"🤝 Qulaylik so'ragan: {_sanitize(application.get('accommodation_text'), 80)}")
+    if application.get("attendance_barrier_text") and application["attendance_barrier_text"].strip().lower() not in ("yo'q", "yoq", "-"):
+        lines.append(f"🗓 Muntazam kelishga xalaqit: {_sanitize(application.get('attendance_barrier_text'), 80)}")
 
     lines += [
         "",
@@ -123,6 +136,18 @@ def format_candidate_card(
         lines.append("💬 Suhbat davomida so'ralgan qo'shimcha savollar:")
         for question in follow_up_questions[:3]:
             lines.append(f"  • {question}")
+
+    if application.get("substance_policy_agree") is not None or application.get("criminal_record") is not None:
+        lines.append("")
+        lines.append("ℹ️ Qo'shimcha ma'lumot (ball emas, faqat Founder ko'rib chiqishi uchun):")
+        if application.get("substance_policy_agree") is not None:
+            lines.append(f"  • Ichimlik/chekish qoidasiga rozi: {_YES_NO.get(application.get('substance_policy_agree'))}")
+        if application.get("criminal_record") is not None:
+            lines.append(f"  • Sudlanganlik: {_YES_NO.get(application.get('criminal_record'))} (avtomatik qaror emas)")
+
+    if application.get("candidate_photo_file_id"):
+        lines.append("")
+        lines.append("📷 Nomzod rasmi yuqorida alohida yuborildi.")
 
     lines.append("")
     lines.append(f"🤖 AI xulosasi: {assessment.get('ai_summary') or '-'}")

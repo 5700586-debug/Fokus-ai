@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS recruiting_applications (
     substance_policy_agree INTEGER,
     criminal_record INTEGER,
     candidate_photo_file_id TEXT,
+    leave_reason_followup_text TEXT,
+    property_honesty_flag INTEGER,
     experience_text TEXT,
     leave_reason_text TEXT,
     availability_text TEXT,

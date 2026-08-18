@@ -27,6 +27,7 @@ SHORTAGE_COVERUP = "shortage_coverup"
 CREDENTIAL_SHARING = "credential_sharing"
 CUSTOMER_CONFLICT = "customer_conflict"
 THEFT_COVERUP = "theft_coverup"
+PROPERTY_HONESTY = "property_honesty"
 
 _RED_FLAG_LABELS: dict[str, str] = {
     EXPIRED_PRODUCT: "Muddati o'tgan mahsulotni sotishga tayyor",
@@ -34,6 +35,7 @@ _RED_FLAG_LABELS: dict[str, str] = {
     CREDENTIAL_SHARING: "Login/kassa ma'lumotini boshqaga beradi",
     CUSTOMER_CONFLICT: "Xaridor bilan mojaroni kuchaytiradi",
     THEFT_COVERUP: "O'g'irlikni yashiradi yoki unga qo'shiladi",
+    PROPERTY_HONESTY: "Oldingi ish joyida mahsulotni ruxsatsiz olgan/yegan",
 }
 
 
@@ -202,3 +204,31 @@ def check_theft_witness(answer_text: str) -> str:
     if reports:
         return GREEN
     return UNCLEAR
+
+
+# ------------------------------------------------ mulkka munosabat (o'zi) --
+
+_PROPERTY_TAKING_ADMISSION = (
+    "qirqib yesam", "qirqib yegan", "kesib yesam", "kesib yegan", "ochib yesam",
+    "yeb qo'yardim", "yeb yurardim", "yeb qo'ygan", "olib ketardim", "olib qo'yardim",
+    "ruxsatsiz oldim", "ruxsatsiz yedim", "sotib olmasdan yedim", "sotib olmasdan olardim",
+    "pulini to'lamasdan", "hisobga olmasdan oldim", "shunchaki olardim", "shunchaki yerdim",
+)
+
+
+def check_property_honesty(answer_text: str) -> str:
+    """Nomzodning O'ZI haqida — oldingi ish joyida do'kon mahsulotini
+    ruxsatsiz olgan/yeganini bilvosita aytib qo'yishi (masalan "nega
+    ketdingiz" degan ochiq savolga javob berayotganda). Bu ``check_theft_witness``dan
+    farqli — u yerda hamkasbning o'g'irligiga guvoh bo'lish so'raladi,
+    bu yerda esa nomzodning o'z xatti-harakati haqida ochiq savolga
+    berilgan erkin javobda tasodifan chiqib qolgan admission aniqlanadi.
+    Faqat RED yoki (signal yo'q bo'lsa) "neytral" natija bor — bu ochiq
+    savol bo'lgani uchun "to'g'ri javob"ning o'zi yo'q, shuning uchun
+    ``GREEN`` shunchaki "signal topilmadi" degani, ijobiy baho emas."""
+    text = _normalize(answer_text)
+    if not text:
+        return UNCLEAR
+    if _contains_any(text, _PROPERTY_TAKING_ADMISSION):
+        return RED
+    return GREEN

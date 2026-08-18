@@ -58,6 +58,7 @@ from services import (
     recruiting_followup,
     recruiting_privacy,
     recruiting_questions,
+    recruiting_redflags,
     recruiting_rubric,
     recruiting_scoring,
     recruiting_voice,
@@ -90,13 +91,9 @@ _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 _NO_VACANCY_TEXT = "Hozircha faol vakansiya mavjud emas. Murojaatingiz uchun rahmat."
 
 _CONSENT_TEXT = (
-    "Assalomu alaykum! 👋 Men Saturn jamoasining Fokus HR yordamchisiman.\n\n"
-    "Sizga bir nechta savol beraman — bu oddiy anketa emas, tabiiy suhbat, "
-    "shuning uchun har safar bittadan savol beraman.\n\n"
-    "• Javoblaringiz FAQAT ishga qabul jarayonida ishlatiladi.\n"
-    "• Yakuniy qarorni FAQAT inson (Saturn jamoasi vakili) qabul qiladi.\n"
-    "• Istalgan vaqtda /cancel buyrug'i bilan to'xtatishingiz mumkin.\n\n"
-    "Boshlaymizmi?"
+    "Assalomu alaykum 👋\n"
+    "Sizni Saturn jamoasida ko'rsak, xursand bo'lamiz 😊\n"
+    "Bir nechta oddiy savol beraman. Boshlaymizmi?"
 )
 
 _YES_NO_MAP = {"yes": 1, "no": 0}
@@ -137,11 +134,6 @@ _STEPS_B_C: list[dict] = [
         "options": [("kunduzgi", "🌤 Kunduzgi"), ("kechki", "🌙 Kechki"), ("almashinuvli", "🔄 Almashinuvli"), ("farqi_yoq", "🤷 Farqi yo'q")],
     },
     {
-        "key": "unavailable_days", "kind": "text",
-        "prompt": "Haftaning qaysi kunlarida ishlay olmaysiz? (bo'lmasa \"yo'q\" deb yozing)",
-        "column": "unavailable_days_text",
-    },
-    {
         "key": "holiday_available", "kind": "choice", "prompt": "Dam olish va bayram kunlarida ishlay olasizmi?",
         "column": "holiday_available", "options": [("yes", "✅ Ha"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
     },
@@ -156,14 +148,10 @@ _STEPS_B_C: list[dict] = [
         "column": "expected_salary",
     },
     {
-        "key": "commute_issue", "kind": "choice", "prompt": "Filialgacha yetib kelishda muammo bormi?",
-        "column": "commute_issue", "options": [("yes", "✅ Ha, bor"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
-    },
-    {
         "key": "accommodation_needed", "kind": "choice",
-        "prompt": "Yana bir savol: uzoq vaqt tik turish va odatiy jismoniy vazifalarni bajarishda sizga biror qulaylik kerakmi?",
-        "column": "accommodation_needed", "options": [("yes", "✅ Ha, kerak"), ("no", "❌ Yo'q, kerak emas")],
-        "value_map": _YES_NO_MAP,
+        "prompt": "Ishimizda ko'p vaqt oyoqda turib ishlanadi. Sizga bu to'g'ri keladimi?",
+        "column": "accommodation_needed", "options": [("yes", "✅ Ha, to'g'ri keladi"), ("no", "❌ Yo'q, qiynalaman")],
+        "value_map": {"yes": 0, "no": 1},
     },
 ]
 
@@ -205,8 +193,9 @@ _STEPS_D: list[dict] = [
     {
         "key": "substance_policy", "kind": "choice",
         "prompt": (
-            "Bizda ish vaqtida spirtli ichimlik, mast holatda kelish va ish joyida "
-            "chekish mumkin emas. Bu qoidalar sizga to'g'ri keladimi?"
+            "Ish vaqtida chekish, telefonda o'ynash, reels ko'rish, telefonda uzoq gaplashish yoki "
+            "tanishlar bilan uzoq suhbatlashish ishga halal bermasligi biz uchun muhim. Shu tartib "
+            "sizga to'g'ri keladimi?"
         ),
         "column": "substance_policy_agree", "options": [("yes", "✅ Ha, to'g'ri keladi"), ("no", "❌ Yo'q")],
         "value_map": _YES_NO_MAP,
@@ -235,6 +224,16 @@ _PHOTO_PROMPT = (
     "(Yubormoqchi bo'lmasangiz, \"yo'q\" deb yozing)"
 )
 
+# "Nega ketgansiz" javobida nomzod o'zi mahsulotni ruxsatsiz olgan/yegan
+# holatni bilvosita aytib qo'yishi mumkin — bu kompaniya mulkiga
+# munosabat/halollik bo'yicha kritik xavf, lekin yakuniy qarorni har
+# doim Founder beradi (qarang services/recruiting_redflags.check_property_honesty).
+_PROPERTY_HONESTY_FOLLOWUP_TEXT = (
+    "Demak, do'kon mahsulotini ruxsatsiz olganingiz/yeganingiz uchun muammo bo'lgan, to'g'rimi? "
+    "Hozir bu holatga qanday qaraysiz?"
+)
+_LEAVE_REASON_FOLLOWUP_STEP_KEY = "leave_reason_followup"
+
 _MOTIVATION_PROMPT = (
     "Oxirgi savol: nega aynan Saturn jamoasida ishlashni xohlaysiz?\n"
     "Matn bilan yozishingiz yoki ovozli xabar (60 soniyagacha) yuborishingiz mumkin."
@@ -258,13 +257,11 @@ def _phone_kb() -> ReplyKeyboardMarkup:
 
 
 def _consent_kb() -> InlineKeyboardMarkup:
+    # Faqat "Boshlash" tugmasi — "Bekor qilish" tugmasi ATAYLAB
+    # ko'rsatilmaydi (real Telegram sinovi bo'yicha talab). Bekor
+    # qilish faqat ``/cancel`` buyrug'i orqali.
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Davom etish", callback_data="rec_consent:yes"),
-                InlineKeyboardButton(text="❌ Bekor qilish", callback_data="rec_consent:no"),
-            ]
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Boshlash", callback_data="rec_consent:yes")]]
     )
 
 
@@ -492,7 +489,6 @@ async def _check_fit_and_maybe_finish(message: Message, state: FSMContext, data:
 
     availability_summary = (
         f"Smena: {application.get('shift_preference') or '-'}; "
-        f"ishlay olmaydigan kunlar: {application.get('unavailable_days_text') or '-'}; "
         f"bayramda: {'ha' if application.get('holiday_available') else 'yo‘q'}"
     )
     recruiting_repo.update_application(application_id, availability_text=availability_summary)
@@ -535,6 +531,13 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
         recruiting_repo.update_application(data["application_id"], retention_intent_reason=text)
         await _advance_after_step(message, state, data)
         return
+    if step_key == _LEAVE_REASON_FOLLOWUP_STEP_KEY:
+        recruiting_repo.update_application(data["application_id"], leave_reason_followup_text=text)
+        await _advance_after_step(message, state, data)
+        return
+    if step_key == "leave_reason":
+        await _handle_leave_reason_answer(message, state, data, text)
+        return
 
     step = _STEP_BY_KEY.get(step_key)
     if step is None:
@@ -551,6 +554,36 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
 
     value = int(text) if step.get("to_int") else text
     recruiting_repo.update_application(data["application_id"], **{step["column"]: value})
+    await _advance_after_step(message, state, data)
+
+
+async def _handle_leave_reason_answer(message: Message, state: FSMContext, data: dict, text: str) -> None:
+    """"Nega ketgansiz" — oddiy erkin savol, lekin real Telegram
+    sinovida nomzod bu yerda aloqasiz/tushunarsiz javob berishi (masalan
+    savolga umuman bog'liq bo'lmagan gap) yoki bilvosita kompaniya
+    mulkini ruxsatsiz olganini aytib qo'yishi mumkin edi. Ikkalasi ham
+    keyingi savolga o'tishdan OLDIN BITTA aniqlashtiruvchi savol talab
+    qiladi."""
+    application_id = data["application_id"]
+    recruiting_repo.update_application(application_id, leave_reason_text=text)
+
+    if recruiting_redflags.check_property_honesty(text) == recruiting_redflags.RED:
+        recruiting_repo.update_application(application_id, property_honesty_flag=1)
+        await state.update_data(step_key=_LEAVE_REASON_FOLLOWUP_STEP_KEY)
+        await state.set_state(RecruitingStates.collecting_text)
+        await message.answer(_PROPERTY_HONESTY_FOLLOWUP_TEXT)
+        return
+
+    leave_reason_prompt = _STEP_BY_KEY["leave_reason"]["prompt"]
+    follow_up_question = await recruiting_followup.decide_follow_up(
+        _CURRENT_OPENAI_CLIENT.get(), leave_reason_prompt, text
+    )
+    if follow_up_question:
+        await state.update_data(step_key=_LEAVE_REASON_FOLLOWUP_STEP_KEY)
+        await state.set_state(RecruitingStates.collecting_text)
+        await message.answer(follow_up_question)
+        return
+
     await _advance_after_step(message, state, data)
 
 
@@ -578,7 +611,7 @@ async def handle_choice_step_answer(callback: CallbackQuery, state: FSMContext) 
 
     recruiting_repo.update_application(data["application_id"], **{step["column"]: stored_value})
 
-    if step_key == "accommodation_needed" and raw_value == "yes" and callback.message:
+    if step_key == "accommodation_needed" and raw_value == "no" and callback.message:
         await state.update_data(step_key="accommodation_text")
         await state.set_state(RecruitingStates.collecting_text)
         await callback.message.answer(_ACCOMMODATION_TEXT_STEP["prompt"])

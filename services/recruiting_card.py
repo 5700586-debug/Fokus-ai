@@ -87,7 +87,6 @@ def format_candidate_card(
         f"📞 Tavsiyanoma uchun bog'lanishga rozi: {_YES_NO.get(application.get('reference_check_consent'), '-')}",
         "",
         f"🕒 Smena: {application.get('shift_preference') or '-'}   "
-        f"Ishlay olmaydigan kunlar: {_sanitize(application.get('unavailable_days_text'), 40)}   "
         f"Bayramda: {_YES_NO.get(application.get('holiday_available'), '-')}",
         f"💰 Oldingi oylik: {application.get('prev_salary_text') or '-'}   "
         f"Kutilayotgan oylik: {application.get('expected_salary') or '-'}",
@@ -97,8 +96,6 @@ def format_candidate_card(
 
     if application.get("retention_intent") == "6oygacha" and application.get("retention_intent_reason"):
         lines.append(f"   ↳ Sababi: {_sanitize(application.get('retention_intent_reason'), 80)}")
-    if application.get("commute_issue"):
-        lines.append("🚌 Filialgacha qatnovda muammo bor deb belgiladi.")
     if application.get("accommodation_needed"):
         lines.append(f"🤝 Qulaylik so'ragan: {_sanitize(application.get('accommodation_text'), 80)}")
     if application.get("attendance_barrier_text") and application["attendance_barrier_text"].strip().lower() not in ("yo'q", "yoq", "-"):
@@ -141,7 +138,7 @@ def format_candidate_card(
         lines.append("")
         lines.append("ℹ️ Qo'shimcha ma'lumot (ball emas, faqat Founder ko'rib chiqishi uchun):")
         if application.get("substance_policy_agree") is not None:
-            lines.append(f"  • Ichimlik/chekish qoidasiga rozi: {_YES_NO.get(application.get('substance_policy_agree'))}")
+            lines.append(f"  • Ish vaqtida diqqatni bo'luvchi holatlar (telefon/reels/uzoq suhbat)ga rozi: {_YES_NO.get(application.get('substance_policy_agree'))}")
         if application.get("criminal_record") is not None:
             lines.append(f"  • Sudlanganlik: {_YES_NO.get(application.get('criminal_record'))} (avtomatik qaror emas)")
 

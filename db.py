@@ -109,6 +109,8 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("recruiting_applications", "substance_policy_agree", "INTEGER"),
     ("recruiting_applications", "criminal_record", "INTEGER"),
     ("recruiting_applications", "candidate_photo_file_id", "TEXT"),
+    ("recruiting_applications", "leave_reason_followup_text", "TEXT"),
+    ("recruiting_applications", "property_honesty_flag", "INTEGER"),
     ("recruiting_assessments", "red_flags_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
 ]

@@ -238,6 +238,22 @@ def score_application(
 
         criteria_scores.append({"key": key, "label": label, "score": score, "evidence": evidence})
 
+    if application.get("property_honesty_flag"):
+        # "Nega ketgansiz" ochiq savoliga javob berayotganda nomzod
+        # o'zi do'kon mahsulotini ruxsatsiz olgan/yeganini aytib
+        # qo'ygan (qarang recruiting_bot._handle_leave_reason_answer) —
+        # bu rubrika mezoni EMAS (alohida savol emas), shuning uchun
+        # to'g'ridan-to'g'ri red_flags ro'yxatiga qo'shiladi. Yakuniy
+        # qarorni baribir Founder beradi (qarang _overall_result).
+        evidence_text = " ".join(
+            filter(None, [application.get("leave_reason_text"), application.get("leave_reason_followup_text")])
+        )
+        red_flags.append({
+            "key": recruiting_redflags.PROPERTY_HONESTY,
+            "label": recruiting_redflags.label_for(recruiting_redflags.PROPERTY_HONESTY),
+            "evidence": _evidence(evidence_text),
+        })
+
     overall_result = _overall_result(criteria_scores, math_correct, position_key, red_flags, has_unclear_critical)
     strengths = [c["label"] for c in criteria_scores if c["score"] == 2][:3]
     risks = [

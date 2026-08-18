@@ -158,6 +158,8 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "substance_policy_agree",
     "criminal_record",
     "candidate_photo_file_id",
+    "leave_reason_followup_text",
+    "property_honesty_flag",
 }
 
 

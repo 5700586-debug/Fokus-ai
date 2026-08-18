@@ -95,6 +95,13 @@ _SHORTAGE_REPORTING = (
     "rahbarga aytaman", "rahbarga xabar", "hisobotga yozaman",
     "hisobga olaman", "tekshiraman", "menejerga aytaman", "darhol aytaman",
     "qayta sanayman", "kamerani ko'raman", "yozib qo'yaman", "xabar beraman",
+    # O'z javobgarligini tan olish ham ijobiy signal — "kim javobgar"
+    # tarzida so'ralgan savolga (masalan ``kassir_javobgarlik``) javob
+    # berganda "rahbarga aytaman" emas, aynan shu ko'rinishda javob
+    # berish tabiiy (real Telegram sinovida topilgan noto'g'ri UNCLEAR
+    # klassifikatsiyasi tuzatildi).
+    "javobgarman", "javobgar bo'lishi kerak", "javobgarlikni o'z zimmamga",
+    "mas'ulman", "o'zim javobgarman", "kassa egasi javobgar",
 )
 
 

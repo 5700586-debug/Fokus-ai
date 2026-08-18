@@ -1,4 +1,4 @@
-"""Fokus HR — nomzod bilan Telegram'da suhbat (ishga qabul anketasi).
+"""Fokus HR — nomzod bilan Telegram'da suhbat (jonli HR intervyu uslubida).
 
 Bu oqim ``supplier_chat_bot.py`` bilan bir xil naqsh: FAQAT nomzod
 (ro'yxatdan o'tgan xodim/Founder EMAS) uchun, ichki menyu/buyruqlarga
@@ -6,18 +6,26 @@ umuman tegmaydi. Nomzod ``/apply`` yoki ``/start apply`` orqali
 kiradi (qarang ``main.py``dagi kichik qo'shimcha tekshiruv).
 
 Suhbat holati aiogram FSM (``storage.py``dagi ``SQLiteStorage``) orqali
-saqlanadi — worker qayta ishga tushsa ham yo'qolmaydi (qarang
-``onboarding.py`` bilan bir xil naqsh). Alohida "session" jadvali shu
-sabab kerak emas (qarang ``schema/recruiting.py`` docstringi).
+saqlanadi — worker qayta ishga tushsa ham yo'qolmaydi.
+
+Ko'p sonli o'xshash ketma-ket maydonlar (B/C/D bo'limlari) alohida-
+alohida ``State()`` yaratish o'rniga IKKITA umumiy holat orqali
+boshqariladi (``collecting_text``/``collecting_choice``) — joriy
+maydon FSM ma'lumotida (``step_key``) saqlanadi, qadamlar ro'yxati
+(``_STEPS_B_C``/``_STEPS_D``) esa oddiy jadval sifatida yozilgan. Bu
+~18 ta deyarli bir xil maydon uchun 18 ta State/handler juftligi
+yozishning oldini oladi.
 
 Baholash har doim DETERMINISTIK (``services/recruiting_scoring.py``) —
 AI faqat qisqa xulosa matni yozadi, yakuniy natijani AI hech qachon
-belgilamaydi. Founder qarori (tugmalar) esa alohida, mustaqil ustunda
-saqlanadi — AI tavsiyasi bilan aralashmaydi.
-"""
+belgilamaydi. "Talab mosligi" (``services/recruiting_fit.py``) esa
+BAHOLASHDAN ATAYLAB ALOHIDA — jadval/yosh mos kelmasligi axloqiy
+kamchilik emas. Founder qarori (tugmalar) mustaqil ustunda saqlanadi —
+AI tavsiyasi bilan aralashmaydi."""
 
 import logging
 import re
+from datetime import date
 
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
@@ -34,12 +42,13 @@ from aiogram.types import (
 )
 from openai import AsyncOpenAI
 
-from config import FOUNDER_ID, RECRUITING_MAX_FOLLOW_UPS, RECRUITING_MAX_VOICE_SECONDS
+from config import FOUNDER_ID, RECRUITING_MAX_FOLLOW_UPS, RECRUITING_MAX_VOICE_SECONDS, RECRUITING_MIN_AGE
 from repositories import recruiting as recruiting_repo
 from services import (
     audit,
     permissions,
     recruiting_card,
+    recruiting_fit,
     recruiting_followup,
     recruiting_privacy,
     recruiting_questions,
@@ -54,12 +63,8 @@ logger = logging.getLogger(__name__)
 class RecruitingStates(StatesGroup):
     consent = State()
     choosing_vacancy = State()
-    full_name = State()
-    phone = State()
-    experience = State()
-    leave_reason = State()
-    availability = State()
-    start_date = State()
+    collecting_text = State()
+    collecting_choice = State()
     role_question = State()
     follow_up = State()
     math_question = State()
@@ -67,7 +72,6 @@ class RecruitingStates(StatesGroup):
 
 
 _ALL_STATES = tuple(RecruitingStates.__all_states__)
-
 
 # ATAYLAB ``main.py``dagi umumiy ``CANCEL_TEXT``/``BACK_TEXT``dan FARQLI
 # matn: main.py'da ``_ClearStaleStateMiddleware`` xuddi shu matnlarni
@@ -85,41 +89,101 @@ _NO_VACANCY_TEXT = "Hozircha faol vakansiya mavjud emas. Murojaatingiz uchun rah
 
 _CONSENT_TEXT = (
     "Assalomu alaykum! 👋 Men Saturn jamoasining Fokus HR yordamchisiman.\n\n"
-    "Ishga qabul jarayonida bir nechta savol beraman:\n"
+    "Sizga bir nechta savol beraman — bu oddiy anketa emas, tabiiy suhbat, "
+    "shuning uchun har safar bittadan savol beraman.\n\n"
     "• Javoblaringiz FAQAT ishga qabul jarayonida ishlatiladi.\n"
-    "• AI yordamchi javoblaringizni tahlil qiladi.\n"
     "• Yakuniy qarorni FAQAT inson (Saturn jamoasi vakili) qabul qiladi.\n"
     "• Istalgan vaqtda jarayonni bekor qilishingiz mumkin.\n\n"
-    "Davom etamizmi?"
+    "Boshlaymizmi?"
 )
 
-_FIELD_PROMPTS: dict[str, str] = {
-    "full_name": "Ism-familiyangizni kiriting:",
-    "phone": "Telefon raqamingizni yuboring (tugma orqali yoki yozib):",
-    "experience": "Oldingi ish tajribangiz haqida qisqacha yozing (bo'lmasa \"yo'q\" deb yozing):",
-    "leave_reason": "Oldingi ish joyingizdan nega ketgansiz (yoki hozir nega ish qidiryapsiz)?",
-    "availability": "Qanday ish jadvali sizga qulay? (masalan: har kuni, smenama-smena, faqat kunduzi)",
-    "start_date": "Qachondan ishga chiqishingiz mumkin?",
-}
+_YES_NO_MAP = {"yes": 1, "no": 0}
 
-_FIELD_STATE: dict[str, State] = {
-    "full_name": RecruitingStates.full_name,
-    "phone": RecruitingStates.phone,
-    "experience": RecruitingStates.experience,
-    "leave_reason": RecruitingStates.leave_reason,
-    "availability": RecruitingStates.availability,
-    "start_date": RecruitingStates.start_date,
-}
-_STATE_TO_FIELD: dict[str, str] = {state.state: field for field, state in _FIELD_STATE.items()}
 
-# field -> (DB ustuni, keyingi qadam nomi)
-_FIELD_NEXT: dict[str, tuple[str, str]] = {
-    "full_name": ("full_name", "phone"),
-    "phone": ("phone", "experience"),
-    "experience": ("experience_text", "leave_reason"),
-    "leave_reason": ("leave_reason_text", "availability"),
-    "availability": ("availability_text", "start_date"),
-    "start_date": ("start_date_text", "role_question"),
+def _valid_birth_year(text: str) -> bool:
+    if not text.strip().isdigit():
+        return False
+    year = int(text.strip())
+    return 1940 <= year <= date.today().year - 10
+
+
+def _looks_like_phone(text: str) -> bool:
+    cleaned = re.sub(r"[\s\-()]", "", text.strip())
+    return bool(_PHONE_RE.match(cleaned))
+
+
+# --------------------------------------------------------------- qadamlar --
+# B bo'limi (asosiy ma'lumotlar) + C bo'limi (moslik filtri). ``kind``:
+# "text" — erkin matn, "phone" — telefon (tugma/matn), "choice" — tugma.
+_STEPS_B_C: list[dict] = [
+    {"key": "full_name", "kind": "text", "prompt": "Ism-familiyangizni kiriting:", "column": "full_name"},
+    {
+        "key": "birth_year", "kind": "text", "prompt": "Tug'ilgan yilingizni yozing (masalan: 2000):",
+        "column": "birth_year", "validator": _valid_birth_year,
+        "error": "❌ Iltimos, tug'ilgan yilni to'g'ri raqamda yozing (masalan: 2000).", "to_int": True,
+    },
+    {"key": "phone", "kind": "phone", "prompt": "Telefon raqamingizni yuboring (tugma orqali yoki yozib):", "column": "phone"},
+    {"key": "residence_area", "kind": "text", "prompt": "Qaysi hudud yoki tumanda yashaysiz?", "column": "residence_area"},
+    {"key": "preferred_branch", "kind": "text", "prompt": "Qaysi filialimizga kelish sizga qulayroq?", "column": "preferred_branch"},
+    {"key": "start_date", "kind": "text", "prompt": "Ishni qachondan boshlay olasiz?", "column": "start_date_text"},
+    {
+        "key": "shift_preference", "kind": "choice", "prompt": "Qaysi smenada ishlay olasiz?", "column": "shift_preference",
+        "options": [("kunduzgi", "🌤 Kunduzgi"), ("kechki", "🌙 Kechki"), ("almashinuvli", "🔄 Almashinuvli"), ("farqi_yoq", "🤷 Farqi yo'q")],
+    },
+    {
+        "key": "unavailable_days", "kind": "text",
+        "prompt": "Haftaning qaysi kunlarida ishlay olmaysiz? (bo'lmasa \"yo'q\" deb yozing)",
+        "column": "unavailable_days_text",
+    },
+    {
+        "key": "holiday_available", "kind": "choice", "prompt": "Dam olish va bayram kunlarida ishlay olasizmi?",
+        "column": "holiday_available", "options": [("yes", "✅ Ha"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
+    },
+    {"key": "expected_salary", "kind": "text", "prompt": "Kutayotgan oyligingiz qancha?", "column": "expected_salary"},
+    {
+        "key": "commute_issue", "kind": "choice", "prompt": "Filialgacha yetib kelishda muammo bormi?",
+        "column": "commute_issue", "options": [("yes", "✅ Ha, bor"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
+    },
+    {
+        "key": "accommodation_needed", "kind": "choice",
+        "prompt": "Yana bir savol: uzoq vaqt tik turish va odatiy jismoniy vazifalarni bajarishda sizga biror qulaylik kerakmi?",
+        "column": "accommodation_needed", "options": [("yes", "✅ Ha, kerak"), ("no", "❌ Yo'q, kerak emas")],
+        "value_map": _YES_NO_MAP,
+    },
+]
+
+# D bo'limi (tajriba) — faqat "talab mosligi" tekshiruvidan o'tgandan
+# keyin so'raladi.
+_STEPS_D: list[dict] = [
+    {
+        "key": "prev_employer", "kind": "text",
+        "prompt": "Oldingi ish joyingiz va lavozimingiz haqida yozing (bo'lmasa \"yo'q\" deb yozing):",
+        "column": "prev_employer_text",
+    },
+    {"key": "experience_duration", "kind": "text", "prompt": "U yerda necha yil yoki oy ishlagansiz?", "column": "experience_duration_text"},
+    {"key": "leave_reason", "kind": "text", "prompt": "Nega ishdan ketgansiz (yoki hozir nega ish qidiryapsiz)?", "column": "leave_reason_text"},
+    {
+        "key": "pos_experience", "kind": "choice", "prompt": "Kassa yoki POS-terminalda ishlagan tajribangiz bormi?",
+        "column": "pos_experience", "options": [("yes", "✅ Ha"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
+    },
+    {
+        "key": "cash_handling", "kind": "text",
+        "prompt": "Naqd pul sanash, qaytim berish yoki smena yopish tajribangiz bormi? Qisqacha yozing:",
+        "column": "cash_handling_text",
+    },
+    {
+        "key": "reference_check_consent", "kind": "choice",
+        "prompt": "Oldingi ish joyingizdan siz haqingizda so'rab bog'lanishimiz mumkinmi?",
+        "column": "reference_check_consent", "options": [("yes", "✅ Mumkin"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,
+    },
+]
+
+_ALL_STEPS: list[dict] = _STEPS_B_C + _STEPS_D
+_STEP_BY_KEY: dict[str, dict] = {step["key"]: step for step in _ALL_STEPS}
+_ACCOMMODATION_TEXT_STEP = {
+    "key": "accommodation_text", "kind": "text",
+    "prompt": "Qanday qulaylik kerak bo'lishini qisqacha yozib bera olasizmi?",
+    "column": "accommodation_text",
 }
 
 _MOTIVATION_PROMPT = (
@@ -130,10 +194,11 @@ _MOTIVATION_QUESTION_TEXT = "Nega aynan Saturn jamoasida ishlashni xohlaysiz?"
 
 _RESUME_NOTICE = "Davom etamiz — tugallanmagan arizangiz saqlangan."
 
-
-def _looks_like_phone(text: str) -> bool:
-    cleaned = re.sub(r"[\s\-()]", "", text.strip())
-    return bool(_PHONE_RE.match(cleaned))
+_MISMATCH_CLOSING_TEXT = (
+    "Javoblaringiz uchun rahmat! 🙏 Hozircha bu lavozimning asosiy shartlariga "
+    "to'liq mos kelmayapsiz ko'rinadi. Ma'lumotlaringiz saqlanadi — boshqa mos "
+    "imkoniyat bo'lsa, siz bilan albatta bog'lanamiz."
+)
 
 
 def _phone_kb() -> ReplyKeyboardMarkup:
@@ -163,6 +228,12 @@ def _vacancy_kb(vacancies: list[dict]) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=v["title"], callback_data=f"rec_vacancy:{v['id']}")]
             for v in vacancies
         ]
+    )
+
+
+def _choice_kb(step_key: str, options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=f"rec_choice:{step_key}:{value}")] for value, label in options]
     )
 
 
@@ -242,22 +313,20 @@ async def handle_vacancy_choice(callback: CallbackQuery, state: FSMContext) -> N
     retention_expires_at = recruiting_privacy.compute_retention_expiry()
     application_id = recruiting_repo.create_application(candidate_id, vacancy_id, retention_expires_at)
     recruiting_repo.record_consent(application_id)
-    recruiting_repo.update_application(application_id, current_step="full_name")
+    first_step = _ALL_STEPS[0]
+    recruiting_repo.update_application(application_id, current_step=first_step["key"])
 
     audit.log_event(
         audit.EVENT_RECRUITING_APPLICATION_STARTED, actor_id=candidate_id, target_id=application_id
     )
 
     await state.update_data(
-        application_id=application_id, vacancy_id=vacancy_id, position_key=vacancy["position_key"]
+        application_id=application_id, vacancy_id=vacancy_id, position_key=vacancy["position_key"], step_index=0
     )
-    await state.set_state(RecruitingStates.full_name)
     await callback.answer()
     if callback.message:
-        await callback.message.answer(
-            f"Ajoyib! \"{vacancy['title']}\" lavozimiga ariza boshladik.\n\n{_FIELD_PROMPTS['full_name']}",
-            reply_markup=_CANCEL_KB,
-        )
+        await callback.message.answer(f"Ajoyib! \"{vacancy['title']}\" lavozimiga ariza boshladik.", reply_markup=ReplyKeyboardRemove())
+    await _send_step_prompt(callback.message, state, first_step)
 
 
 async def handle_cancel(message: Message, state: FSMContext) -> None:
@@ -287,26 +356,26 @@ async def _resume_application(message: Message, state: FSMContext, application: 
     await state.update_data(
         application_id=application["id"], vacancy_id=application["vacancy_id"], position_key=position_key
     )
-    step = application.get("current_step") or "full_name"
+    step_key = application.get("current_step") or _ALL_STEPS[0]["key"]
 
-    if step in _FIELD_STATE:
-        await state.set_state(_FIELD_STATE[step])
+    if step_key in _STEP_BY_KEY:
+        index = _ALL_STEPS.index(_STEP_BY_KEY[step_key])
+        await state.update_data(step_index=index)
         await message.answer(_RESUME_NOTICE)
-        kb = _phone_kb() if step == "phone" else _CANCEL_KB
-        await message.answer(_FIELD_PROMPTS[step], reply_markup=kb)
+        await _send_step_prompt(message, state, _ALL_STEPS[index])
         return
 
-    if step == "role_question":
+    if step_key == "role_question":
         questions = recruiting_questions.questions_for(position_key)
         answers = recruiting_repo.get_answers(application["id"])
         question_keys = {key for key, _ in questions}
         answered = sum(1 for a in answers if a["question_key"] in question_keys and not a["is_follow_up"])
-        await state.update_data(question_index=answered, follow_up_count=application.get("follow_up_count", 0))
+        await state.update_data(question_index=answered)
         await message.answer(_RESUME_NOTICE)
-        await _advance_to_step(message, state, await state.get_data(), "role_question", index_override=answered)
+        await _advance_role_questions(message, state, await state.get_data(), answered)
         return
 
-    if step == "math_question":
+    if step_key == "math_question":
         math_q = recruiting_questions.math_question_for(position_key)
         await message.answer(_RESUME_NOTICE)
         if math_q:
@@ -320,59 +389,159 @@ async def _resume_application(message: Message, state: FSMContext, application: 
     await _ask_motivation(message, state)
 
 
-# --------------------------------------------------------------- oddiy maydonlar --
+# ------------------------------------------------------- qadamlar (B/C/D) --
 
 
-async def handle_field_answer(message: Message, state: FSMContext) -> None:
-    current_state = await state.get_state()
-    field = _STATE_TO_FIELD.get(current_state)
-    if field is None:
+async def _send_step_prompt(message: Message, state: FSMContext, step: dict) -> None:
+    await state.update_data(step_key=step["key"])
+    if step["kind"] == "phone":
+        await state.set_state(RecruitingStates.collecting_text)
+        await message.answer(step["prompt"], reply_markup=_phone_kb())
+        return
+    if step["kind"] == "choice":
+        await state.set_state(RecruitingStates.collecting_choice)
+        await message.answer(step["prompt"], reply_markup=_choice_kb(step["key"], step["options"]))
+        return
+    await state.set_state(RecruitingStates.collecting_text)
+    await message.answer(step["prompt"], reply_markup=_CANCEL_KB)
+
+
+async def _advance_after_step(message: Message, state: FSMContext, data: dict) -> None:
+    """Joriy qadamdan keyingi qadamga o'tadi. C bo'limi (moslik filtri)
+    tugagach, bir marta ``fit_result`` hisoblanadi — mos kelmasa D/E
+    bo'limlari BUTUNLAY o'tkazib yuboriladi (suhbat behuda cho'zilmaydi)."""
+    index = data["step_index"] + 1
+    await state.update_data(step_index=index)
+
+    if index == len(_STEPS_B_C):
+        mismatched = await _check_fit_and_maybe_finish(message, state, data)
+        if mismatched:
+            return
+
+    if index < len(_ALL_STEPS):
+        recruiting_repo.update_application(data["application_id"], current_step=_ALL_STEPS[index]["key"])
+        await _send_step_prompt(message, state, _ALL_STEPS[index])
         return
 
-    if field == "phone" and message.contact is not None:
+    # B+C+D tugadi -> vaziyatli savollar (E).
+    recruiting_repo.update_application(data["application_id"], current_step="role_question")
+    await state.update_data(question_index=0)
+    await _advance_role_questions(message, state, await state.get_data(), 0)
+
+
+async def _check_fit_and_maybe_finish(message: Message, state: FSMContext, data: dict) -> bool:
+    """``True`` — talab mosligi MISMATCH, ariza shu yerda (D/E'siz)
+    yakunlandi. ``False`` — mos, davom etadi."""
+    application_id = data["application_id"]
+    application = recruiting_repo.get_application(application_id)
+    vacancy = recruiting_repo.get_vacancy(application["vacancy_id"])
+
+    availability_summary = (
+        f"Smena: {application.get('shift_preference') or '-'}; "
+        f"ishlay olmaydigan kunlar: {application.get('unavailable_days_text') or '-'}; "
+        f"bayramda: {'ha' if application.get('holiday_available') else 'yo‘q'}"
+    )
+    recruiting_repo.update_application(application_id, availability_text=availability_summary)
+    application["availability_text"] = availability_summary
+
+    fit_result, fit_reason = recruiting_fit.compute_fit(
+        birth_year=application.get("birth_year"),
+        shift_preference=application.get("shift_preference"),
+        holiday_available=application.get("holiday_available"),
+        vacancy=vacancy,
+        min_age=RECRUITING_MIN_AGE,
+    )
+    recruiting_repo.update_application(application_id, fit_result=fit_result, fit_reason=fit_reason)
+
+    if fit_result == recruiting_fit.MISMATCH:
+        await _finish_mismatch_application(message, state, application_id, application["vacancy_id"], fit_reason)
+        return True
+    return False
+
+
+async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    step_key = data.get("step_key")
+    if step_key is None:
+        return
+
+    text = (message.text or "").strip()
+    if step_key == "phone" and message.contact is not None:
         text = message.contact.phone_number
-    else:
-        text = (message.text or "").strip()
 
     if not text:
         await message.answer("❌ Iltimos, javob yozing.")
         return
-    if field == "phone" and not _looks_like_phone(text):
-        await message.answer("❌ Telefon raqami noto'g'ri. Masalan: +998901234567", reply_markup=_phone_kb())
+
+    if step_key == "accommodation_text":
+        recruiting_repo.update_application(data["application_id"], accommodation_text=text)
+        await _advance_after_step(message, state, data)
         return
 
+    step = _STEP_BY_KEY.get(step_key)
+    if step is None:
+        return
+
+    if step["kind"] == "phone":
+        if not _looks_like_phone(text):
+            await message.answer("❌ Telefon raqami noto'g'ri. Masalan: +998901234567", reply_markup=_phone_kb())
+            return
+    validator = step.get("validator")
+    if validator and not validator(text):
+        await message.answer(step.get("error", "❌ Noto'g'ri format."))
+        return
+
+    value = int(text) if step.get("to_int") else text
+    recruiting_repo.update_application(data["application_id"], **{step["column"]: value})
+    await _advance_after_step(message, state, data)
+
+
+async def handle_choice_step_answer(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
-    application_id = data["application_id"]
-    db_column, next_step = _FIELD_NEXT[field]
-    recruiting_repo.update_application(application_id, **{db_column: text, "current_step": next_step})
-
-    await _advance_to_step(message, state, data, next_step)
-
-
-async def _advance_to_step(
-    message: Message, state: FSMContext, data: dict, step: str, index_override: int | None = None
-) -> None:
-    if step in _FIELD_STATE:
-        await state.set_state(_FIELD_STATE[step])
-        kb = _phone_kb() if step == "phone" else _CANCEL_KB
-        await message.answer(_FIELD_PROMPTS[step], reply_markup=kb)
+    step_key = data.get("step_key")
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3 or step_key is None or parts[1] != step_key:
+        # Eskirgan/ikki marta bosilgan tugma — joriy qadamga mos kelmaydi.
+        await callback.answer()
         return
 
-    if step == "role_question":
-        position_key = data["position_key"]
-        questions = recruiting_questions.questions_for(position_key)
-        index = index_override if index_override is not None else 0
-        await state.update_data(question_index=index, follow_up_count=data.get("follow_up_count", 0))
-        await state.set_state(RecruitingStates.role_question)
-        recruiting_repo.update_application(data["application_id"], current_step="role_question")
-        if index < len(questions):
-            await message.answer(questions[index][1], reply_markup=_CANCEL_KB)
-        else:
-            await _finish_role_questions(message, state, data)
+    step = _STEP_BY_KEY.get(step_key)
+    if step is None:
+        await callback.answer()
         return
+
+    raw_value = parts[2]
+    value_map = step.get("value_map") or {}
+    stored_value = value_map.get(raw_value, raw_value)
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer("Qabul qilindi ✅")
+
+    recruiting_repo.update_application(data["application_id"], **{step["column"]: stored_value})
+
+    if step_key == "accommodation_needed" and raw_value == "yes" and callback.message:
+        await state.update_data(step_key="accommodation_text")
+        await state.set_state(RecruitingStates.collecting_text)
+        await callback.message.answer(_ACCOMMODATION_TEXT_STEP["prompt"], reply_markup=_CANCEL_KB)
+        return
+
+    if callback.message:
+        await _advance_after_step(callback.message, state, data)
 
 
 # ------------------------------------------------------------- rol savollari --
+
+
+async def _advance_role_questions(message: Message, state: FSMContext, data: dict, index: int) -> None:
+    position_key = data["position_key"]
+    questions = recruiting_questions.questions_for(position_key)
+    await state.update_data(question_index=index, follow_up_attempt=0)
+    await state.set_state(RecruitingStates.role_question)
+    if index < len(questions):
+        await message.answer(questions[index][1], reply_markup=_CANCEL_KB)
+    else:
+        await _finish_role_questions(message, state, data)
 
 
 async def handle_role_question(message: Message, state: FSMContext, openai_client: AsyncOpenAI | None) -> None:
@@ -389,14 +558,27 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
     q_key, q_text = questions[index]
 
     recruiting_repo.add_answer(application_id, q_key, q_text, text, answer_source="text")
+    await _maybe_ask_follow_up(message, state, data, q_key, q_text, text)
 
-    follow_up_count = data.get("follow_up_count", 0)
-    if follow_up_count < RECRUITING_MAX_FOLLOW_UPS:
-        follow_up_question = await recruiting_followup.decide_follow_up(openai_client, q_text, text)
+
+async def _maybe_ask_follow_up(
+    message: Message, state: FSMContext, data: dict, q_key: str, q_text: str, answer_text: str
+) -> None:
+    """Bitta javobga MAKSIMAL ``RECRUITING_MAX_FOLLOW_UPS`` marta
+    aniqlashtiruvchi savol beriladi (per-answer, butun suhbatga emas —
+    real sinovdan keyingi tuzatuv)."""
+    application_id = data["application_id"]
+    attempt = data.get("follow_up_attempt", 0)
+    index = data["question_index"]
+
+    if attempt < RECRUITING_MAX_FOLLOW_UPS:
+        follow_up_question = await recruiting_followup.decide_follow_up(
+            _CURRENT_OPENAI_CLIENT.get(), q_text, answer_text, question_key=q_key
+        )
         if follow_up_question:
-            new_count = recruiting_repo.increment_follow_up_count(application_id)
+            recruiting_repo.increment_follow_up_count(application_id)
             await state.update_data(
-                follow_up_count=new_count,
+                follow_up_attempt=attempt + 1,
                 follow_up_question_key=q_key,
                 follow_up_question_text=follow_up_question,
             )
@@ -404,7 +586,7 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
             await message.answer(follow_up_question, reply_markup=_CANCEL_KB)
             return
 
-    await _advance_to_step(message, state, data, "role_question", index_override=index + 1)
+    await _advance_role_questions(message, state, data, index + 1)
 
 
 async def handle_follow_up_answer(message: Message, state: FSMContext) -> None:
@@ -419,8 +601,12 @@ async def handle_follow_up_answer(message: Message, state: FSMContext) -> None:
     q_text = data["follow_up_question_text"]
     recruiting_repo.add_answer(application_id, q_key, q_text, text, answer_source="text", is_follow_up=True)
 
-    index = data["question_index"]
-    await _advance_to_step(message, state, data, "role_question", index_override=index + 1)
+    # Asl savol matni bilan (redflag tekshiruvi savol MATNIGA emas,
+    # savol KALITIGA qarab ishlaydi) yana bir marta tekshiramiz — agar
+    # hali ham noaniq/xavfli bo'lsa va urinish limiti tugamagan bo'lsa,
+    # ikkinchi (oxirgi) aniqlashtirish so'raladi.
+    original_q_text = next((q for k, q in recruiting_questions.questions_for(data["position_key"]) if k == q_key), q_text)
+    await _maybe_ask_follow_up(message, state, data, q_key, original_q_text, text)
 
 
 async def _finish_role_questions(message: Message, state: FSMContext, data: dict) -> None:
@@ -458,7 +644,6 @@ async def handle_math_choice(callback: CallbackQuery, state: FSMContext) -> None
         await callback.answer()
         return
 
-    correct = choice_key == math_q.correct_key
     recruiting_repo.add_answer(application_id, math_q.key, math_q.text, chosen.label, answer_source="text")
 
     if callback.message:
@@ -546,6 +731,45 @@ async def _finish_application(
         logger.error("Rekruting tahlili/karta yuborishda xato (application_id=%s): %r", application_id, error)
 
 
+async def _finish_mismatch_application(
+    message: Message, state: FSMContext, application_id: int, vacancy_id: int, fit_reason: str | None
+) -> None:
+    """Talab mosligi MISMATCH bo'lsa — suhbat D/E'siz, qisqa va
+    neytral yakunlanadi (nomzod "yomon" deb baholanmaydi)."""
+    recruiting_repo.update_application(application_id, current_step="submitted", status="awaiting_review")
+
+    audit.log_event(
+        audit.EVENT_RECRUITING_APPLICATION_SUBMITTED,
+        actor_id=message.chat.id if message.chat else None,
+        target_id=application_id,
+    )
+
+    await message.answer(_MISMATCH_CLOSING_TEXT, reply_markup=ReplyKeyboardRemove())
+    await state.clear()
+
+    try:
+        application = recruiting_repo.get_application(application_id)
+        vacancy = recruiting_repo.get_vacancy(vacancy_id)
+        rubric_version = recruiting_rubric.ensure_rubric_version(vacancy["position_key"])
+        recruiting_repo.save_assessment(
+            application_id,
+            rubric_version["id"],
+            recruiting_scoring.RESULT_MISMATCH,
+            [],
+            [],
+            [],
+            "Asosiy talab (jadval/yosh)ga mos kelmagani sababli to'liq suhbat o'tkazilmadi.",
+            source="deterministic",
+        )
+        assessment = recruiting_repo.get_assessment(application_id)
+        card_text = recruiting_card.format_candidate_card(application, vacancy, assessment, rubric_version, [])
+        await message.bot.send_message(
+            FOUNDER_ID, card_text, reply_markup=recruiting_card.candidate_review_keyboard(application_id)
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error("Mismatch karta yuborishda xato (application_id=%s): %r", application_id, error)
+
+
 async def _run_assessment_and_notify_founder(
     message: Message, application_id: int, position_key: str, openai_client: AsyncOpenAI | None
 ) -> None:
@@ -574,6 +798,8 @@ async def _run_assessment_and_notify_founder(
         deterministic_result["risks"],
         ai_summary,
         source="ai" if openai_client is not None else "deterministic",
+        red_flags=deterministic_result["red_flags"],
+        clarify_questions=deterministic_result["clarify_questions"],
     )
     audit.log_event(
         audit.EVENT_RECRUITING_ASSESSMENT_COMPLETED,
@@ -638,6 +864,23 @@ async def handle_more_questions(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+async def handle_raw_answers(callback: CallbackQuery) -> None:
+    if not await permissions.ensure_permission(callback, permissions.ACTION_RECRUITING_REVIEW):
+        return
+
+    application_id = int(callback.data.split(":", 1)[1])
+    application = recruiting_repo.get_application(application_id)
+    if application is None:
+        await callback.answer("Ariza topilmadi.", show_alert=True)
+        return
+
+    answers = recruiting_repo.get_answers(application_id)
+    text = recruiting_card.format_raw_answers(application, answers)
+    if callback.message:
+        await callback.message.answer(text)
+    await callback.answer()
+
+
 # -------------------------------------------------------------- vakansiyalar --
 
 
@@ -692,7 +935,30 @@ async def start_application_from_deeplink(message: Message, state: FSMContext) -
     await cmd_apply(message, state)
 
 
+class _CurrentClientHolder:
+    """``handle_role_question``/``handle_follow_up_answer`` chaqiruv
+    zanjirida ``openai_client``ni har bir funksiyaga alohida parametr
+    sifatida o'tkazish o'rniga (ko'p bosqichli follow-up mantig'i uchun
+    noqulay bo'lardi), ``register()`` chaqirilganda BIR MARTA o'rnatiladi.
+    Test/ishlab chiqarishda bitta process bitta ``openai_client``
+    bilan ishlaydi — global holat xavfsiz."""
+
+    def __init__(self) -> None:
+        self._client: AsyncOpenAI | None = None
+
+    def set(self, client: AsyncOpenAI | None) -> None:
+        self._client = client
+
+    def get(self) -> AsyncOpenAI | None:
+        return self._client
+
+
+_CURRENT_OPENAI_CLIENT = _CurrentClientHolder()
+
+
 def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
+    _CURRENT_OPENAI_CLIENT.set(openai_client)
+
     @dp.message(Command("apply"))
     async def apply_handler(message: Message, state: FSMContext) -> None:
         await cmd_apply(message, state)
@@ -713,9 +979,13 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def vacancy_choice_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await handle_vacancy_choice(callback, state)
 
-    @dp.message(StateFilter(*_FIELD_STATE.values()))
-    async def field_answer_handler(message: Message, state: FSMContext) -> None:
-        await handle_field_answer(message, state)
+    @dp.message(StateFilter(RecruitingStates.collecting_text))
+    async def text_step_handler(message: Message, state: FSMContext) -> None:
+        await handle_text_step_answer(message, state)
+
+    @dp.callback_query(F.data.startswith("rec_choice:"), StateFilter(RecruitingStates.collecting_choice))
+    async def choice_step_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        await handle_choice_step_answer(callback, state)
 
     @dp.message(StateFilter(RecruitingStates.role_question))
     async def role_question_handler(message: Message, state: FSMContext) -> None:
@@ -760,3 +1030,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     @dp.callback_query(F.data.startswith("rec_question:"))
     async def more_questions_handler(callback: CallbackQuery) -> None:
         await handle_more_questions(callback)
+
+    @dp.callback_query(F.data.startswith("rec_raw:"))
+    async def raw_answers_handler(callback: CallbackQuery) -> None:
+        await handle_raw_answers(callback)

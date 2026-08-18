@@ -9,9 +9,29 @@ tabiiy matnli xulosa yozadi. AI ishlamasa yoki noto'g'ri/uzun natija
 bersa, oddiy shablon xulosa ishlatiladi — baholash hech qachon
 to'xtamaydi.
 
+REAL TELEGRAM SINOVIDA topilgan asosiy kamchilik: eski versiya
+mazmundan qat'i nazar faqat javob UZUNLIGIGA qarab ball berardi
+(``_score_by_length``) — shu sabab xavfli javoblar ham "uzun/aniq"
+bo'lgani uchun yaxshi baholanardi. Endi ``kassa_xavfsizlik``,
+``muddat_xavfsizligi``, ``javobgarlik`` va ``muomala`` (mojaro savoli)
+mezonlari ``services/recruiting_redflags.py`` orqali MAZMUNGA qarab
+baholanadi:
+
+- kritik RED signal topilsa — ball 0 VA ``red_flags`` ro'yxatiga
+  qo'shiladi. Kritik red flag mavjud bo'lsa, yakuniy natija HECH
+  QACHON ``INTERVIEW_RECOMMENDED`` bo'lmaydi (qarang ``_overall_result``).
+- javob berilmagan bo'lsa — ball ``None`` (o'rtacha ballga QO'SHILMAYDI,
+  "javobsiz savolga ball berilmaydi").
+- javob ikkilanuvchan (UNCLEAR) bo'lsa — ball ``None`` va savol
+  ``clarify_questions``ga qo'shiladi (Founderga "suhbatda aniqlashtiring"
+  deb ko'rsatiladi) — bitta yaxshi kalit so'z butun javobni avtomatik
+  yaxshi qilib bermaydi.
+
 Himoyalangan shaxsiy xususiyatlar (din, millat, oilaviy holat va h.k.)
 BU YERDA UMUMAN YO'Q — ular hech qachon so'ralmagani uchun ballga ham
-ta'sir qila olmaydi.
+ta'sir qila olmaydi. Tug'ilgan yil ham shu sabab bu yerda UMUMAN
+ishlatilmaydi (faqat FSM darajasida qonuniy yosh tekshiruvi uchun,
+qarang ``recruiting_bot.py``).
 """
 
 import json
@@ -19,7 +39,7 @@ import logging
 
 from openai import AsyncOpenAI
 
-from services import recruiting_followup, recruiting_rubric
+from services import recruiting_redflags, recruiting_rubric
 
 logger = logging.getLogger(__name__)
 
@@ -30,23 +50,44 @@ RESULT_INTERVIEW = "INTERVIEW_RECOMMENDED"
 RESULT_NEEDS_REVIEW = "NEEDS_HUMAN_REVIEW"
 RESULT_MISMATCH = "REQUIREMENT_MISMATCH"
 
+# Mezon kaliti -> lavozim -> savol kalitlari. Shu mezonlar UZUNLIKKA
+# emas, MAZMUNGA qarab (``recruiting_redflags`` orqali) baholanadi.
+_REDFLAG_CRITERIA_QUESTIONS: dict[str, dict[str, tuple[str, ...]]] = {
+    "kassa_xavfsizlik": {"kassir": ("kassir_login",)},
+    "muddat_xavfsizligi": {"kassir": ("kassir_muddat",), "sotuvchi": ("sotuvchi_muddat",)},
+    "javobgarlik": {"kassir": ("kassir_kamomad", "kassir_javobgarlik")},
+    "muomala": {"kassir": ("kassir_janjal",), "sotuvchi": ("sotuvchi_norozilik",)},
+}
+_REDFLAG_CHECKER: dict[str, "callable[[str], str]"] = {
+    "kassa_xavfsizlik": recruiting_redflags.check_credential_sharing,
+    "muddat_xavfsizligi": recruiting_redflags.check_expired_product,
+    "javobgarlik": recruiting_redflags.check_shortage_response,
+    "muomala": recruiting_redflags.check_customer_conflict,
+}
+_REDFLAG_FLAG_KEY: dict[str, str] = {
+    "kassa_xavfsizlik": recruiting_redflags.CREDENTIAL_SHARING,
+    "muddat_xavfsizligi": recruiting_redflags.EXPIRED_PRODUCT,
+    "javobgarlik": recruiting_redflags.SHORTAGE_COVERUP,
+    "muomala": recruiting_redflags.CUSTOMER_CONFLICT,
+}
+
 _KASSIR_CRITERION_QUESTIONS: dict[str, list[str]] = {
-    "muomala": ["kassir_janjal"],
-    "muammo_yechish": ["kassir_narx_farqi", "kassir_muddat"],
-    "javobgarlik": ["kassir_kamomad", "kassir_javobgarlik"],
+    "muammo_yechish": ["kassir_narx_farqi", "kassir_telefon", "umumiy_kech_qolish"],
 }
 _SOTUVCHI_CRITERION_QUESTIONS: dict[str, list[str]] = {
-    "muomala": ["sotuvchi_kutib_olish", "sotuvchi_norozilik"],
-    "ehtiyoj": ["sotuvchi_ehtiyoj"],
+    "ehtiyoj": ["sotuvchi_ehtiyoj", "sotuvchi_kutib_olish"],
     "tavsiya": ["sotuvchi_qoshimcha", "sotuvchi_topilmasa"],
-    "javon": ["sotuvchi_javon", "sotuvchi_muddat"],
-    "muammo_yechish": ["sotuvchi_norozilik"],
+    "javon": ["sotuvchi_javon", "umumiy_kech_qolish"],
     "jamoaviylik": ["sotuvchi_kelishmovchilik"],
 }
 _CRITERION_QUESTIONS_BY_POSITION = {
     "kassir": _KASSIR_CRITERION_QUESTIONS,
     "sotuvchi": _SOTUVCHI_CRITERION_QUESTIONS,
 }
+
+_GENERIC_VAGUE_PHRASES = (
+    "bilmayman", "bilmadim", "farqi yo'q", "shunchaki", "hech narsa", "nima desam",
+)
 
 
 def _answers_by_key(answers: list[dict]) -> dict[str, list[dict]]:
@@ -62,7 +103,12 @@ def _evidence(text: str, limit: int = 110) -> str:
 
 
 def _score_by_length(combined_text: str) -> int:
-    length = len(combined_text.strip())
+    text = combined_text.strip()
+    length = len(text)
+    if length == 0:
+        return 0
+    if any(phrase in text.lower() for phrase in _GENERIC_VAGUE_PHRASES):
+        return min(1, 1 if length >= 5 else 0)
     if length >= 20:
         return 2
     if length >= 5:
@@ -70,32 +116,66 @@ def _score_by_length(combined_text: str) -> int:
     return 0
 
 
-def _score_kassa_xavfsizlik(grouped_answers: dict[str, list[dict]]) -> tuple[int, str]:
-    entries = grouped_answers.get("kassir_login", [])
+def _combined_answer_text(grouped_answers: dict[str, list[dict]], question_keys: tuple[str, ...]) -> tuple[str, str]:
+    """(asl_javob, keyingi_aniqlashtirish_matni) — ikkalasi alohida,
+    chunki qaror avval aslidan, keyin (agar xavfli bo'lsa) aniqlashtirish
+    javobidan ham kelib chiqadi (qarang mavjud ``kassa_xavfsizlik``
+    naqshi — nomzod follow-up'da fikridan qaytishi mumkin)."""
+    entries: list[dict] = []
+    for q_key in question_keys:
+        entries.extend(grouped_answers.get(q_key, []))
     if not entries:
-        return 1, "Javob berilmagan."
-
-    original = entries[0]["answer_text"]
-    follow_up_text = " ".join(e["answer_text"] for e in entries[1:])
-    risky = recruiting_followup.deterministic_follow_up(original) is not None
-
-    if not risky:
-        return 2, _evidence(original)
-
-    reassuring_phrases = ("bermayman", "hech kimga bermayman", "faqat o'zim", "hech qachon bermayman")
-    if follow_up_text and any(phrase in follow_up_text.lower() for phrase in reassuring_phrases):
-        return 2, _evidence(follow_up_text)
-
-    return 0, _evidence(original)
+        return "", ""
+    original = " ".join(e["answer_text"] for e in entries if not e.get("is_follow_up"))
+    follow_up = " ".join(e["answer_text"] for e in entries if e.get("is_follow_up"))
+    return original, follow_up
 
 
-def _score_jadval_moslik(availability_text: str | None) -> tuple[int, str]:
+def _score_redflag_criterion(
+    grouped_answers: dict[str, list[dict]], question_keys: tuple[str, ...], checker, flag_key: str
+) -> tuple[int | None, str, dict | None, bool]:
+    """Qaytaradi: (ball yoki None, dalil matni, red_flag yozuvi yoki
+    None, aniqlashtirish_kerak: bool)."""
+    original, follow_up = _combined_answer_text(grouped_answers, question_keys)
+    if not original.strip():
+        return None, "Javob berilmagan.", None, False
+
+    status = checker(original)
+    evidence_text = original
+    if follow_up.strip():
+        # Aniqlashtirish javobini ALOHIDA tekshiramiz (birlashtirilgan
+        # matnda emas) — aks holda asl xavfli ibora combined matnda
+        # baribir qolib, "ikkalasi ham bor -> RED" qoidasi orqali
+        # chinakam fikridan qaytishni ham RED qilib qo'yardi. Nomzod
+        # aniq fikridan qaytsa (follow-up ALOHIDA GREEN), red flag olib
+        # tashlanadi; yana ham xavfli javob bersa (follow-up ALOHIDA
+        # RED), RED holicha qoladi; follow-up o'zi ham noaniq bo'lsa,
+        # ASL javobning holati saqlanadi.
+        follow_up_status = checker(follow_up)
+        evidence_text = f"{original} {follow_up}"
+        if follow_up_status in (recruiting_redflags.RED, recruiting_redflags.GREEN):
+            status = follow_up_status
+
+    if status == recruiting_redflags.RED:
+        red_flag = {
+            "key": flag_key,
+            "label": recruiting_redflags.label_for(flag_key),
+            "evidence": _evidence(evidence_text),
+        }
+        return 0, _evidence(evidence_text), red_flag, False
+
+    if status == recruiting_redflags.GREEN:
+        return 2, _evidence(evidence_text), None, False
+
+    # UNCLEAR — ikkalasi ham aniq emas: ball berilmaydi, Founder
+    # suhbatda aniqlashtirsin (AI/deterministik tizim ma'no o'ylab
+    # topmaydi).
+    return None, _evidence(evidence_text) or "Javob noaniq.", None, True
+
+
+def _score_jadval_moslik(availability_text: str | None) -> tuple[int | None, str]:
     if not availability_text or not availability_text.strip():
-        return 0, "Ish jadvaliga moslik haqida ma'lumot berilmagan."
-    # Vakansiyaning aniq jadval talabi (schedule_description) odatda
-    # sozlanmagan bo'lishi mumkin — bunday holatda taqqoslash uchun
-    # yetarli ma'lumot yo'q, shuning uchun "noaniq" (1) deb belgilanadi,
-    # mos EMAS (0) deb hukm qilinmaydi.
+        return None, "Ish jadvaliga moslik haqida ma'lumot berilmagan."
     return 1, _evidence(availability_text)
 
 
@@ -110,37 +190,52 @@ def score_application(
     criterion_question_map = _CRITERION_QUESTIONS_BY_POSITION.get(position_key, {})
 
     criteria_scores: list[dict] = []
+    red_flags: list[dict] = []
+    clarify_questions: list[str] = []
+    has_unclear_critical = False
+
     for criterion in criteria:
         key, label = criterion["key"], criterion["label"]
+        redflag_question_keys = _REDFLAG_CRITERIA_QUESTIONS.get(key, {}).get(position_key)
 
-        if key == "tajriba":
-            text = application.get("experience_text") or ""
-            score = _score_by_length(text)
+        if redflag_question_keys:
+            checker = _REDFLAG_CHECKER[key]
+            flag_key = _REDFLAG_FLAG_KEY[key]
+            score, evidence, red_flag, unclear = _score_redflag_criterion(
+                grouped_answers, redflag_question_keys, checker, flag_key
+            )
+            if red_flag:
+                red_flags.append(red_flag)
+            if unclear:
+                has_unclear_critical = True
+                present = [qk for qk in redflag_question_keys if qk in grouped_answers]
+                if present:
+                    q_text = grouped_answers[present[0]][0]["question_text"]
+                    clarify_questions.append(q_text)
+        elif key == "tajriba":
+            text = " ".join(
+                filter(None, [application.get("prev_employer_text"), application.get("experience_duration_text"), application.get("experience_text")])
+            )
+            score = _score_by_length(text) if text.strip() else None
             evidence = _evidence(text) or "Ma'lumot berilmagan."
-        elif key == "kassa_xavfsizlik":
-            score, evidence = _score_kassa_xavfsizlik(grouped_answers)
         elif key == "matematik":
             if math_correct is None:
-                score, evidence = 1, "Matematik savol berilmagan."
+                score, evidence = None, "Matematik savol berilmagan."
             else:
                 score = 2 if math_correct else 0
                 evidence = "To'g'ri javob berdi." if math_correct else "Noto'g'ri javob berdi."
         elif key == "jadval_moslik":
             score, evidence = _score_jadval_moslik(application.get("availability_text"))
         else:
-            question_keys = criterion_question_map.get(key, [])
-            texts = [
-                entry["answer_text"]
-                for q_key in question_keys
-                for entry in grouped_answers.get(q_key, [])
-            ]
-            combined = " ".join(texts)
-            score = _score_by_length(combined)
+            question_keys = tuple(criterion_question_map.get(key, []))
+            original, follow_up = _combined_answer_text(grouped_answers, question_keys)
+            combined = f"{original} {follow_up}".strip()
+            score = _score_by_length(combined) if combined else None
             evidence = _evidence(combined) or "Javob berilmagan."
 
         criteria_scores.append({"key": key, "label": label, "score": score, "evidence": evidence})
 
-    overall_result = _overall_result(criteria_scores, math_correct, position_key)
+    overall_result = _overall_result(criteria_scores, math_correct, position_key, red_flags, has_unclear_critical)
     strengths = [c["label"] for c in criteria_scores if c["score"] == 2][:3]
     risks = [
         {"criterion": c["label"], "evidence": c["evidence"]}
@@ -153,18 +248,30 @@ def score_application(
         "overall_result": overall_result,
         "strengths": strengths,
         "risks": risks,
+        "red_flags": red_flags,
+        "clarify_questions": clarify_questions[:4],
     }
 
 
-def _overall_result(criteria_scores: list[dict], math_correct: bool | None, position_key: str) -> str:
-    security_score = next((c["score"] for c in criteria_scores if c["key"] == "kassa_xavfsizlik"), None)
-    if security_score == 0:
-        return RESULT_MISMATCH
+def _overall_result(
+    criteria_scores: list[dict],
+    math_correct: bool | None,
+    position_key: str,
+    red_flags: list[dict],
+    has_unclear_critical: bool,
+) -> str:
+    # Kritik xavf — hech qachon avtomatik "Suhbatga tavsiya" chiqmaydi,
+    # ball qanchalik yuqori bo'lishidan qat'i nazar.
+    if red_flags:
+        return RESULT_NEEDS_REVIEW
+
+    if has_unclear_critical:
+        return RESULT_NEEDS_REVIEW
 
     if position_key == "kassir" and math_correct is False:
         return RESULT_NEEDS_REVIEW
 
-    scores = [c["score"] for c in criteria_scores]
+    scores = [c["score"] for c in criteria_scores if c["score"] is not None]
     if not scores:
         return RESULT_NEEDS_REVIEW
 
@@ -177,11 +284,14 @@ def _overall_result(criteria_scores: list[dict], math_correct: bool | None, posi
 
 
 def _fallback_summary(position_key: str, deterministic_result: dict) -> str:
-    scores = [c["score"] for c in deterministic_result["criteria_scores"]]
+    scores = [c["score"] for c in deterministic_result["criteria_scores"] if c["score"] is not None]
     average = round(sum(scores) / len(scores), 1) if scores else 0
+    red_flag_note = ""
+    if deterministic_result.get("red_flags"):
+        red_flag_note = f" ⚠️ {len(deterministic_result['red_flags'])} ta kritik xavf aniqlandi."
     return (
         f"{position_key.capitalize()} lavozimi bo'yicha {len(scores)} mezon baholandi, "
-        f"o'rtacha ball: {average}/2. To'liq tafsilotlar mezonlar jadvalida."
+        f"o'rtacha ball: {average}/2.{red_flag_note} To'liq tafsilotlar mezonlar jadvalida."
     )
 
 

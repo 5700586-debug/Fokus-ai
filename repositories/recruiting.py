@@ -60,6 +60,23 @@ def set_vacancy_active(vacancy_id: int, is_active: bool) -> None:
         conn.close()
 
 
+def set_vacancy_requirements(vacancy_id: int, required_shift: str | None, requires_weekends: bool) -> None:
+    """Founder/admin tomonidan vakansiyaning qat'iy talablarini
+    sozlash uchun (qarang ``services/recruiting_fit.py``) — hozircha
+    faqat dasturiy/test chaqiruvi orqali, botda alohida buyruq shart
+    emas (ikkala standart vakansiyada ham sukut bo'yicha bo'sh, ya'ni
+    hech qanday qat'iy cheklov yo'q)."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE recruiting_vacancies SET required_shift = ?, requires_weekends = ?, updated_at = ? WHERE id = ?",
+            (required_shift, 1 if requires_weekends else 0, _now(), vacancy_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------------- ariza --
 
 
@@ -117,6 +134,23 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "motivation_text",
     "current_step",
     "status",
+    "birth_year",
+    "residence_area",
+    "preferred_branch",
+    "shift_preference",
+    "unavailable_days_text",
+    "holiday_available",
+    "expected_salary",
+    "commute_issue",
+    "accommodation_needed",
+    "accommodation_text",
+    "fit_result",
+    "fit_reason",
+    "prev_employer_text",
+    "experience_duration_text",
+    "pos_experience",
+    "cash_handling_text",
+    "reference_check_consent",
 }
 
 
@@ -313,6 +347,8 @@ def save_assessment(
     risks: list[dict],
     ai_summary: str | None,
     source: str,
+    red_flags: list[dict] | None = None,
+    clarify_questions: list[str] | None = None,
 ) -> None:
     now = _now()
     conn = get_connection()
@@ -323,8 +359,9 @@ def save_assessment(
         conn.execute(
             "INSERT INTO recruiting_assessments "
             "(application_id, rubric_version_id, overall_result, criteria_scores_json, "
-            "strengths_json, risks_json, ai_summary, source, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "strengths_json, risks_json, ai_summary, source, red_flags_json, "
+            "clarify_questions_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 application_id,
                 rubric_version_id,
@@ -334,6 +371,8 @@ def save_assessment(
                 json.dumps(risks, ensure_ascii=False),
                 ai_summary,
                 source,
+                json.dumps(red_flags or [], ensure_ascii=False),
+                json.dumps(clarify_questions or [], ensure_ascii=False),
                 now,
             ),
         )

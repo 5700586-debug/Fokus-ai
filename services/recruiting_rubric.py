@@ -1,28 +1,34 @@
 """Lavozimga bog'liq baholash rubrikasi — versiyalangan, faqat ish
 bilan bog'liq mezonlar (qarang loyihaning rekruting talab hujjati:
 himoyalangan shaxsiy xususiyatlar ballga hech qachon ta'sir qilmaydi,
-chunki ular bu ro'yxatda umuman yo'q va hech qachon so'ralmaydi)."""
+chunki ular bu ro'yxatda umuman yo'q va hech qachon so'ralmaydi).
+
+``RUBRIC_VERSION = 2`` — real Telegram sinovidan keyin qo'shildi:
+``muddat_xavfsizligi`` (muddati o'tgan mahsulot) endi ``muammo_yechish``
+ichida yashiringan emas, alohida KRITIK mezon (qarang
+``services/recruiting_scoring.py``dagi red-flag integratsiyasi)."""
 
 from repositories import recruiting as recruiting_repo
 
-RUBRIC_VERSION = 1
+RUBRIC_VERSION = 2
 
 KASSIR_CRITERIA: list[dict] = [
     {"key": "tajriba", "label": "Tegishli tajriba"},
-    {"key": "muomala", "label": "Mijoz bilan muomala"},
+    {"key": "muomala", "label": "Mijoz bilan muomala (mojaro paytida)"},
     {"key": "kassa_xavfsizlik", "label": "Kassa xavfsizligi va shaxsiy login qoidasi"},
+    {"key": "muddat_xavfsizligi", "label": "Muddati o'tgan mahsulotga munosabat"},
     {"key": "matematik", "label": "Oddiy matematik aniqlik"},
     {"key": "muammo_yechish", "label": "Muammoni hal qilish"},
-    {"key": "javobgarlik", "label": "Javobgarlik"},
+    {"key": "javobgarlik", "label": "Javobgarlik (kamomad holati)"},
     {"key": "jadval_moslik", "label": "E'lon qilingan ish jadvaliga moslik"},
 ]
 
 SOTUVCHI_CRITERIA: list[dict] = [
-    {"key": "muomala", "label": "Mijoz bilan muomala"},
+    {"key": "muomala", "label": "Mijoz bilan muomala (norozilik paytida)"},
     {"key": "ehtiyoj", "label": "Ehtiyojni tushunish"},
     {"key": "tavsiya", "label": "Mahsulot tavsiya qilish"},
     {"key": "javon", "label": "Javon, yaroqlilik va ozodalik"},
-    {"key": "muammo_yechish", "label": "Muammoni hal qilish"},
+    {"key": "muddat_xavfsizligi", "label": "Muddati o'tgan mahsulotga munosabat"},
     {"key": "jamoaviylik", "label": "Jamoaviy ishlash"},
     {"key": "jadval_moslik", "label": "E'lon qilingan ish jadvaliga moslik"},
 ]

@@ -158,3 +158,23 @@ async def test_more_questions_button_shows_phone_and_follow_ups_to_founder_only(
 
     allowed = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_question:{application_id}", target_chat_id=FOUNDER_ID)
     assert any("+998900000000" in (getattr(m, "text", "") or "") for m in allowed)
+
+
+async def test_raw_answers_button_shows_full_text_to_founder_only(bot_dp):
+    import roles
+
+    main, bot = bot_dp
+    roles.set_role(ORDINARY_EMPLOYEE_ID, "kassir", set_by=FOUNDER_ID)
+    application_id = _create_awaiting_review_application(600005)
+    recruiting_repo.add_answer(
+        application_id, "kassir_muddat", "Muddati o'tgan mahsulot?",
+        "juda xatoli va uzun asl javob matni bo'lsin",
+    )
+
+    denied = await send_callback(
+        main.dp, bot, ORDINARY_EMPLOYEE_ID, f"rec_raw:{application_id}", target_chat_id=FOUNDER_ID
+    )
+    assert not any("juda xatoli va uzun asl javob matni" in (getattr(m, "text", "") or "") for m in denied)
+
+    allowed = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_raw:{application_id}", target_chat_id=FOUNDER_ID)
+    assert any("juda xatoli va uzun asl javob matni" in (getattr(m, "text", "") or "") for m in allowed)

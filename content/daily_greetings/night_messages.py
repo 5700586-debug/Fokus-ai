@@ -1,0 +1,36 @@
+"""30 kunlik tayyor tungi salom matnlari — Founder tomonidan aynan shu
+holatda tasdiqlangan, o'zgartirilmaydi va yangi matn qo'shilmaydi.
+Moliyaviy/savdo/KPI mazmuni yo'q."""
+
+NIGHT_MESSAGES: list[str] = [
+    "🌙 Kun yakuni.\nBugun kimningdir kayfiyatini yaxshiladingizmi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qaysi ishingizdan ko'nglingiz to'ldi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun sizni yaxshi eslab qoladigan xaridor bo'ldimi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun hech kim aytmasdan nima qildingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kimning ishini yengillashtirdingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kechagidan nimangiz yaxshiroq bo'ldi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBu haftada o'zingizdan mamnun bo'lgan qaysi ishingiz bor?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun sizdan keyin ish joyi yaxshiroq qoldimi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qaysi suhbat sizga yoqdi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qaysi xatoning oldini oldingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qayerda tashabbus ko'rsatdingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kim sizdan yaxshi kayfiyat oldi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qaysi vaziyatda o'zingizni boshqardingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nQaysi kichik odatni keyingi haftaga olib o'tasiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun nimada o'sdingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun nimadan saboq oldingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun nimani yangi bildingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kimdan nimani o'rgandingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kayfiyatingiz emas, qaroringiz yutgan vaziyat bo'ldimi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBir oy oldingiga qaraganda nimani yaxshiroq qilyapsiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nKeyingi haftada nimani yaxshilamoqchisiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun jamoaga nima qo'shdingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun \"biz\" uchun nima qildingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun kimni yaxshiroq tingladingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun qaysi muammoga yechim topdingiz?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun yordam so'ramasdan turib kimnidir payqadingizmi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun sizga ishonish uchun sabab berdingizmi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBugun muammoga emas, yechimga qaragan paytingiz bo'ldimi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nShu oy sizda nimani ozgina bo'lsa ham o'zgartirdi?\nXayrli tun, Saturn jamoasi.",
+    "🌙 Kun yakuni.\nBu oy uchun o'zingizga bitta \"rahmat\" ayting. Ertaga davom etamiz.\nXayrli tun, Saturn jamoasi.",
+]

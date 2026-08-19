@@ -44,20 +44,20 @@ async def _tick(bot, openai_client: AsyncOpenAI) -> None:
 
     try:
         # "Friendly phase": xodimlar guruhiga avtomatik boradigan tonggi/
-        # tungi xabar rasmli, moliyasiz salom (qarang
-        # ``services/saturn_group.send_morning_image_message``/
-        # ``send_night_image_message``). Eski matnli
-        # ``send_morning_message``/moliyaviy ``send_evening_message``
-        # BU YERDAN HECH QACHON chaqirilmaydi va endi ``/saturntest``
-        # orqali ham xodimlar guruhiga chiqmaydi (funksiyalarning o'zi
-        # olib tashlanmadi — ichki, admin-only qayta ishlatish uchun
-        # qoldirildi, qarang ``send_evening_message``dagi guruh-chat_id
-        # himoyasi).
+        # tungi xabar — sodda, 30 kunlik tayyor kontent (qarang
+        # ``services/daily_greetings.py`` va
+        # ``services/saturn_group.send_daily_greeting_morning``/
+        # ``send_daily_greeting_night``), AI/Pillow render yo'q. Eski
+        # AI+ob-havo rasmli funksiyalar (``send_morning_image_message``/
+        # ``send_night_image_message``) va matnli/moliyaviy
+        # ``send_morning_message``/``send_evening_message`` BU YERDAN
+        # HECH QACHON chaqirilmaydi — o'zlari olib tashlanmadi, faqat
+        # ichki/``/saturntest`` sinov uchun qoldirildi.
         if current_hm >= rules_service.get_saturn_morning_time() and rules_service.get_saturn_morning_image_enabled():
-            await saturn_group.send_morning_image_message(bot, openai_client, group_chat_id)
+            await saturn_group.send_daily_greeting_morning(bot, group_chat_id)
 
         if current_hm >= rules_service.get_saturn_evening_time() and rules_service.get_saturn_night_image_enabled():
-            await saturn_group.send_night_image_message(bot, openai_client, group_chat_id)
+            await saturn_group.send_daily_greeting_night(bot, group_chat_id)
 
         if current_hm >= rules_service.get_saturn_tip_time():
             await saturn_group.send_tip_message(bot, group_chat_id)

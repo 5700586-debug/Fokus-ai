@@ -12,7 +12,7 @@ deb aniq ko'rsatiladi.
 
 import logging
 
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 from openai import AsyncOpenAI
 
 import company_time
@@ -20,7 +20,7 @@ from config import SATURN_HOT_THRESHOLD_C, SATURN_WEATHER_CITY, SATURN_WIND_THRE
 from providers.sales_data_provider import DailySales, get_sales_data_provider
 from providers.weather_provider import get_weather_provider
 from repositories import saturn_group as saturn_repo
-from services import notifications, saturn_content, saturn_image
+from services import daily_greetings, notifications, saturn_content, saturn_image
 from services import rules as rules_service
 from services import saturn_season, saturn_weather_scene
 
@@ -405,3 +405,61 @@ async def send_night_image_preview(bot, client: AsyncOpenAI | None, chat_id: int
     photo = BufferedInputFile(photo_bytes, filename="saturn_night_preview.png")
     caption = _with_credit("🔍 Sinov: tungi rasm (hech qanday yozuv band qilinmadi)", credit)
     await bot.send_photo(chat_id, photo, caption=caption)
+
+
+# ------------------------------------------------- sodda 30 kunlik salom --
+# ``services/daily_greetings.py``dagi tayyor matn + (bo'lsa) statik rasm —
+# AI yo'q, Pillow render yo'q, ob-havo/fasl hisobga olinmaydi. Idempotency
+# — qarang ``send_morning_image_message`` docstringi. 30-kundan keyin
+# ``daily_greetings`` ``None`` qaytaradi — shu holatda HECH NARSA
+# yuborilmaydi (boshidan avtomatik takrorlanmaydi).
+
+
+async def send_daily_greeting_morning(bot, group_chat_id: int) -> None:
+    text = daily_greetings.get_morning_message()
+    if text is None:
+        return
+
+    today = _today_str()
+    job_key = f"daily_greeting_morning_{today}"
+
+    if not await notifications.try_reserve(job_key, group_chat_id):
+        return
+
+    try:
+        image_path = daily_greetings.get_morning_image_path()
+        if image_path is not None:
+            await bot.send_photo(group_chat_id, FSInputFile(image_path), caption=text)
+        else:
+            await bot.send_message(group_chat_id, text)
+    except Exception:
+        notifications.release_reservation(job_key, group_chat_id)
+        raise
+
+    notifications.mark_sent(job_key, group_chat_id)
+    saturn_repo.log_post("daily_greeting_morning", today, text)
+
+
+async def send_daily_greeting_night(bot, group_chat_id: int) -> None:
+    text = daily_greetings.get_night_message()
+    if text is None:
+        return
+
+    today = _today_str()
+    job_key = f"daily_greeting_night_{today}"
+
+    if not await notifications.try_reserve(job_key, group_chat_id):
+        return
+
+    try:
+        image_path = daily_greetings.get_night_image_path()
+        if image_path is not None:
+            await bot.send_photo(group_chat_id, FSInputFile(image_path), caption=text)
+        else:
+            await bot.send_message(group_chat_id, text)
+    except Exception:
+        notifications.release_reservation(job_key, group_chat_id)
+        raise
+
+    notifications.mark_sent(job_key, group_chat_id)
+    saturn_repo.log_post("daily_greeting_night", today, text)

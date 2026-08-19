@@ -255,6 +255,14 @@ _MISMATCH_CLOSING_TEXT = (
 _HUMOR_ACK_TEXT = "😂 Zo'r hazil ekan. Endi jiddiylashamiz 🙂"
 
 
+def _closing_text_for(full_name: str | None) -> str:
+    """Suhbat oxirida nomzod ismi bilan samimiy yakunlash matni (real
+    Telegram sinovidan keyingi talab)."""
+    first_name = (full_name or "").strip().split()[0] if full_name and full_name.strip() else None
+    greeting = first_name or "Hurmatli nomzod"
+    return f"{greeting}, suhbat uchun rahmat 😊 Javoblaringiz qabul qilindi. Natijani asoschi ko'rib chiqadi."
+
+
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
@@ -515,6 +523,40 @@ async def _check_fit_and_maybe_finish(message: Message, state: FSMContext, data:
     return False
 
 
+# -------------------------------------------------- suhbat chegaralari --
+# Bot FAQAT rekruting suhbati doirasida ishlashi kerak — ichki tizim/
+# xavfsizlik so'rovlariga yoki mavzudan chetga chiqishga har doim shu
+# ikkita himoya orqali javob beriladi (qarang services/recruiting_followup.py).
+# Suhbat holati/state machine O'ZGARMAYDI — faqat kutilayotgan savol
+# qayta ko'rsatiladi.
+
+
+async def _enforce_conversation_boundary(message: Message, pending_prompt: str, text: str) -> bool:
+    """``True`` — chegaradan chiqish aniqlandi, javob berildi va
+    kutilayotgan savol qayta ko'rsatildi; chaqiruvchi handler DARHOL
+    to'xtashi kerak. ``False`` — oddiy javob, davom eting."""
+    if recruiting_followup.is_security_probe(text):
+        await message.answer(recruiting_followup.SECURITY_REFUSAL_TEXT)
+        await message.answer(pending_prompt)
+        return True
+    if await recruiting_followup.is_off_topic(_CURRENT_OPENAI_CLIENT.get(), pending_prompt, text):
+        await message.answer(recruiting_followup.OFF_TOPIC_REDIRECT_TEXT)
+        await message.answer(pending_prompt)
+        return True
+    return False
+
+
+def _pending_prompt_for(step_key: str) -> str | None:
+    if step_key == "accommodation_text":
+        return _ACCOMMODATION_TEXT_STEP["prompt"]
+    if step_key == "retention_intent_reason":
+        return _RETENTION_REASON_STEP["prompt"]
+    if step_key == _LEAVE_REASON_FOLLOWUP_STEP_KEY:
+        return _STEP_BY_KEY["leave_reason"]["prompt"]
+    step = _STEP_BY_KEY.get(step_key)
+    return step["prompt"] if step else None
+
+
 async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     step_key = data.get("step_key")
@@ -527,6 +569,10 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
 
     if not text:
         await message.answer("❌ Iltimos, javob yozing.")
+        return
+
+    pending_prompt = _pending_prompt_for(step_key)
+    if pending_prompt and await _enforce_conversation_boundary(message, pending_prompt, text):
         return
 
     if step_key == "accommodation_text":
@@ -576,6 +622,9 @@ async def _handle_leave_reason_answer(message: Message, state: FSMContext, data:
     if await recruiting_followup.detect_humor(_CURRENT_OPENAI_CLIENT.get(), leave_reason_prompt, text):
         await message.answer(_HUMOR_ACK_TEXT)
         await message.answer(leave_reason_prompt)
+        return
+
+    if await _enforce_conversation_boundary(message, leave_reason_prompt, text):
         return
 
     recruiting_repo.update_application(application_id, leave_reason_text=text)
@@ -677,6 +726,18 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
         await message.answer(q_text)
         return
 
+    if recruiting_followup.is_security_probe(text):
+        await message.answer(recruiting_followup.SECURITY_REFUSAL_TEXT)
+        await message.answer(q_text)
+        return
+    if attempt < RECRUITING_MAX_FOLLOW_UPS and await recruiting_followup.is_off_topic(
+        _CURRENT_OPENAI_CLIENT.get(), q_text, text
+    ):
+        await state.update_data(follow_up_attempt=attempt + 1)
+        await message.answer(recruiting_followup.OFF_TOPIC_REDIRECT_TEXT)
+        await message.answer(q_text)
+        return
+
     recruiting_repo.add_answer(application_id, q_key, q_text, text, answer_source="text")
     await _maybe_ask_follow_up(message, state, data, q_key, q_text, text)
 
@@ -719,6 +780,10 @@ async def handle_follow_up_answer(message: Message, state: FSMContext) -> None:
     application_id = data["application_id"]
     q_key = data["follow_up_question_key"]
     q_text = data["follow_up_question_text"]
+
+    if await _enforce_conversation_boundary(message, q_text, text):
+        return
+
     recruiting_repo.add_answer(application_id, q_key, q_text, text, answer_source="text", is_follow_up=True)
 
     # Asl savol matni bilan (redflag tekshiruvi savol MATNIGA emas,
@@ -803,6 +868,9 @@ async def handle_motivation_voice(
         )
         return
 
+    if await _enforce_conversation_boundary(message, _MOTIVATION_PROMPT, transcript):
+        return
+
     await _ask_for_photo(message, state, transcript, answer_source="voice")
 
 
@@ -810,6 +878,9 @@ async def handle_motivation_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
         await message.answer("❌ Iltimos, javob yozing yoki ovozli xabar yuboring.")
+        return
+
+    if await _enforce_conversation_boundary(message, _MOTIVATION_PROMPT, text):
         return
 
     await _ask_for_photo(message, state, text, answer_source="text")
@@ -861,10 +932,8 @@ async def _finish_application(
         target_id=application_id,
     )
 
-    await message.answer(
-        "Rahmat! Javoblaringiz qabul qilindi. Saturn jamoasi vakili natija bo'yicha siz bilan bog'lanadi.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    full_name = recruiting_repo.get_application(application_id).get("full_name")
+    await message.answer(_closing_text_for(full_name), reply_markup=ReplyKeyboardRemove())
     await state.clear()
 
     # Baholash/karta xatosi nomzodga yuborilgan yakuniy xabarni orqaga

@@ -250,3 +250,95 @@ async def decide_follow_up(
             return ai_result
 
     return deterministic_follow_up(answer_text, question_key)
+
+
+# --------------------------------------------------- suhbat chegaralari --
+# Bot FAQAT ishga qabul suhbati doirasida ishlashi kerak (vakansiya, ish
+# shartlari, nomzod javoblari). Bu bo'lim ikkita mustaqil himoya qatlamini
+# ta'minlaydi:
+#
+# 1. ``is_security_probe`` — DETERMINISTIK, AI'ga bog'liq emas (hech
+#    qachon "ishlamay qolmasligi" kerak bo'lgan eng muhim himoya):
+#    source code, system prompt, API kalit/token/.env, DB, ichki
+#    arxitektura yoki "oldingi ko'rsatmalarni unut" kabi prompt-injection
+#    urinishlarini kalit so'z bo'yicha aniqlaydi.
+# 2. ``is_off_topic`` — AI orqali (faqat AI mavjud bo'lsa; aks holda
+#    ``False`` — noaniq holatda nomzodni bezovta qilmaslik xavfsizroq),
+#    nomzod javob o'rniga botga umuman aloqasiz savol/gap yozganini
+#    aniqlaydi (masalan ob-havo, shaxsiy suhbat va h.k.).
+#
+# Ikkalasi ham ANIQLANGANDA suhbat holati/state machine O'ZGARMAYDI —
+# faqat qisqa javob berilib, xuddi shu kutilayotgan savol qayta
+# ko'rsatiladi (qarang recruiting_bot.py dagi chaqiruv nuqtalari).
+
+SECURITY_REFUSAL_TEXT = (
+    "Ichki tizim va xavfsizlik ma'lumotlari maxfiy. Men faqat ishga qabul "
+    "jarayoni bo'yicha yordam bera olaman."
+)
+OFF_TOPIC_REDIRECT_TEXT = "Men faqat ishga qabul suhbati bo'yicha yordam beraman 🙂 Davom etamiz."
+
+_SECURITY_KEYWORDS = (
+    # kod / arxitektura
+    "system prompt", "system instruksiya", "sistem prompt", "manba kod", "manba kodi",
+    "source code", "kodni ko'rsat", "kodingni ko'rsat", "loyiha skeleti",
+    "ichki arxitektura", "arxitekturangni",
+    # kalit/token/muhit
+    "api key", "api kalit", "api token", "bot token", "bot tokeni", ".env",
+    # DB va admin/xavfsizlik
+    "ma'lumotlar bazasi", "database", "sql so'rov", "admin parol", "administrator parol",
+    "xavfsizlik sozlamalari", "server sozlamalari",
+    # prompt-injection urinishlari
+    "ko'rsatmalaringni unut", "ko'rsatmalarni unut", "instruksiyalaringni unut",
+    "instruksiyalarni unut", "avvalgi ko'rsatma", "oldingi ko'rsatma",
+    "ignore previous", "ignore all previous", "ignore your instructions",
+    "jailbreak", "promptingni chiqar", "promptini chiqar",
+)
+
+
+def _normalize_for_probe(text: str) -> str:
+    return (text or "").strip().lower().replace("‘", "'").replace("’", "'")
+
+
+def is_security_probe(text: str) -> bool:
+    """Faqat kalit so'z asosida — AI mavjud bo'lmasa ham HAR DOIM
+    ishlaydi, chunki bu eng muhim himoya qatlami (hech qachon ichki
+    tizim/xavfsizlik ma'lumoti oshkor bo'lmasligi kerak)."""
+    lowered = _normalize_for_probe(text)
+    if not lowered:
+        return False
+    return any(keyword in lowered for keyword in _SECURITY_KEYWORDS)
+
+
+async def is_off_topic(client: AsyncOpenAI | None, question_text: str, answer_text: str) -> bool:
+    """Nomzod javob o'rniga botga aloqasiz savol/mavzu yozganini
+    aniqlaydi (masalan ob-havo, shaxsiy suhbat). AI mavjud bo'lmasa yoki
+    xato bersa HAR DOIM ``False`` — noaniq holatda nomzodni asossiz
+    "mavzudan chetga chiqdingiz" deb ushlab qolmaslik xavfsizroq."""
+    if client is None:
+        return False
+    try:
+        response = await client.responses.create(
+            model=_MODEL,
+            instructions=(
+                "Sen ishga qabul suhbatidagi HR yordamchisan. Bot FAQAT "
+                "vakansiya, ish shartlari va nomzodning shu suhbatdagi "
+                "javoblari doirasida ishlashi kerak. Nomzod javobi ANIQ "
+                "botga umuman aloqasiz mavzuga (masalan ob-havo, sport, "
+                "shaxsiy suhbat, umuman boshqa mavzu) o'tib ketganini "
+                "aniqla — bu savolga qiyshiq/tushunarsiz/qisqa javob "
+                "berish EMAS, balki butunlay BOSHQA mavzuga o'tish. "
+                "Bezarar hazil yoki savolga tegishli (hatto chalkash) "
+                "javob mavzudan chetga chiqish deb hisoblanmaydi. "
+                "Ishonching past bo'lsa, mavzudan chetga chiqmagan deb hisobla. "
+                'Faqat quyidagi JSON formatida javob qaytar: '
+                '{"off_topic": true yoki false}'
+            ),
+            input=f"Kutilayotgan savol: {question_text}\nNomzod yozgani: {answer_text}",
+        )
+        data = _parse_json(response.output_text or "")
+        if data is None:
+            return False
+        return data.get("off_topic") is True
+    except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
+        logger.warning("OpenAI xatosi (recruiting off-topic detect): %r", error)
+        return False

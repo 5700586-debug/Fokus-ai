@@ -99,11 +99,26 @@ _CONSENT_TEXT = (
 _YES_NO_MAP = {"yes": 1, "no": 0}
 
 
-def _valid_birth_year(text: str) -> bool:
-    if not text.strip().isdigit():
-        return False
-    year = int(text.strip())
-    return 1940 <= year <= date.today().year - 10
+_BIRTH_DATE_RE = re.compile(r"^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$")
+_YEAR_ONLY_RE = re.compile(r"^\d{4}$")
+
+
+def _parse_birth_date(text: str) -> tuple[int, int, int] | None:
+    """(kun, oy, yil) yoki ``None`` (format noto'g'ri/sana mavjud emas/
+    yosh talabidan tashqari). Nomzod ".", "/", "-" bilan yozishi mumkin —
+    hammasi bir xil ichki formatga keltiriladi (qarang
+    ``_handle_birth_date_answer``)."""
+    match = _BIRTH_DATE_RE.match(text.strip())
+    if not match:
+        return None
+    day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    try:
+        date(year, month, day)
+    except ValueError:
+        return None
+    if not (1940 <= year <= date.today().year - 10):
+        return None
+    return day, month, year
 
 
 def _looks_like_phone(text: str) -> bool:
@@ -117,9 +132,9 @@ def _looks_like_phone(text: str) -> bool:
 _STEPS_B_C: list[dict] = [
     {"key": "full_name", "kind": "text", "prompt": "Ism-familiyangizni kiriting:", "column": "full_name"},
     {
-        "key": "birth_year", "kind": "text", "prompt": "Tug'ilgan yilingizni yozing (masalan: 2000):",
-        "column": "birth_year", "validator": _valid_birth_year,
-        "error": "❌ Iltimos, tug'ilgan yilni to'g'ri raqamda yozing (masalan: 2000).", "to_int": True,
+        "key": "birth_date", "kind": "text",
+        "prompt": "Tug'ilgan sanangizni yozing.\nMasalan: 12.10.1983",
+        "column": "birth_date_text",
     },
     {"key": "phone", "kind": "phone", "prompt": "Telefon raqamingizni yuboring (tugma orqali yoki yozib):", "column": "phone"},
     {"key": "residence_area", "kind": "text", "prompt": "Qaysi hudud yoki tumanda yashaysiz?", "column": "residence_area"},
@@ -557,6 +572,34 @@ def _pending_prompt_for(step_key: str) -> str | None:
     return step["prompt"] if step else None
 
 
+async def _handle_birth_date_answer(message: Message, state: FSMContext, data: dict, text: str) -> None:
+    """Nomzod oddiy odam ekanini hisobga olib, ".", "/", "-" bilan
+    yozilgan har xil formatlarni qabul qiladi. Faqat yil yozilsa (masalan
+    "1983"), muloyim tushuntirib qayta so'raladi — umumiy xato xabari
+    o'rniga. Kun/oy KELAJAKDA tug'ilgan kun eslatmasi uchun saqlanadi
+    (hozir hech qanday scheduler/eslatma qurilmagan); ``birth_year``
+    o'zgarishsiz qoladi — mavjud qonuniy yosh tekshiruvi
+    (``services/recruiting_fit.py``) buzilmaydi. Ball berilmaydi."""
+    stripped = text.strip()
+    parsed = _parse_birth_date(stripped)
+    if parsed is None:
+        if _YEAR_ONLY_RE.match(stripped):
+            await message.answer("Kun va oyni ham yozing 🙂 Masalan: 12.10.1983")
+            return
+        await message.answer("❌ Sana formatini tushunmadim. Masalan: 12.10.1983")
+        return
+
+    day, month, year = parsed
+    recruiting_repo.update_application(
+        data["application_id"],
+        birth_date_text=f"{day:02d}.{month:02d}.{year}",
+        birth_year=year,
+        birth_day=day,
+        birth_month=month,
+    )
+    await _advance_after_step(message, state, data)
+
+
 async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     step_key = data.get("step_key")
@@ -589,6 +632,9 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
         return
     if step_key == "leave_reason":
         await _handle_leave_reason_answer(message, state, data, text)
+        return
+    if step_key == "birth_date":
+        await _handle_birth_date_answer(message, state, data, text)
         return
 
     step = _STEP_BY_KEY.get(step_key)

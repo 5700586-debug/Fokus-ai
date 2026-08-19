@@ -160,6 +160,9 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "candidate_photo_file_id",
     "leave_reason_followup_text",
     "property_honesty_flag",
+    "birth_date_text",
+    "birth_day",
+    "birth_month",
 }
 
 

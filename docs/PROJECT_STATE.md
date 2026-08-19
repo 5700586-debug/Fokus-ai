@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `d0ae153` — "Shrink the situational question bank to the agreed 6-question structure"
+- **Oxirgi commit:** `7d6791c` — "Add simple 30-day daily greeting content module" (`content/daily_greetings/` — hali deploy qilinmagan, rasmlar hali qo'yilmagan)
 
 ## Render — test muhiti
 
@@ -28,7 +28,8 @@ list`) ustuvor — bu faylning o'zi emas.
 
 - **Saturn kunlik rasmli salom** (tong/tun, ob-havoga mos, haqiqiy fotolar) — `main`ga birlashtirilgan.
 - **Recruiting (Fokus HR) — suhbat asosidagi intervyu** — vaqtincha barqaror/yakunlangan (qarang `docs/modules/RECRUITING.md`), faqat test muhitida.
+- **Xayrli tong/tun — sodda 30 kunlik kontent** (`content/daily_greetings/`, `services/daily_greetings.py`) — kod tayyor, mavjud Saturn scheduler'ga ulangan (`saturn_group_bot.py` tick), lekin `morning.jpg`/`night.jpg` hali Founder tomonidan qo'yilmagan va hali test servisga deploy qilinmagan.
 
 ## Hozirgi bitta keyingi qadam
 
-Founder test botda (`fokus-ai-test`) yangi recruiting o'zgarishlarini sinab ko'rgach, tasdiqlansa: (a) branch HEAD'ni (`d0ae153`) test servisga deploy qilish, (b) production'dagi `8f492e2` deploy failure sababini alohida tekshirish (bu Recruiting bilan bog'liq emas, mustaqil masala).
+Founder `content/daily_greetings/morning.jpg` va `night.jpg` fayllarini qo'ygach va test botda (`fokus-ai-test`) yangi recruiting + daily-greetings o'zgarishlarini sinab ko'rgach, tasdiqlansa: (a) branch HEAD'ni (`7d6791c`) test servisga deploy qilish, (b) production'dagi `8f492e2` deploy failure sababini alohida tekshirish (bu Recruiting/daily-greetings bilan bog'liq emas, mustaqil masala).

@@ -5,17 +5,17 @@ muhim commit/deploydan keyin yangilanadi (qarang root `CLAUDE.md`).
 Ziddiyat bo'lsa, real Git/Render holati (`git log`, `render deploys
 list`) ustuvor — bu faylning o'zi emas.
 
-**Oxirgi tekshirilgan sana:** 2026-08-19
+**Oxirgi tekshirilgan sana:** 2026-08-20
 
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `08bfa2d` — "Add location/timing/retention fields and an explicit recommendation line to the Founder card"
+- **Oxirgi commit:** `d0ae153` — "Shrink the situational question bank to the agreed 6-question structure"
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `be84557` — branchdan 2 ta commit orqada (`862cc72`, `08bfa2d` hali deploy qilinmagan)
+- **Live commit:** `be84557` — branchdan bir necha commit orqada (`862cc72`, `08bfa2d`, `d8136fd`, `8fa3fa5`, `d0ae153` hali deploy qilinmagan)
 
 ## Render — production
 
@@ -31,4 +31,4 @@ list`) ustuvor — bu faylning o'zi emas.
 
 ## Hozirgi bitta keyingi qadam
 
-Founder test botda (`fokus-ai-test`) yangi recruiting o'zgarishlarini sinab ko'rgach, tasdiqlansa: (a) qolgan 2 ta commitni (`862cc72`, `08bfa2d`) test servisga deploy qilish, (b) production'dagi `8f492e2` deploy failure sababini alohida tekshirish (bu Recruiting bilan bog'liq emas, mustaqil masala).
+Founder test botda (`fokus-ai-test`) yangi recruiting o'zgarishlarini sinab ko'rgach, tasdiqlansa: (a) branch HEAD'ni (`d0ae153`) test servisga deploy qilish, (b) production'dagi `8f492e2` deploy failure sababini alohida tekshirish (bu Recruiting bilan bog'liq emas, mustaqil masala).

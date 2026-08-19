@@ -241,8 +241,11 @@ _RETENTION_REASON_STEP = {
     "column": "retention_intent_reason",
 }
 _PHOTO_PROMPT = (
-    "So'nggi savol 🙂 Hozirgi oddiy bir rasmingizni yubora olasizmi? "
-    "(Yubormoqchi bo'lmasangiz, \"yo'q\" deb yozing)"
+    "📷 Oxirgi qadam — o'zingizning hozirgi rasmingizni yuboring.\n"
+    "Rasm faqat nomzod kartangiz uchun saqlanadi, AI tashqi ko'rinishingizni baholamaydi."
+)
+_PHOTO_REQUIRED_REMINDER = (
+    "📷 Ariza rasmingiz kelmaguncha yakunlanmaydi. Iltimos, hozirgi oddiy bir rasmingizni yuboring."
 )
 
 # "Nega ketgansiz" javobida nomzod o'zi mahsulotni ruxsatsiz olgan/yegan
@@ -967,11 +970,23 @@ async def _ask_for_photo(message: Message, state: FSMContext, motivation_text: s
 
 
 async def handle_candidate_photo(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    photo_file_id = message.photo[-1].file_id if message.photo else None
-    await _finish_application(
-        message, state, data["motivation_text"], data["motivation_source"], photo_file_id
-    )
+    if message.photo:
+        data = await state.get_data()
+        photo_file_id = message.photo[-1].file_id
+        await _finish_application(
+            message, state, data["motivation_text"], data["motivation_source"], photo_file_id
+        )
+        return
+
+    # Rasm MAJBURIY — kelmaguncha ariza yakunlanmaydi. Xavfsizlik/mavzudan
+    # chetga chiqish tekshiruvi bu yerda ham amal qiladi (matn yuborilgan
+    # bo'lsa), lekin har ikkala holatda ham javob rasm so'rovi bilan
+    # tugaydi — hech qanday "o'tkazib yuborish" yo'li yo'q.
+    text = (message.text or "").strip()
+    if text and await _enforce_conversation_boundary(message, _PHOTO_PROMPT, text):
+        return
+
+    await message.answer(_PHOTO_REQUIRED_REMINDER)
 
 
 async def _finish_application(

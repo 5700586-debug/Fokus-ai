@@ -54,40 +54,37 @@ RESULT_MISMATCH = "REQUIREMENT_MISMATCH"
 
 # Mezon kaliti -> lavozim -> savol kalitlari. Shu mezonlar UZUNLIKKA
 # emas, MAZMUNGA qarab (``recruiting_redflags`` orqali) baholanadi.
+# Savol banki qisqartirilgandan keyin (qarang recruiting_questions.py)
+# ikkala lavozim uchun bir xil savol kalitlari ishlatiladi. Kassa
+# xavfsizligi/javobgarlik endi mos savol yo'qligi uchun bu yerda YO'Q —
+# tekshiruvchi funksiyalarning o'zi (``check_credential_sharing``,
+# ``check_shortage_response``) hali ham mavjud, sabab bo'lsa qayta
+# ulanishi mumkin.
 _REDFLAG_CRITERIA_QUESTIONS: dict[str, dict[str, tuple[str, ...]]] = {
-    "kassa_xavfsizlik": {"kassir": ("kassir_login",)},
-    "muddat_xavfsizligi": {"kassir": ("kassir_muddat",), "sotuvchi": ("sotuvchi_muddat",)},
-    "javobgarlik": {"kassir": ("kassir_kamomad", "kassir_javobgarlik")},
-    "muomala": {"kassir": ("kassir_janjal",), "sotuvchi": ("sotuvchi_norozilik",)},
-    "halollik": {"kassir": ("umumiy_ogirlik_guvoh",), "sotuvchi": ("umumiy_ogirlik_guvoh",)},
+    "muddat_xavfsizligi": {"kassir": ("core_muddat",), "sotuvchi": ("core_muddat",)},
+    "muomala": {"kassir": ("core_mijoz_qopol",), "sotuvchi": ("core_mijoz_qopol",)},
+    "halollik": {"kassir": ("core_halollik",), "sotuvchi": ("core_halollik",)},
 }
 _REDFLAG_CHECKER: dict[str, "callable[[str], str]"] = {
-    "kassa_xavfsizlik": recruiting_redflags.check_credential_sharing,
     "muddat_xavfsizligi": recruiting_redflags.check_expired_product,
-    "javobgarlik": recruiting_redflags.check_shortage_response,
     "muomala": recruiting_redflags.check_customer_conflict,
     "halollik": recruiting_redflags.check_theft_witness,
 }
 _REDFLAG_FLAG_KEY: dict[str, str] = {
-    "kassa_xavfsizlik": recruiting_redflags.CREDENTIAL_SHARING,
     "muddat_xavfsizligi": recruiting_redflags.EXPIRED_PRODUCT,
-    "javobgarlik": recruiting_redflags.SHORTAGE_COVERUP,
     "muomala": recruiting_redflags.CUSTOMER_CONFLICT,
     "halollik": recruiting_redflags.THEFT_COVERUP,
 }
 
-_KASSIR_CRITERION_QUESTIONS: dict[str, list[str]] = {
-    "muammo_yechish": ["kassir_narx_farqi", "kassir_telefon", "umumiy_kech_qolish"],
-}
-_SOTUVCHI_CRITERION_QUESTIONS: dict[str, list[str]] = {
-    "ehtiyoj": ["sotuvchi_ehtiyoj", "sotuvchi_kutib_olish"],
-    "tavsiya": ["sotuvchi_qoshimcha", "sotuvchi_topilmasa"],
-    "javon": ["sotuvchi_javon", "umumiy_kech_qolish"],
-    "jamoaviylik": ["sotuvchi_kelishmovchilik"],
+# Kritik bo'lmagan (uzunlik+noaniqlik asosida baholanadigan) mezonlar
+# — ikkala lavozim uchun bir xil, shuning uchun bitta jadval yetarli.
+_GENERIC_CRITERION_QUESTIONS: dict[str, list[str]] = {
+    "savdo_fikrlash": ["core_mahsulot_yoq"],
+    "tashabbuskorlik": ["core_tashabbus"],
 }
 _CRITERION_QUESTIONS_BY_POSITION = {
-    "kassir": _KASSIR_CRITERION_QUESTIONS,
-    "sotuvchi": _SOTUVCHI_CRITERION_QUESTIONS,
+    "kassir": _GENERIC_CRITERION_QUESTIONS,
+    "sotuvchi": _GENERIC_CRITERION_QUESTIONS,
 }
 
 _GENERIC_VAGUE_PHRASES = (

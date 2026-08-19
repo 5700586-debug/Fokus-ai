@@ -1,4 +1,4 @@
-"""Fokus HR — lavozimga mos vaziyatli savollar banki.
+"""Fokus HR — vaziyatli savollar banki.
 
 Har bir savol ``(key, text)`` — kalit tahlil/rubrika/audit uchun
 barqaror identifikator. Matematik savol alohida (``MATH_QUESTIONS``) —
@@ -6,72 +6,67 @@ javob variantlari bilan, chunki u erkin matn emas, aniq tekshiriladigan
 tanlov (inline tugmalar orqali, xato erkin-matn tahlilidan qochish
 uchun).
 
+QUESTION_BANK_VERSION 4: suhbat qisqartirildi — endi FAQAT 4 ta
+umumiy (ikkala lavozim uchun bir xil) vaziyatli savol + 1 ta qisqa
+operatsion tekshiruv (muddati o'tgan mahsulot). Qolgan 2 ta "asosiy 6
+psixologik savol"dan ikkitasi (motivatsiya/ketish sababi va ish
+barqarorligi) E bo'limida EMAS — ular D bo'limida allaqachon mavjud
+(``recruiting_bot.py``dagi ``leave_reason``/``job_stability`` qadamlari).
+Lavozimga xos ko'p sonli qo'shimcha savollar (narx farqi, telefon,
+login, kamomad, kutib olish, javon va h.k.) real Telegram sinovidan
+keyin ATAYLAB OLIB TASHLANDI — suhbat charchatmasin, lekin muhim
+signallar (mijoz bilan muomala, halollik, savdo fikrlashi,
+tashabbuskorlik) saqlansin.
+
 Savollar oddiy, xalqchil tilda yozilgan — "protsedura", "protokol",
-"eskalatsiya" kabi rasmiy/tushunarsiz so'zlar ATAYLAB ishlatilmaydi
-(qarang loyihaning rekruting talab hujjati, "REAL TESTDA TOPILGAN
-MUAMMOLAR" #3).
+"eskalatsiya" kabi rasmiy/tushunarsiz so'zlar ATAYLAB ishlatilmaydi.
 
 Faqat ish bilan bog'liq mezonlar so'raladi — himoyalangan shaxsiy
 xususiyat (din, millat, oilaviy holat va h.k.) haqida HECH QACHON
 savol yo'q.
 """
 
-QUESTION_BANK_VERSION = 3
+QUESTION_BANK_VERSION = 4
 
-# Ikkala lavozim uchun umumiy — real testda "ishga kech qolish" holati
-# hech qachon so'ralmagani aniqlangan edi. Keyingi uchtasi — qadriyat/
-# real vaziyat savollari (real Telegram sinovidan keyingi qo'shimcha).
-COMMON_QUESTIONS: list[tuple[str, str]] = [
-    ("umumiy_kech_qolish", "Ishga kech qolishingiz yoki kelolmasligingiz aniq bo'lsa, nima qilasiz?"),
+# 6 ta asosiy psixologik erkin-javobli savoldan 4 tasi — ikkala
+# lavozim uchun bir xil (qarang loyihaning rekruting talab hujjati:
+# "ASOSIY 6 TA ERKIN JAVOBLI SAVOL"). Qolgan 2 tasi (motivatsiya/ketish
+# sababi, ish barqarorligi) D bo'limida so'raladi.
+CORE_QUESTIONS: list[tuple[str, str]] = [
+    ("core_mijoz_qopol", "Jahli chiqqan xaridor sizga qo'pol gapirsa, nima qilasiz?"),
+    ("core_mahsulot_yoq", "Xaridor so'ragan mahsulot bo'lmasa, nima qilasiz?"),
     (
-        "umumiy_hamkasb_telefon",
-        "Rahbar yo'q paytda sherigingiz telefonga berilib ketdi, ish esa turibdi. Siz nima qilardingiz?",
+        "core_halollik",
+        "Rahbar yo'q paytda hamkasbingiz do'kondagi mahsulotni yashirib olsa yoki yeb qo'ysa, nima qilasiz?",
     ),
-    (
-        "umumiy_ogirlik_guvoh",
-        "Rahbar yo'q, sherigingiz do'kondagi mahsulotni yashirib yedi yoki olib qo'ydi. "
-        "Siz buni ko'rib qolsangiz nima qilardingiz?",
-    ),
-    ("umumiy_bosh_vaqt", "Xaridor kam, sizga hozircha vazifa berilmagan. O'sha paytda nima qilasiz?"),
+    ("core_tashabbus", "Ish tinch, xaridor kam va sizga hozircha vazifa berilmagan. Nima qilasiz?"),
 ]
 
-# "umumiy_ogirlik_guvoh" — kritik: o'g'irlikni yashirish yoki unga
-# qo'shilish qizil xavf (qarang services/recruiting_redflags.check_theft_witness).
-THEFT_QUESTION_KEYS = {"umumiy_ogirlik_guvoh"}
-
-KASSIR_QUESTIONS: list[tuple[str, str]] = [
-    ("kassir_kamomad", "Smena oxirida kassada pul kam chiqsa, nima qilasiz va kimga aytasiz?"),
-    ("kassir_narx_farqi", "Peshtaxtadagi narx bilan kassadagi narx boshqacha chiqsa, nima qilasiz?"),
-    ("kassir_telefon", "Navbat ko'paygan paytda telefoningiz jiringlasa, nima qilasiz?"),
-    ("kassir_login", "Hamkasbingiz login yoki kassangizni so'rasa, berasizmi?"),
-    ("kassir_javobgarlik", "Sizning kassangizga boshqa odam kirib, keyin kamomad chiqsa, kim javobgar bo'lishi kerak deb o'ylaysiz?"),
-    ("kassir_janjal", "Jahli chiqqan xaridor bilan qanday gaplashasiz?"),
-    ("kassir_muddat", "Muddati o'tgan mahsulotni ko'rib qolsangiz, nima qilasiz?"),
-] + COMMON_QUESTIONS
-
-SOTUVCHI_QUESTIONS: list[tuple[str, str]] = [
-    ("sotuvchi_kutib_olish", "Do'konga kirgan xaridorni qanday kutib olasiz?"),
-    ("sotuvchi_ehtiyoj", "Xaridorning nima izlayotganini qanday bilib olasiz?"),
-    ("sotuvchi_topilmasa", "So'ralgan mahsulot bo'lmasa, nima taklif qilasiz?"),
-    ("sotuvchi_norozilik", "Xaridor noroziligini qanday hal qilasiz?"),
-    ("sotuvchi_qoshimcha", "Qo'shimcha mahsulotni bosim qilmasdan qanday tavsiya qilasiz?"),
-    ("sotuvchi_javon", "Javon bo'sh yoki tartibsiz ekanini ko'rsangiz, nima qilasiz?"),
-    ("sotuvchi_muddat", "Muddati o'tgan mahsulotni ko'rib qolsangiz, nima qilasiz?"),
-    ("sotuvchi_kelishmovchilik", "Hamkasbingiz bilan kelishmovchilik chiqsa, qanday hal qilasiz?"),
-] + COMMON_QUESTIONS
+# Muddati o'tgan mahsulot — asosiy 6 psixologik savol qatoridan
+# ATAYLAB chiqarilgan, lekin qisqa OPERATSION tekshiruv sifatida
+# saqlanadi (aniq javob bo'lsa follow-up berilmaydi — qarang
+# services/recruiting_followup.py).
+OPERATIONAL_QUESTIONS: list[tuple[str, str]] = [
+    ("core_muddat", "Muddati o'tgan mahsulotni ko'rsangiz nima qilasiz?"),
+]
 
 ROLE_QUESTIONS: dict[str, list[tuple[str, str]]] = {
-    "kassir": KASSIR_QUESTIONS,
-    "sotuvchi": SOTUVCHI_QUESTIONS,
+    "kassir": CORE_QUESTIONS + OPERATIONAL_QUESTIONS,
+    "sotuvchi": CORE_QUESTIONS + OPERATIONAL_QUESTIONS,
 }
 
-# Savol kalitlaridan qaysi biri "muddati o'tgan mahsulot" va "kamomad"
-# vaziyatiga tegishli ekanini bildiradi — ``services/recruiting_redflags.py``
-# shu kalitlar bo'yicha maxsus (kritik) tahlil qiladi.
-EXPIRED_PRODUCT_QUESTION_KEYS = {"kassir_muddat", "sotuvchi_muddat"}
-SHORTAGE_QUESTION_KEYS = {"kassir_kamomad", "kassir_javobgarlik"}
-CREDENTIAL_SHARING_QUESTION_KEYS = {"kassir_login"}
-CUSTOMER_CONFLICT_QUESTION_KEYS = {"kassir_janjal", "sotuvchi_norozilik"}
+# Savol kalitlaridan qaysi biri qaysi kritik (red-flag) kategoriyaga
+# tegishli ekanini bildiradi — ``services/recruiting_redflags.py`` shu
+# kalitlar bo'yicha maxsus tahlil qiladi. Kassa xavfsizligi (login
+# ulashish) va kamomad/javobgarlik savollari endi so'ralmagani uchun
+# bo'sh to'plam — tekshiruvchi funksiyalarning o'zi
+# (``check_credential_sharing``, ``check_shortage_response``) hali ham
+# mavjud, faqat hech qanday faol savolga bog'lanmagan.
+EXPIRED_PRODUCT_QUESTION_KEYS = {"core_muddat"}
+SHORTAGE_QUESTION_KEYS: set[str] = set()
+CREDENTIAL_SHARING_QUESTION_KEYS: set[str] = set()
+CUSTOMER_CONFLICT_QUESTION_KEYS = {"core_mijoz_qopol"}
+THEFT_QUESTION_KEYS = {"core_halollik"}
 
 
 class MathChoice:

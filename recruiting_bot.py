@@ -185,7 +185,7 @@ _STEPS_D: list[dict] = [
         "prompt": "Oxirgi 2 yil ichida nechta joyda ishladingiz va eng uzoq ishlagan joyingizda qancha ishladingiz?",
         "column": "job_stability_text",
     },
-    {"key": "leave_reason", "kind": "text", "prompt": "Nega ishdan ketgansiz (yoki hozir nega ish qidiryapsiz)?", "column": "leave_reason_text"},
+    {"key": "leave_reason", "kind": "text", "prompt": "Oldingi ish joyingizdan nega ketdingiz?", "column": "leave_reason_text"},
     {
         "key": "pos_experience", "kind": "choice", "prompt": "Kassa yoki POS-terminalda ishlagan tajribangiz bormi?",
         "column": "pos_experience", "options": [("yes", "✅ Ha"), ("no", "❌ Yo'q")], "value_map": _YES_NO_MAP,

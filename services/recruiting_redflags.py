@@ -28,6 +28,7 @@ CREDENTIAL_SHARING = "credential_sharing"
 CUSTOMER_CONFLICT = "customer_conflict"
 THEFT_COVERUP = "theft_coverup"
 PROPERTY_HONESTY = "property_honesty"
+PHYSICAL_AGGRESSION = "physical_aggression"
 
 _RED_FLAG_LABELS: dict[str, str] = {
     EXPIRED_PRODUCT: "Muddati o'tgan mahsulotni sotishga tayyor",
@@ -36,6 +37,7 @@ _RED_FLAG_LABELS: dict[str, str] = {
     CUSTOMER_CONFLICT: "Xaridor bilan mojaroni kuchaytiradi",
     THEFT_COVERUP: "O'g'irlikni yashiradi yoki unga qo'shiladi",
     PROPERTY_HONESTY: "Oldingi ish joyida mahsulotni ruxsatsiz olgan/yegan",
+    PHYSICAL_AGGRESSION: "Jismoniy zo'ravonlikka aniq ishora qildi",
 }
 
 
@@ -230,5 +232,41 @@ def check_property_honesty(answer_text: str) -> str:
     if not text:
         return UNCLEAR
     if _contains_any(text, _PROPERTY_TAKING_ADMISSION):
+        return RED
+    return GREEN
+
+
+# ------------------------------------------------------- jismoniy tahdid --
+
+# QASDDAN TOR ro'yxat — faqat zo'ravonlik FE'LI bilan birga keladigan
+# aniq iboralar. Masalan "qulog'i tagiga uzr deyman" kabi noaniq/betaraf
+# gap (bu shunchaki "yaqin turib uzr so'rayman" degani) BU YERGA
+# TUSHMAYDI — faqat "qulog'ining tagiga BERAMAN/TUSHIRAMAN" kabi fe'l
+# bilan aniq tahdid qilingandagina RED bo'ladi (qarang loyihaning
+# rekruting talab hujjati: noaniq gapni darrov agressiya deb
+# talqin qilmaslik talabi).
+_PHYSICAL_AGGRESSION_PHRASES = (
+    "uraman", "urib yuboraman", "urib qo'yaman", "do'pposlayman", "dopposlayman",
+    "kaltaklayman", "tepib yuboraman", "musht tushiraman", "musht ursam",
+    "qulog'ining tagiga beraman", "qulog'i tagiga beraman",
+    "qulog'ining tagiga tushiraman", "qulog'i tagiga tushiraman",
+    "qulog'ining tagiga urib yuboraman", "qulog'i tagiga urib yuboraman",
+    "tarsaki tortib yuboraman", "tarsaki beraman", "bir urib qo'yaman",
+    "jerkillab urib yuboraman", "yuziga musht", "qo'l ko'taraman",
+)
+
+
+def check_physical_aggression(answer_text: str) -> str:
+    """Faqat ANIQ, ochiq jismoniy zo'ravonlik iborasi bo'lsa ``RED`` —
+    boshqa barcha holatda ``GREEN`` (bu "signal topilmadi" degani, ijobiy
+    baho emas — javob mavzudan qat'i nazar zo'ravonlik haqida umuman
+    gapirmasligi normal holat). Savol turidan (``question_key``) qat'i
+    nazar HAR QANDAY erkin javobda tekshirilishi mumkin — tahdid faqat
+    "xaridor bilan mojaro" savolida emas, istalgan javobda chiqib
+    qolishi mumkin."""
+    text = _normalize(answer_text)
+    if not text:
+        return GREEN
+    if _contains_any(text, _PHYSICAL_AGGRESSION_PHRASES):
         return RED
     return GREEN

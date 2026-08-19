@@ -119,6 +119,19 @@ def _score_by_length(combined_text: str) -> int:
     return 0
 
 
+def _is_still_vague_or_offtopic(text: str) -> bool:
+    """Bitta/ikkita aniqlashtirish urinishidan KEYIN ham javob hali
+    mazmunsiz/aloqasiz bo'lib qolsa — "ijobiy ball berilmasin,
+    aniqlashtirish kerak deb belgilansin" (real Telegram sinovidan
+    keyingi talab). Faqat oxirgi (barcha follow-up bilan birlashtirilgan)
+    matnga qo'llaniladi."""
+    stripped = text.strip()
+    if len(stripped) < 5:
+        return True
+    lowered = stripped.lower()
+    return any(phrase in lowered for phrase in _GENERIC_VAGUE_PHRASES)
+
+
 def _combined_answer_text(grouped_answers: dict[str, list[dict]], question_keys: tuple[str, ...]) -> tuple[str, str]:
     """(asl_javob, keyingi_aniqlashtirish_matni) — ikkalasi alohida,
     chunki qaror avval aslidan, keyin (agar xavfli bo'lsa) aniqlashtirish
@@ -174,6 +187,23 @@ def _score_redflag_criterion(
     # suhbatda aniqlashtirsin (AI/deterministik tizim ma'no o'ylab
     # topmaydi).
     return None, _evidence(evidence_text) or "Javob noaniq.", None, True
+
+
+def _scan_for_physical_aggression(grouped_answers: dict[str, list[dict]]) -> list[dict]:
+    """Jismoniy tahdid ISTALGAN savolda chiqib qolishi mumkin — bitta
+    rubrika mezoniga bog'lanmagan, shuning uchun transkriptdagi barcha
+    savol kalitlari bo'yicha alohida skanerlanadi (retraction mantig'i
+    ``_score_redflag_criterion`` bilan bir xil: follow-up'da chindan
+    fikridan qaytsa, red flag qo'yilmaydi)."""
+    flags: list[dict] = []
+    for question_keys in [(key,) for key in grouped_answers]:
+        _, _, red_flag, _ = _score_redflag_criterion(
+            grouped_answers, question_keys, recruiting_redflags.check_physical_aggression,
+            recruiting_redflags.PHYSICAL_AGGRESSION,
+        )
+        if red_flag:
+            flags.append(red_flag)
+    return flags
 
 
 def _score_jadval_moslik(availability_text: str | None) -> tuple[int | None, str]:
@@ -233,8 +263,18 @@ def score_application(
             question_keys = tuple(criterion_question_map.get(key, []))
             original, follow_up = _combined_answer_text(grouped_answers, question_keys)
             combined = f"{original} {follow_up}".strip()
-            score = _score_by_length(combined) if combined else None
-            evidence = _evidence(combined) or "Javob berilmagan."
+            if not combined:
+                score, evidence = None, "Javob berilmagan."
+            elif follow_up.strip() and _is_still_vague_or_offtopic(combined):
+                # Aniqlashtiruvchi savoldan KEYIN ham hali mazmunsiz/aloqasiz —
+                # ball berilmaydi, Founder suhbatda aniqlashtirsin.
+                score, evidence = None, _evidence(combined) or "Javob noaniq."
+                present = [qk for qk in question_keys if qk in grouped_answers]
+                if present:
+                    clarify_questions.append(grouped_answers[present[0]][0]["question_text"])
+            else:
+                score = _score_by_length(combined)
+                evidence = _evidence(combined) or "Javob berilmagan."
 
         criteria_scores.append({"key": key, "label": label, "score": score, "evidence": evidence})
 
@@ -253,6 +293,10 @@ def score_application(
             "label": recruiting_redflags.label_for(recruiting_redflags.PROPERTY_HONESTY),
             "evidence": _evidence(evidence_text),
         })
+
+    # Jismoniy tahdid har qanday savolda chiqib qolishi mumkin (faqat
+    # "xaridor bilan mojaro" savoli emas) — butun transkript skanerlanadi.
+    red_flags.extend(_scan_for_physical_aggression(grouped_answers))
 
     overall_result = _overall_result(criteria_scores, math_correct, position_key, red_flags, has_unclear_critical)
     strengths = [c["label"] for c in criteria_scores if c["score"] == 2][:3]

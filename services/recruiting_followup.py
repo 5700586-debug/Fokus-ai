@@ -87,6 +87,17 @@ def deterministic_follow_up(answer_text: str, question_key: str | None = None) -
     if not lowered:
         return "Kechirasiz, javobingizni ko'rmadim — birroz batafsilroq yozib bera olasizmi?"
 
+    # Jismoniy tahdid — savol turidan (question_key) qat'i nazar HAR
+    # DOIM tekshiriladi (tahdid istalgan javobda chiqib qolishi mumkin).
+    # Avtomatik rad qilinmaydi — faqat tasdiqlovchi (ayblov emas) savol
+    # so'raladi, yakuniy qaror doim Founderda qoladi (qarang
+    # recruiting_scoring._scan_for_physical_aggression).
+    if recruiting_redflags.check_physical_aggression(answer_text) == recruiting_redflags.RED:
+        return (
+            "Bu biroz jiddiy javob bo'ldi — aniqlik uchun so'rayman: "
+            "haqiqatan ham shunday qilardingizmi, yoki bu shunchaki ibora edimi?"
+        )
+
     checker = _redflag_checker_for(question_key)
     if checker is not None:
         status = checker(answer_text)
@@ -166,6 +177,10 @@ async def _ai_follow_up(client: AsyncOpenAI, question_text: str, answer_text: st
                 "ekanini aniq bila olmasang), baribir eng xavfsiz yo'l — oddiy "
                 "aniqlashtiruvchi savol taklif qilish, LEKIN nomzod o'rniga hech "
                 "qachon ma'no o'ylab topma yoki uning fikrini taxmin qilib yozma.\n\n"
+                "MUHIM: noaniq yoki g'alati eshitiladigan gapni (masalan tanadagi "
+                "biror a'zo tilga olingan idioma yoki sheva iborasi) DARHOL "
+                "tahdid/agressiya deb talqin qilma — bunday holatda ham faqat "
+                "yumshoq aniqlashtiruvchi savol ber, hech qachon ayblama.\n\n"
                 "Faqat quyidagi JSON formatida javob qaytar, boshqa hech narsa "
                 'yozma: {"follow_up": "savol matni yoki null"}'
             ),
@@ -187,6 +202,40 @@ async def _ai_follow_up(client: AsyncOpenAI, question_text: str, answer_text: st
     except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
         logger.warning("OpenAI xatosi (recruiting follow-up): %r", error)
         return None
+
+
+async def detect_humor(client: AsyncOpenAI | None, question_text: str, answer_text: str) -> bool:
+    """Nomzod savolga bezarar hazil bilan javob berganini aniqlaydi —
+    faqat AI orqali (kalit so'z bilan "hazilmi yo'qmi" ishonchli
+    aniqlab bo'lmaydi). AI mavjud bo'lmasa yoki xato bersa HAR DOIM
+    ``False`` — noaniq holatda "hazil" deb taxmin qilinmaydi, oddiy
+    aniqlashtiruvchi yo'lga tushiladi (xavfsizroq)."""
+    if client is None:
+        return False
+    try:
+        response = await client.responses.create(
+            model=_MODEL,
+            instructions=(
+                "Sen ishga qabul suhbatidagi HR yordamchisan. Nomzod javobi "
+                "savolga aloqasi yo'q, lekin ANIQ bezarar hazil/kulgili gap "
+                "ekanligini aniqla. Agar javob jiddiy mavzuga tegishli bo'lsa "
+                "(masalan tahdid, zo'ravonlik, o'g'irlik, sudlanganlik, "
+                "kamomad, xavfsizlik va h.k.) — bu HECH QACHON hazil deb "
+                "belgilanmasin, hatto kulgili ohangda yozilgan bo'lsa ham. "
+                "Ishonching past bo'lsa yoki hazil ekanligi shubhali bo'lsa, "
+                "hazil DEB BELGILAMA (false qaytar). Faqat quyidagi JSON "
+                'formatida javob qaytar, boshqa hech narsa yozma: '
+                '{"is_joke": true yoki false}'
+            ),
+            input=f"Savol: {question_text}\nNomzod javobi: {answer_text}",
+        )
+        data = _parse_json(response.output_text or "")
+        if data is None:
+            return False
+        return data.get("is_joke") is True
+    except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
+        logger.warning("OpenAI xatosi (recruiting humor detect): %r", error)
+        return False
 
 
 async def decide_follow_up(

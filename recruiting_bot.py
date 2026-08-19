@@ -248,6 +248,12 @@ _MISMATCH_CLOSING_TEXT = (
     "imkoniyat bo'lsa, siz bilan albatta bog'lanamiz."
 )
 
+# Real Telegram sinovidan keyingi talab: nomzod bezarar hazil qilsa,
+# sovuq "Tushunmadim" o'rniga iliq javob berilsin, so'ng javobsiz qolgan
+# savol qayta so'raladi (ballga ta'sir qilmaydi — qarang
+# services/recruiting_followup.detect_humor).
+_HUMOR_ACK_TEXT = "😂 Zo'r hazil ekan. Endi jiddiylashamiz 🙂"
+
 
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -565,6 +571,13 @@ async def _handle_leave_reason_answer(message: Message, state: FSMContext, data:
     keyingi savolga o'tishdan OLDIN BITTA aniqlashtiruvchi savol talab
     qiladi."""
     application_id = data["application_id"]
+    leave_reason_prompt = _STEP_BY_KEY["leave_reason"]["prompt"]
+
+    if await recruiting_followup.detect_humor(_CURRENT_OPENAI_CLIENT.get(), leave_reason_prompt, text):
+        await message.answer(_HUMOR_ACK_TEXT)
+        await message.answer(leave_reason_prompt)
+        return
+
     recruiting_repo.update_application(application_id, leave_reason_text=text)
 
     if recruiting_redflags.check_property_honesty(text) == recruiting_redflags.RED:
@@ -574,7 +587,6 @@ async def _handle_leave_reason_answer(message: Message, state: FSMContext, data:
         await message.answer(_PROPERTY_HONESTY_FOLLOWUP_TEXT)
         return
 
-    leave_reason_prompt = _STEP_BY_KEY["leave_reason"]["prompt"]
     follow_up_question = await recruiting_followup.decide_follow_up(
         _CURRENT_OPENAI_CLIENT.get(), leave_reason_prompt, text
     )
@@ -653,6 +665,17 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
     questions = recruiting_questions.questions_for(position_key)
     index = data["question_index"]
     q_key, q_text = questions[index]
+
+    # Hazil bo'lsa, javob umuman SAQLANMAYDI (ballga ta'sir qilmasligi
+    # uchun) — iliq javob berilib, o'sha savol qayta so'raladi.
+    attempt = data.get("follow_up_attempt", 0)
+    if attempt < RECRUITING_MAX_FOLLOW_UPS and await recruiting_followup.detect_humor(
+        _CURRENT_OPENAI_CLIENT.get(), q_text, text
+    ):
+        await state.update_data(follow_up_attempt=attempt + 1)
+        await message.answer(_HUMOR_ACK_TEXT)
+        await message.answer(q_text)
+        return
 
     recruiting_repo.add_answer(application_id, q_key, q_text, text, answer_source="text")
     await _maybe_ask_follow_up(message, state, data, q_key, q_text, text)

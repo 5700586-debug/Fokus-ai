@@ -408,9 +408,11 @@ async def send_night_image_preview(bot, client: AsyncOpenAI | None, chat_id: int
 
 
 # ------------------------------------------------- sodda 30 kunlik salom --
-# ``services/daily_greetings.py``dagi tayyor matn + (bo'lsa) statik rasm —
-# AI yo'q, Pillow render yo'q, ob-havo/fasl hisobga olinmaydi. Idempotency
-# — qarang ``send_morning_image_message`` docstringi. 30-kundan keyin
+# ``services/daily_greetings.py``dagi tayyor matn + (bo'lsa) o'sha kunga
+# alohida statik rasm (``morning_01.jpg``...``morning_30.jpg`` /
+# ``night_01.jpg``...``night_30.jpg``) — AI yo'q, Pillow render yo'q,
+# ob-havo/fasl hisobga olinmaydi. Idempotency — qarang
+# ``send_morning_image_message`` docstringi. 30-kundan keyin
 # ``daily_greetings`` ``None`` qaytaradi — shu holatda HECH NARSA
 # yuborilmaydi (boshidan avtomatik takrorlanmaydi).
 

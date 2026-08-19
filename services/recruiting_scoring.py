@@ -52,15 +52,6 @@ RESULT_INTERVIEW = "INTERVIEW_RECOMMENDED"
 RESULT_NEEDS_REVIEW = "NEEDS_HUMAN_REVIEW"
 RESULT_MISMATCH = "REQUIREMENT_MISMATCH"
 
-# Xulosa (AI yoki shablon) HAR DOIM shu uchtadan birini oddiy so'z bilan
-# aytishi kerak — Founder kartasida endi alohida texnik "Natija:" qatori
-# yo'q, shuning uchun yakuniy holat FAQAT shu jumla orqali ma'lum bo'ladi.
-_RESULT_PLAIN_TEXT = {
-    RESULT_INTERVIEW: "Umumiy holat: suhbatga tavsiya etiladi.",
-    RESULT_NEEDS_REVIEW: "Umumiy holat: qo'lda ko'rib chiqish kerak.",
-    RESULT_MISMATCH: "Umumiy holat: talablarga mos emas.",
-}
-
 # Mezon kaliti -> lavozim -> savol kalitlari. Shu mezonlar UZUNLIKKA
 # emas, MAZMUNGA qarab (``recruiting_redflags`` orqali) baholanadi.
 _REDFLAG_CRITERIA_QUESTIONS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -369,17 +360,6 @@ def _fallback_summary(position_key: str, deterministic_result: dict) -> str:
     return f"{position_key.capitalize()} lavozimi bo'yicha javoblar baholandi (o'rtacha {average}/2).{red_flag_note}"
 
 
-def _ensure_result_stated(summary: str, overall_result: str) -> str:
-    """Xulosa (AI yoki shablon) yakuniy holatni ALBATTA oddiy so'z bilan
-    aytishi kerak — karta endi alohida texnik "Natija:" qatorini
-    ko'rsatmaydi. Agar AI buni allaqachon aytgan bo'lsa (masalan
-    "Umumiy holat: ...") takrorlanmaydi."""
-    if "umumiy holat" in summary.lower():
-        return summary
-    plain_text = _RESULT_PLAIN_TEXT.get(overall_result, "")
-    return f"{summary} {plain_text}".strip()
-
-
 def _parse_json(raw: str) -> dict | None:
     cleaned = raw.strip()
     if cleaned.startswith("```"):
@@ -407,15 +387,13 @@ async def _ai_summary(
                 "atamalarisiz, uzun gaplarsiz). Faqat berilgan savol-javoblar asosida, "
                 "HECH QANDAY yangi fakt yoki raqam o'ylab topmasdan yoz. Nomzodni "
                 "ayblama, haqorat qilma yoki shaxsi ustidan baho berma (masalan 'menga "
-                "yoqdi' kabi) — faqat faktlarga tayan. Oxirgi jumla ALBATTA yakuniy "
-                "holatni oddiy so'z bilan aytsin: 'Umumiy holat: suhbatga tavsiya "
-                "etiladi.' yoki 'Umumiy holat: qo'lda ko'rib chiqish kerak.' yoki "
-                "'Umumiy holat: talablarga mos emas.' — shulardan FAQAT bittasi, aynan "
-                "shu so'zlar bilan. Masalan: \"Savdo tajribasi bor, mijoz bilan "
-                "muomalasi yaxshi. Halollik bo'yicha bitta savolni Founder "
-                "aniqlashtirishi kerak. Umumiy holat: qo'lda ko'rib chiqish kerak.\" "
-                "Faqat quyidagi JSON formatida javob qaytar, boshqa hech narsa "
-                'yozma: {"summary": "xulosa matni"}'
+                "yoqdi' kabi) — faqat faktlarga tayan. Yakuniy natijani (masalan "
+                "'suhbatga tavsiya etiladi' yoki 'qo'lda ko'rib chiqish kerak') AYTMA — "
+                "karta buni allaqachon alohida ko'rsatadi, sen faqat qisqa faktik "
+                "kuzatuv yoz. Masalan: \"Savdo tajribasi bor, mijoz bilan muomalasi "
+                "yaxshi. Halollik bo'yicha bitta savolni Founder aniqlashtirishi "
+                "kerak.\" Faqat quyidagi JSON formatida javob qaytar, boshqa hech "
+                'narsa yozma: {"summary": "xulosa matni"}'
             ),
             input=f"Lavozim: {position_key}\n\nSavol-javoblar:\n{transcript}",
         )
@@ -437,10 +415,9 @@ async def _ai_summary(
 async def summarize(
     client: AsyncOpenAI | None, position_key: str, answers: list[dict], deterministic_result: dict
 ) -> str:
-    overall_result = deterministic_result["overall_result"]
     if client is not None:
         ai_result = await _ai_summary(client, position_key, answers, deterministic_result)
         if ai_result:
-            return _ensure_result_stated(ai_result, overall_result)
+            return ai_result
 
-    return _ensure_result_stated(_fallback_summary(position_key, deterministic_result), overall_result)
+    return _fallback_summary(position_key, deterministic_result)

@@ -27,6 +27,18 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 _YES_NO = {1: "ha", 0: "yo'q", None: "-"}
 
+_RETENTION_LABELS = {
+    "6oygacha": "6 oygacha",
+    "6_12oy": "6-12 oy",
+    "1yil_plus": "1 yil va undan ko'p",
+}
+
+_RESULT_DISPLAY = {
+    "INTERVIEW_RECOMMENDED": "🟢 Mos",
+    "NEEDS_HUMAN_REVIEW": "🟡 Qo'lda ko'rib chiqish kerak",
+    "REQUIREMENT_MISMATCH": "🔴 Mos emas",
+}
+
 
 def _sanitize(text: str | None, limit: int = 140) -> str:
     """Faqat DETERMINISTIK tozalash — ortiqcha bo'shliq/tinish belgisi
@@ -42,17 +54,20 @@ def _sanitize(text: str | None, limit: int = 140) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-def _signals(risks: list[dict], red_flags: list[dict]) -> list[str]:
-    """Qizil bayroqlar (kritik) + past baholangan (lekin kritik
-    KATEGORIYAGA kirmaydigan) mezonlar — bitta ro'yxat, kritiklari
-    birinchi, jami 3 tadan oshmaydi. ``risks`` (``recruiting_scoring``dan)
-    red-flag mezonlarini ALLAQACHON chetlab o'tgan — shuning uchun bu
-    yerda takrorlanish yo'q (Founder bir xil signalni ikki marta
-    ko'rmasligi kerak)."""
-    signals = [flag["label"] for flag in red_flags]
-    for risk in risks:
-        signals.append(f"{risk['criterion']}: {_sanitize(risk['evidence'], 50)}")
-    return signals[:3]
+def _reason_text(overall_result: str, red_flags: list[dict], clarify_questions: list[str], fit_reason: str | None) -> str:
+    """Tavsiya ostidagi bitta qisqa "Sabab:" qatori — DETERMINISTIK
+    (AI matniga bog'liq emas, hech qachon uzun/texnik bo'lmaydi)."""
+    if overall_result == "REQUIREMENT_MISMATCH" and fit_reason:
+        return f"Sabab: {_sanitize(fit_reason, 70)}"
+    if red_flags:
+        if len(red_flags) == 1:
+            return f"Sabab: {red_flags[0]['label']}."
+        return f"Sabab: {len(red_flags)} ta jiddiy signal aniqlandi."
+    if clarify_questions:
+        return f"Sabab: {len(clarify_questions)} ta muhim savol aniqlashtirilishi kerak."
+    if overall_result == "INTERVIEW_RECOMMENDED":
+        return "Sabab: Javoblar ijobiy baholandi."
+    return "Sabab: Qo'shimcha ma'lumot yetarli emas."
 
 
 def format_candidate_card(
@@ -63,9 +78,9 @@ def format_candidate_card(
     follow_up_questions: list[str],
 ) -> str:
     strengths = json.loads(assessment["strengths_json"])
-    risks = json.loads(assessment.get("risks_json") or "[]")
     red_flags = json.loads(assessment.get("red_flags_json") or "[]")
     clarify_questions = json.loads(assessment.get("clarify_questions_json") or "[]")
+    overall_result = assessment["overall_result"]
 
     shift = application.get("shift_preference")
     schedule_bits = []
@@ -78,12 +93,19 @@ def format_candidate_card(
         experience_bits.append(_sanitize(application.get("experience_duration_text"), 20))
     leave_reason = _sanitize(application.get("leave_reason_text"), 60)
 
+    retention = _RETENTION_LABELS.get(application.get("retention_intent"), "-")
+    if application.get("retention_intent") == "6oygacha" and application.get("retention_intent_reason"):
+        retention += f" ({_sanitize(application.get('retention_intent_reason'), 40)})"
+
     lines = [
         f"🧑‍💼 {_sanitize(application.get('full_name'), 50)} — {vacancy['title']}",
         f"📞 {application.get('phone') or '-'}   🏢 {_sanitize(application.get('preferred_branch'), 30)}",
+        f"📍 {_sanitize(application.get('residence_area'), 40)}",
         f"📋 {', '.join(experience_bits)} — \"{leave_reason}\"",
         f"💰 Oldingi: {application.get('prev_salary_text') or '-'} → Kutilayotgan: {application.get('expected_salary') or '-'}",
         f"🕒 {', '.join(schedule_bits)}",
+        f"📅 Ish boshlash: {application.get('start_date_text') or '-'}",
+        f"⏳ Ishlash niyati: {retention}",
     ]
 
     if application.get("fit_result") == "mismatch":
@@ -94,12 +116,13 @@ def format_candidate_card(
     for strength in strengths[:3]:
         lines.append(f"• {strength}")
 
-    signals = _signals(risks, red_flags)
-    if signals:
-        lines.append("")
-        lines.append("⚠️ Xavf/signallar:")
-        for signal in signals:
-            lines.append(f"• {signal}")
+    lines.append("")
+    if red_flags:
+        lines.append("🚩 Red Flag:")
+        for flag in red_flags[:3]:
+            lines.append(f"• {flag['label']}")
+    else:
+        lines.append("🚩 Red Flag: aniqlanmadi")
 
     if clarify_questions:
         lines.append("")
@@ -109,6 +132,11 @@ def format_candidate_card(
 
     lines.append("")
     lines.append(f"🤖 AI xulosasi: {assessment.get('ai_summary') or '-'}")
+
+    lines.append("")
+    lines.append(f"📊 Yakuniy tavsiya: {_RESULT_DISPLAY.get(overall_result, overall_result)}")
+    lines.append(_reason_text(overall_result, red_flags, clarify_questions, application.get("fit_reason")))
+
     lines.append("")
     lines.append("⚠️ Yakuniy qarorni siz qabul qilasiz.")
 

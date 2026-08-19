@@ -54,6 +54,27 @@ def _sanitize(text: str | None, limit: int = 140) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
+_JOB_STABILITY_COUNT_RE = re.compile(r"(\d+)\s*(?:ta)?\s*(?:joy|ish\s*joy|tashkilot|kompaniya)")
+_JOB_STABILITY_FIRST_JOB_PHRASES = ("birinchi ish", "hali ishlamaganman", "hali ishlamagan", "ishlamaganman")
+
+
+def _job_stability_needs_clarification(text: str | None) -> bool:
+    """Ko'p ish almashtirish AVTOMATIK red flag yoki rad etish mezoni
+    EMAS (sabablari turlicha bo'lishi mumkin) — faqat Founder e'tibor
+    qaratishi uchun yumshoq belgi. Ishonchli aniqlanmasa (raqam
+    topilmasa), signal QO'YILMAYDI — xato taxmin qilishdan ko'ra
+    jim turish xavfsizroq."""
+    if not text:
+        return False
+    lowered = text.strip().lower()
+    if any(phrase in lowered for phrase in _JOB_STABILITY_FIRST_JOB_PHRASES):
+        return False
+    match = _JOB_STABILITY_COUNT_RE.search(lowered)
+    if not match:
+        return False
+    return int(match.group(1)) >= 3
+
+
 def _reason_text(overall_result: str, red_flags: list[dict], clarify_questions: list[str], fit_reason: str | None) -> str:
     """Tavsiya ostidagi bitta qisqa "Sabab:" qatori — DETERMINISTIK
     (AI matniga bog'liq emas, hech qachon uzun/texnik bo'lmaydi)."""
@@ -106,6 +127,7 @@ def format_candidate_card(
         f"🕒 {', '.join(schedule_bits)}",
         f"📅 Ish boshlash: {application.get('start_date_text') or '-'}",
         f"⏳ Ishlash niyati: {retention}",
+        f"⏳ Oxirgi 2 yil: {_sanitize(application.get('job_stability_text'), 70)}",
     ]
 
     if application.get("fit_result") == "mismatch":
@@ -124,10 +146,13 @@ def format_candidate_card(
     else:
         lines.append("🚩 Red Flag: aniqlanmadi")
 
-    if clarify_questions:
+    clarify_items = list(clarify_questions)
+    if _job_stability_needs_clarification(application.get("job_stability_text")):
+        clarify_items.append("⚠️ Ish barqarorligini aniqlashtirish kerak")
+    if clarify_items:
         lines.append("")
         lines.append("❓ Aniqlashtirish kerak:")
-        for question in clarify_questions[:3]:
+        for question in clarify_items[:3]:
             lines.append(f"• {question}")
 
     lines.append("")
@@ -135,7 +160,7 @@ def format_candidate_card(
 
     lines.append("")
     lines.append(f"📊 Yakuniy tavsiya: {_RESULT_DISPLAY.get(overall_result, overall_result)}")
-    lines.append(_reason_text(overall_result, red_flags, clarify_questions, application.get("fit_reason")))
+    lines.append(_reason_text(overall_result, red_flags, clarify_items, application.get("fit_reason")))
 
     lines.append("")
     lines.append("⚠️ Yakuniy qarorni siz qabul qilasiz.")

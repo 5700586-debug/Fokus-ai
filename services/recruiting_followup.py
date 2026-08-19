@@ -87,36 +87,24 @@ def deterministic_follow_up(answer_text: str, question_key: str | None = None) -
     if not lowered:
         return "Kechirasiz, javobingizni ko'rmadim — birroz batafsilroq yozib bera olasizmi?"
 
-    # Jismoniy tahdid — savol turidan (question_key) qat'i nazar HAR
-    # DOIM tekshiriladi (tahdid istalgan javobda chiqib qolishi mumkin).
-    # Avtomatik rad qilinmaydi — faqat tasdiqlovchi (ayblov emas) savol
-    # so'raladi, yakuniy qaror doim Founderda qoladi (qarang
-    # recruiting_scoring._scan_for_physical_aggression).
-    if recruiting_redflags.check_physical_aggression(answer_text) == recruiting_redflags.RED:
-        return (
-            "Bu biroz jiddiy javob bo'ldi — aniqlik uchun so'rayman: "
-            "haqiqatan ham shunday qilardingizmi, yoki bu shunchaki ibora edimi?"
-        )
-
+    # Real Telegram sinovidan keyingi tuzatuv: pozitsiya aniq bo'lsa
+    # (RED — salbiy bo'lsa ham, yoki GREEN — xavfsiz), qayta-qayta
+    # so'ralmaydi. Follow-up FAQAT javob chindan ham ikkilanuvchan
+    # (UNCLEAR) bo'lganda so'raladi — signal (RED/GREEN) baholashda
+    # (``recruiting_scoring.py``) ishlatiladi, suhbatda "to'g'rilash"
+    # uchun emas.
     checker = _redflag_checker_for(question_key)
     if checker is not None:
         status = checker(answer_text)
-        if status == recruiting_redflags.RED:
-            return _redflag_clarifying_question(question_key)
         if status == recruiting_redflags.UNCLEAR:
             return _redflag_clarifying_question(question_key)
-        # GREEN — aniq, xavfsiz javob, qo'shimcha savol shart emas.
         return None
 
-    # Umumiy (savol turiga bog'liq bo'lmagan) noaniqlik tekshiruvi.
+    # Umumiy (savol turiga bog'liq bo'lmagan) noaniqlik tekshiruvi —
+    # bu MA'NOSIZ/juda qisqa javoblar uchun, aniq (garchi salbiy
+    # bo'lsa ham) pozitsiya uchun EMAS.
     if _looks_too_short_to_be_an_answer(answer_text) or any(p in lowered for p in _GENERIC_VAGUE_PHRASES):
         return "Tushunmadim — bu holatda aniq nima qilgan bo'lardingiz, birrov aytib bera olasizmi?"
-
-    # Eski (umumiy) login/kassa ulashish signali — savol kaliti berilmagan
-    # chaqiruvlar (masalan mavjud testlar) uchun ham ishlashi kerak.
-    credential_status = recruiting_redflags.check_credential_sharing(answer_text)
-    if credential_status == recruiting_redflags.RED:
-        return "U foydalanganidan keyin kassada kamomad chiqsa, buning uchun kim javobgar bo'ladi?"
 
     return None
 
@@ -158,21 +146,28 @@ async def _ai_follow_up(client: AsyncOpenAI, question_text: str, answer_text: st
                 "Sen ishga qabul suhbatini olib boruvchi, iliq va sabrli HR "
                 "yordamchisan. Nomzod javobida IMLOVIY XATO, SHEVA yoki OG'ZAKI "
                 "yozuv bo'lishi mumkin — buning uchun JAZOLAMA, faqat MA'NOSINI "
-                "tushunishga harakat qil. Javob tushunarli va mavzuga oid bo'lsa, "
-                "follow_up qiymatini null qil.\n\n"
+                "tushunishga harakat qil. Javobning POZITSIYASI (fikri qanday "
+                "ekani) tushunarli bo'lsa — hatto javob zaif, salbiy yoki xavfli "
+                "ko'rinsa ham — follow_up qiymatini null qil va o'tkazib yubor. "
+                "Follow-up FAQAT javob chindan ham ikki xil talqin qilinadigan "
+                "yoki tushunib bo'lmaydigan bo'lgandagina so'raladi — nomzodning "
+                "fikri allaqachon aniq bo'lsa, buni 'to'g'irlash' yoki qayta "
+                "tasdiqlash uchun ISHLATILMAYDI.\n\n"
                 "Faqat quyidagi holatlarda BITTA qisqa, oddiy va xalqchil tilda "
                 "aniqlashtiruvchi savol taklif qil:\n"
-                "- javob noaniq yoki ikki xil talqin qilinadi;\n"
-                "- javob savolga aloqasi yo'q yoki mavzudan qochadi;\n"
-                "- javob xavfsizlik yoki kassa/mahsulot qoidasini buzadigan tarzda xavfli ko'rinadi.\n\n"
+                "- javob noaniq yoki ikki xil talqin qilinadi (pozitsiyasi "
+                "aniqlanmaydi);\n"
+                "- javob savolga aloqasi yo'q yoki mavzudan qochadi.\n\n"
                 "QAT'IY TAQIQ: savolda 'protsedura', 'protokol', 'eskalatsiya', "
                 "'rasmiylashtirish' kabi rasmiy/og'ir so'zlarni ISHLATMA — oddiy "
                 "kundalik so'zlashuv tilida yoz (masalan 'kimga aytasiz' emas "
                 "'rasmiylashtirasizmi' kabi emas). Nomzodni ayblama, haqorat "
                 "qilma, unga o'rgatib qo'yma, shaxsiy yoki himoyalangan xususiyat "
                 "(din, millat, oilaviy holat va h.k.) haqida hech qachon so'rama. "
-                "Yangi mavzu o'ylab topma — faqat shu javobga aniqlik kiritishga "
-                "oid savol ber.\n\n"
+                "Nomzodni 'to'g'ri' yoki kutilgan javobga yetaklovchi ishora "
+                "berma — vazifang uning haqiqiy fikrini bilish, kerakli javobni "
+                "olish emas. Yangi mavzu o'ylab topma — faqat shu javobga "
+                "aniqlik kiritishga oid savol ber.\n\n"
                 "AGAR ISHONCHING PAST bo'lsa (javob chindan ham tushunarsiz "
                 "ekanini aniq bila olmasang), baribir eng xavfsiz yo'l — oddiy "
                 "aniqlashtiruvchi savol taklif qilish, LEKIN nomzod o'rniga hech "

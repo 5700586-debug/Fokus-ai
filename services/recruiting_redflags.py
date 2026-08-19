@@ -180,9 +180,11 @@ def check_customer_conflict(answer_text: str) -> str:
 # ---------------------------------------------------------------- o'g'irlik --
 
 _THEFT_COVERUP = (
-    "hech kimga aytmayman", "sezmaganman deyman", "indamayman", "jim turaman",
-    "yashiraman", "men ham olib qolaman", "menga nima", "aralashmayman",
-    "ko'rmaganga olaman", "bilmasman deyman", "aybini ochib qo'ymayman",
+    "hech kimga aytmayman", "aytmayman", "sezmaganman deyman",
+    "indamayman", "jim turaman", "yashiraman", "men ham olib qolaman", "menga nima",
+    "aralashmayman", "ko'rmaganga olaman", "bilmasman deyman", "aybini ochib qo'ymayman",
+    "bu mening vazifam emas", "mening ishim emas", "mening vazifam emas",
+    "menga aloqasi yo'q", "menga tegishli emas",
 )
 _THEFT_REPORTING = (
     "rahbarga aytaman", "rahbarga xabar", "menejerga aytaman", "darhol xabar beraman",

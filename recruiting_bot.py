@@ -46,6 +46,7 @@ from config import (
     FOUNDER_ID,
     RECRUITING_BRANCH_NAMES,
     RECRUITING_MAX_FOLLOW_UPS,
+    RECRUITING_MAX_FOLLOW_UPS_CRITICAL,
     RECRUITING_MAX_VOICE_SECONDS,
     RECRUITING_MIN_AGE,
 )
@@ -179,6 +180,11 @@ _STEPS_D: list[dict] = [
         "column": "prev_employer_text",
     },
     {"key": "experience_duration", "kind": "text", "prompt": "U yerda necha yil yoki oy ishlagansiz?", "column": "experience_duration_text"},
+    {
+        "key": "job_stability", "kind": "text",
+        "prompt": "Oxirgi 2 yil ichida nechta joyda ishladingiz va eng uzoq ishlagan joyingizda qancha ishladingiz?",
+        "column": "job_stability_text",
+    },
     {"key": "leave_reason", "kind": "text", "prompt": "Nega ishdan ketgansiz (yoki hozir nega ish qidiryapsiz)?", "column": "leave_reason_text"},
     {
         "key": "pos_experience", "kind": "choice", "prompt": "Kassa yoki POS-terminalda ishlagan tajribangiz bormi?",
@@ -764,7 +770,8 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
     # Hazil bo'lsa, javob umuman SAQLANMAYDI (ballga ta'sir qilmasligi
     # uchun) — iliq javob berilib, o'sha savol qayta so'raladi.
     attempt = data.get("follow_up_attempt", 0)
-    if attempt < RECRUITING_MAX_FOLLOW_UPS and await recruiting_followup.detect_humor(
+    cap = _follow_up_cap_for(q_key)
+    if attempt < cap and await recruiting_followup.detect_humor(
         _CURRENT_OPENAI_CLIENT.get(), q_text, text
     ):
         await state.update_data(follow_up_attempt=attempt + 1)
@@ -776,7 +783,7 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
         await message.answer(recruiting_followup.SECURITY_REFUSAL_TEXT)
         await message.answer(q_text)
         return
-    if attempt < RECRUITING_MAX_FOLLOW_UPS and await recruiting_followup.is_off_topic(
+    if attempt < cap and await recruiting_followup.is_off_topic(
         _CURRENT_OPENAI_CLIENT.get(), q_text, text
     ):
         await state.update_data(follow_up_attempt=attempt + 1)
@@ -788,17 +795,31 @@ async def handle_role_question(message: Message, state: FSMContext, openai_clien
     await _maybe_ask_follow_up(message, state, data, q_key, q_text, text)
 
 
+def _follow_up_cap_for(q_key: str) -> int:
+    """Oddiy savollar uchun standart chegara (``RECRUITING_MAX_FOLLOW_UPS``);
+    kritik mavzular (o'g'irlik/halollik, kassa xavfsizligi) uchun, javob
+    chindan ham ikkilanuvchan bo'lib qolaversa, bitta ortiqcha urinishga
+    ruxsat beriladi (``RECRUITING_MAX_FOLLOW_UPS_CRITICAL``)."""
+    if q_key in recruiting_questions.THEFT_QUESTION_KEYS or q_key in recruiting_questions.CREDENTIAL_SHARING_QUESTION_KEYS:
+        return RECRUITING_MAX_FOLLOW_UPS_CRITICAL
+    return RECRUITING_MAX_FOLLOW_UPS
+
+
 async def _maybe_ask_follow_up(
     message: Message, state: FSMContext, data: dict, q_key: str, q_text: str, answer_text: str
 ) -> None:
-    """Bitta javobga MAKSIMAL ``RECRUITING_MAX_FOLLOW_UPS`` marta
-    aniqlashtiruvchi savol beriladi (per-answer, butun suhbatga emas —
-    real sinovdan keyingi tuzatuv)."""
+    """Bitta javobga MAKSIMAL necha marta aniqlashtiruvchi savol
+    berilishi (per-answer, butun suhbatga emas) — oddiy savollarda
+    ``RECRUITING_MAX_FOLLOW_UPS``, kritik mavzularda
+    ``RECRUITING_MAX_FOLLOW_UPS_CRITICAL`` (qarang ``_follow_up_cap_for``).
+    FAQAT javob chindan ham ikkilanuvchan bo'lganda so'raladi — pozitsiyasi
+    aniq (salbiy bo'lsa ham) javobga follow-up berilmaydi (qarang
+    ``services/recruiting_followup.deterministic_follow_up``)."""
     application_id = data["application_id"]
     attempt = data.get("follow_up_attempt", 0)
     index = data["question_index"]
 
-    if attempt < RECRUITING_MAX_FOLLOW_UPS:
+    if attempt < _follow_up_cap_for(q_key):
         follow_up_question = await recruiting_followup.decide_follow_up(
             _CURRENT_OPENAI_CLIENT.get(), q_text, answer_text, question_key=q_key
         )

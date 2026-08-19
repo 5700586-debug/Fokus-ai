@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS recruiting_applications (
     fit_reason TEXT,
     prev_employer_text TEXT,
     experience_duration_text TEXT,
+    job_stability_text TEXT,
     pos_experience INTEGER,
     cash_handling_text TEXT,
     reference_check_consent INTEGER,

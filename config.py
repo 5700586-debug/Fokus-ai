@@ -106,9 +106,17 @@ RECRUITING_RETENTION_DAYS = int(os.getenv("RECRUITING_RETENTION_DAYS") or "90")
 RECRUITING_MAX_VOICE_SECONDS = int(os.getenv("RECRUITING_MAX_VOICE_SECONDS") or "60")
 
 # BITTA javobga AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
-# (adaptive follow-up) savollar soni chegarasi — har bir asosiy savol
-# qayta boshlanganda hisoblagich reset qilinadi (qarang recruiting_bot.py).
-RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "2")
+# (adaptive follow-up) savollar soni chegarasi — oddiy savollar uchun.
+# Har bir asosiy savol qayta boshlanganda hisoblagich reset qilinadi
+# (qarang recruiting_bot.py). Real Telegram sinovidan keyin: bu endi
+# FAQAT javob chindan ham ikkilanuvchan bo'lganda ishlatiladi — pozitsiyasi
+# aniq (garchi salbiy bo'lsa ham) javobga follow-up so'ralmaydi.
+RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "1")
+
+# Kritik mavzular (o'g'irlik/halollik, kassa xavfsizligi) uchun — javob
+# chindan ham ikkilanuvchan bo'lib qolaversa, bitta qo'shimcha urinishga
+# ruxsat beriladi (qarang recruiting_bot._follow_up_cap_for).
+RECRUITING_MAX_FOLLOW_UPS_CRITICAL = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS_CRITICAL") or "2")
 
 # Qonuniy minimal ishga qabul yoshi — faqat shu yosh talabini tekshirish
 # uchun ishlatiladi, ballga HECH QACHON ta'sir qilmaydi (qarang

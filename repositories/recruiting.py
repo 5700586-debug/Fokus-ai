@@ -163,6 +163,7 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "birth_date_text",
     "birth_day",
     "birth_month",
+    "job_stability_text",
 }
 
 

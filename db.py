@@ -114,6 +114,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("recruiting_applications", "birth_date_text", "TEXT"),
     ("recruiting_applications", "birth_day", "INTEGER"),
     ("recruiting_applications", "birth_month", "INTEGER"),
+    ("recruiting_applications", "job_stability_text", "TEXT"),
     ("recruiting_assessments", "red_flags_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
 ]

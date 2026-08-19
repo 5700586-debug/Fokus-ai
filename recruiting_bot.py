@@ -956,6 +956,10 @@ async def _run_assessment_and_notify_founder(
     card_text = recruiting_card.format_candidate_card(
         application, vacancy, assessment, rubric_version, follow_up_questions
     )
+
+    critical_alert = recruiting_card.format_critical_alert(application, deterministic_result["red_flags"])
+    if critical_alert:
+        await message.bot.send_message(FOUNDER_ID, critical_alert)
     if application.get("candidate_photo_file_id"):
         await message.bot.send_photo(
             FOUNDER_ID, application["candidate_photo_file_id"], caption=f"📷 {application.get('full_name') or '-'}"

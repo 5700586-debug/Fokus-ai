@@ -282,6 +282,15 @@ _FOUNDER_MENU_LABELS = [
 ]
 
 
+def _paired_keyboard_rows(labels: list[str]) -> list[list[KeyboardButton]]:
+    """Matnlarni 2 tadan qatorlab joylashtiradi — oxirida bitta qolsa
+    alohida qatorda (mobilda tugmalar siqilib qolmasligi uchun)."""
+    return [
+        [KeyboardButton(text=label) for label in labels[i:i + 2]]
+        for i in range(0, len(labels), 2)
+    ]
+
+
 def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     """Foydalanuvchining HAQIQIY (joriy) ruxsatlariga mos yagona menyu.
 
@@ -289,7 +298,7 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     — boshqa rollar uchun mantiq o'zgarmagan.
     """
     if get_role(user_id) == "founder":
-        rows = [[KeyboardButton(text=label)] for label in _FOUNDER_MENU_LABELS]
+        rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
         return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
     rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
@@ -475,13 +484,14 @@ _ROLE_NAME_TO_KEY = {name: key for key, name in ROLES.items() if key != "founder
 
 
 def _invite_role_kb() -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=name)] for key, name in ROLES.items() if key != "founder"]
+    role_names = [name for key, name in ROLES.items() if key != "founder"]
+    rows = _paired_keyboard_rows(role_names)
     rows.append([KeyboardButton(text=_INVITE_BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def _invite_branch_kb() -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=name)] for name in RECRUITING_BRANCH_NAMES]
+    rows = _paired_keyboard_rows(RECRUITING_BRANCH_NAMES)
     rows.append([KeyboardButton(text=_INVITE_BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 

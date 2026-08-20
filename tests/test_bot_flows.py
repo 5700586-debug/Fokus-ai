@@ -117,6 +117,20 @@ async def test_add_employee_role_and_branch_selection_produces_invite_link(bot_d
     assert "token" not in sent[0].text.lower()
 
 
+async def test_invite_role_buttons_are_paired_two_per_row(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+    rows = sent[0].reply_markup.keyboard
+
+    # "⬅️ Orqaga" doim eng pastda, alohida qatorda.
+    assert [b.text for b in rows[-1]] == ["⬅️ Orqaga"]
+    # Qolgan barcha (rol) qatorlar 2 tadan (oxirgisi toq bo'lsa 1 ta bo'lishi mumkin).
+    for row in rows[:-1]:
+        assert len(row) in (1, 2)
+    assert all(len(row) == 2 for row in rows[:-2])
+
+
 async def test_stranger_start_is_rejected(bot_dp):
     main, bot = bot_dp
 

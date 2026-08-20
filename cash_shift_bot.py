@@ -188,10 +188,11 @@ _DISCREPANCY_PRESET_REASONS = {
 
 
 def _discrepancy_preset_reason_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=label, callback_data=f"csui_reason:{key}")]
+    preset_buttons = [
+        InlineKeyboardButton(text=label, callback_data=f"csui_reason:{key}")
         for key, label in _DISCREPANCY_PRESET_REASONS.items()
     ]
+    rows = [preset_buttons[i:i + 2] for i in range(0, len(preset_buttons), 2)]
     rows.append([InlineKeyboardButton(text="✍️ Boshqa sabab", callback_data="csui_reason:other")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

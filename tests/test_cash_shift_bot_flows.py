@@ -676,3 +676,20 @@ async def test_discrepancy_reason_notifies_founder(bot_dp, monkeypatch):
     assert "Qabul qilingan summa: 580000" in alert_text
     assert "Tafovut: -20 000 so'm" in alert_text
     assert "Qaytimda xato bo'lishi mumkin" in alert_text
+
+
+async def test_kassir_choice_buttons_are_two_per_row(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send(main.dp, bot, 111, photo_file_id="sales_photo")
+    await send(main.dp, bot, 111, photo_file_id="cash_photo")
+    await send(main.dp, bot, 111, text="100000")
+    await send(main.dp, bot, 111, text="0")
+    sent = await send(main.dp, bot, 111, text="0")  # "Smenani topshirasizmi?" darvozasi
+
+    rows = sent[0].reply_markup.inline_keyboard
+    assert len(rows) == 1
+    assert [b.text for b in rows[0]] == ["✅ Ha, topshiraman", "❌ Orqaga"]

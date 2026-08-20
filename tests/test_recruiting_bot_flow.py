@@ -494,7 +494,7 @@ async def test_invalid_birth_year_text_is_rejected(bot_dp):
     await send(main.dp, bot, CANDIDATE_ID, text="Ali Valiyev")
 
     sent = await send(main.dp, bot, CANDIDATE_ID, text="qwerty")
-    assert "yil" in _last_text(sent).lower()
+    assert "tushunmadim" in _last_text(sent).lower()
 
     application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
     assert application["birth_year"] is None

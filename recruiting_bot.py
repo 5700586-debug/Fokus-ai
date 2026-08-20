@@ -100,19 +100,65 @@ _CONSENT_TEXT = (
 _YES_NO_MAP = {"yes": 1, "no": 0}
 
 
-_BIRTH_DATE_RE = re.compile(r"^(\d{1,2})[./\-](\d{1,2})[./\-](\d{4})$")
+_BIRTH_DATE_SUFFIX_RE = re.compile(r"\s*(yil|y|йил|й|года|год|г)\s*$", re.IGNORECASE)
+_BIRTH_DATE_NUMERIC_RE = re.compile(r"^(\d{1,2})[./\-,\s]+(\d{1,2})[./\-,\s]+(\d{4})$")
+_BIRTH_DATE_MONTH_NAME_RE = re.compile(r"^(\d{1,2})\s+([^\s\d]+)\s+(\d{4})$")
 _YEAR_ONLY_RE = re.compile(r"^\d{4}$")
+
+# Oy nomlari — o'zbek lotin, o'zbek kirill va ruscha (nominativ + ruscha
+# sana ichida odatiy bo'lgan roditelniy kelishik: "oktyabr"/"октябрь"/
+# "октября"). Barchasi kichik harfda solishtiriladi.
+_MONTH_NAME_TO_NUMBER: dict[str, int] = {
+    "yanvar": 1, "январ": 1, "январь": 1, "января": 1,
+    "fevral": 2, "феврал": 2, "февраль": 2, "февраля": 2,
+    "mart": 3, "март": 3, "марта": 3,
+    "aprel": 4, "апрел": 4, "апрель": 4, "апреля": 4,
+    "may": 5, "май": 5, "мая": 5,
+    "iyun": 6, "июн": 6, "июнь": 6, "июня": 6,
+    "iyul": 7, "июл": 7, "июль": 7, "июля": 7,
+    "avgust": 8, "август": 8, "августа": 8,
+    "sentabr": 9, "sentyabr": 9, "сентабр": 9, "сентябрь": 9, "сентября": 9,
+    "oktabr": 10, "oktyabr": 10, "октабр": 10, "октябрь": 10, "октября": 10,
+    "noyabr": 11, "ноябр": 11, "ноябрь": 11, "ноября": 11,
+    "dekabr": 12, "декабр": 12, "декабрь": 12, "декабря": 12,
+}
+
+
+def _strip_birth_date_suffix(text: str) -> str:
+    """Sana oxiridagi "yil"/"y"/"йил"/"й"/"год"/"года"/"г" kabi so'zlarni
+    olib tashlaydi (masalan "15.10.2020 yil" -> "15.10.2020")."""
+    return _BIRTH_DATE_SUFFIX_RE.sub("", text).strip()
 
 
 def _parse_birth_date(text: str) -> tuple[int, int, int] | None:
     """(kun, oy, yil) yoki ``None`` (format noto'g'ri/sana mavjud emas/
-    yosh talabidan tashqari). Nomzod ".", "/", "-" bilan yozishi mumkin —
-    hammasi bir xil ichki formatga keltiriladi (qarang
-    ``_handle_birth_date_answer``)."""
-    match = _BIRTH_DATE_RE.match(text.strip())
-    if not match:
+    yosh talabidan tashqari). Kun har doim BIRINCHI (kun-oy-yil).
+
+    Raqamli sana ".", "/", "-", ",", bo'sh joy bilan ajratilishi mumkin,
+    oxirida "yil"/"y"/"й"/"год"/"года"/"г" kabi so'z bo'lishi mumkin.
+    Oy nomi bilan ham yoziladi (o'zbek lotin/kirill, ruscha) — qarang
+    ``_MONTH_NAME_TO_NUMBER``."""
+    stripped = _strip_birth_date_suffix(text.strip())
+
+    day: int | None = None
+    month: int | None = None
+    year: int | None = None
+
+    numeric_match = _BIRTH_DATE_NUMERIC_RE.match(stripped)
+    if numeric_match:
+        day = int(numeric_match.group(1))
+        month = int(numeric_match.group(2))
+        year = int(numeric_match.group(3))
+    else:
+        name_match = _BIRTH_DATE_MONTH_NAME_RE.match(stripped)
+        if name_match:
+            day = int(name_match.group(1))
+            month = _MONTH_NAME_TO_NUMBER.get(name_match.group(2).lower())
+            year = int(name_match.group(3))
+
+    if day is None or month is None or year is None:
         return None
-    day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+
     try:
         date(year, month, day)
     except ValueError:
@@ -592,10 +638,10 @@ async def _handle_birth_date_answer(message: Message, state: FSMContext, data: d
     stripped = text.strip()
     parsed = _parse_birth_date(stripped)
     if parsed is None:
-        if _YEAR_ONLY_RE.match(stripped):
+        if _YEAR_ONLY_RE.match(_strip_birth_date_suffix(stripped)):
             await message.answer("Kun va oyni ham yozing 🙂 Masalan: 12.10.1983")
             return
-        await message.answer("❌ Sana formatini tushunmadim. Masalan: 12.10.1983")
+        await message.answer("Sanani tushunmadim. Masalan: 15.10.2000 yoki 15 oktabr 2000")
         return
 
     day, month, year = parsed

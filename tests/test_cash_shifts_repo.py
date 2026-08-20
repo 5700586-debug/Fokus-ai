@@ -19,8 +19,8 @@ def test_open_shift_is_idempotent_for_same_day():
 
 
 def test_get_last_closed_shift_ignores_open_shifts():
-    repo.open_shift(1, None, "2026-01-01", opening_balance=0, tolerance=20000)
-    assert repo.get_last_closed_shift(1) is None
+    repo.open_shift(1, "Filial-1", "2026-01-01", opening_balance=0, tolerance=20000)
+    assert repo.get_last_closed_shift("Filial-1") is None
 
     shift = repo.get_open_shift(1, "2026-01-01")
     repo.update_shift_result(
@@ -37,7 +37,7 @@ def test_get_last_closed_shift_ignores_open_shifts():
         close=True,
     )
 
-    last_closed = repo.get_last_closed_shift(1)
+    last_closed = repo.get_last_closed_shift("Filial-1")
     assert last_closed["id"] == shift["id"]
     assert last_closed["actual_cash_balance"] == 100
     assert last_closed["closed_at"] is not None

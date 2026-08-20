@@ -29,7 +29,8 @@ def get_open_shift(employee_id: int, shift_date: str) -> dict | None:
 
 
 def open_shift(
-    employee_id: int, branch: str | None, shift_date: str, opening_balance: int, tolerance: int
+    employee_id: int, branch: str | None, shift_date: str, opening_balance: int, tolerance: int,
+    received_cash_balance: int | None = None,
 ) -> dict:
     """``employee_id``+``shift_date`` uchun smena allaqachon mavjud bo'lsa,
     yangisini yaratmasdan mavjudini qaytaradi (duplicate open'dan himoya).
@@ -43,10 +44,10 @@ def open_shift(
     try:
         cursor = conn.execute(
             "INSERT INTO cash_shifts "
-            "(employee_id, branch, shift_date, opening_balance, tolerance, status, "
+            "(employee_id, branch, shift_date, opening_balance, received_cash_balance, tolerance, status, "
             "opened_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (employee_id, branch, shift_date, opening_balance, tolerance, now, now, now),
+            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+            (employee_id, branch, shift_date, opening_balance, received_cash_balance, tolerance, now, now, now),
         )
         conn.commit()
         shift_id = cursor.lastrowid
@@ -66,16 +67,20 @@ def get_shift(shift_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def get_last_closed_shift(employee_id: int) -> dict | None:
-    """Oxirgi yopilgan (``open`` emas) smena — ertangi kun uchun
-    ``opening_balance`` shu smenaning ``actual_cash_balance``idan olinadi.
+def get_last_closed_shift(branch: str | None) -> dict | None:
+    """Oxirgi yopilgan (``open`` emas) smena — FILIAL bo'yicha (xodim
+    emas), chunki haqiqiy topshirish/qabul qilish odatda ikki XIL kassir
+    orasida bo'ladi (masalan tungi va ertalabgi). Ertangi/keyingi kassir
+    uchun ``opening_balance`` shu smenaning ``actual_cash_balance``idan
+    olinadi. Bir kunda bir nechta kassir bo'lishi mumkin bo'lgani uchun
+    ``id`` bo'yicha ham tartiblanadi (eng oxirgi yaratilgani g'olib).
     """
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT * FROM cash_shifts WHERE employee_id = ? AND status != 'open' "
-            "ORDER BY shift_date DESC LIMIT 1",
-            (employee_id,),
+            "SELECT * FROM cash_shifts WHERE branch = ? AND status != 'open' "
+            "ORDER BY shift_date DESC, id DESC LIMIT 1",
+            (branch,),
         ).fetchone()
     finally:
         conn.close()
@@ -101,6 +106,33 @@ def set_cash_report_photo(shift_id: int, photo_ref: str) -> None:
         conn.execute(
             "UPDATE cash_shifts SET cash_report_photo_ref = ?, updated_at = ? WHERE id = ?",
             (photo_ref, _now(), shift_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_received_cash_balance(shift_id: int, amount: int) -> None:
+    """Qabul qiluvchi kassir "Yana sanayman" bilan qayta kiritganda —
+    smena qatori ``open_shift``da allaqachon yaratilgan bo'lgani uchun
+    (idempotent), qiymatni shu yerda yangilaydi."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE cash_shifts SET received_cash_balance = ?, updated_at = ? WHERE id = ?",
+            (amount, _now(), shift_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_discrepancy_reason(shift_id: int, reason: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE cash_shifts SET discrepancy_reason_text = ?, updated_at = ? WHERE id = ?",
+            (reason, _now(), shift_id),
         )
         conn.commit()
     finally:

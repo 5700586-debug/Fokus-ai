@@ -51,7 +51,9 @@ def test_zero_difference_is_clean_closed():
     )
 
     assert result.difference == 0
-    assert result.status == cash_shift.STATUS_CLEAN_CLOSED
+    # Toza chiqsa ham smena darhol yopilmaydi — qabul qiluvchi kassir
+    # mustaqil sanab tasdiqlagunicha PENDING_HANDOVER'da qoladi.
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
     assert result.finalized is True
 
 
@@ -64,7 +66,7 @@ def test_difference_within_tolerance():
         cash_expenses=0, actual_cash_balance=100_000 - 15_000,
     )
 
-    assert result.status == cash_shift.STATUS_WITHIN_TOLERANCE
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
     assert result.finalized is True
 
 
@@ -161,7 +163,7 @@ def test_supervisor_recheck_lets_kassir_try_again():
         cash_expenses=0, actual_cash_balance=100_000,
     )
     assert result.finalized is True
-    assert result.status == cash_shift.STATUS_CLEAN_CLOSED
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
 
 
 def test_duplicate_close_after_finalized_raises():
@@ -193,11 +195,11 @@ def test_next_day_opening_balance_carries_forward_from_yesterday_actual():
         cash_expenses=0, actual_cash_balance=600_000,
     )
 
-    assert cash_shift.is_first_ever_shift(1) is False
+    assert cash_shift.is_first_ever_shift("Filial-1") is False
 
     today = cash_shift.open_shift_for_today(1, "Filial-1", "2026-01-02")
     assert today["opening_balance"] == 600_000
 
 
 def test_is_first_ever_shift_true_before_any_closed_shift():
-    assert cash_shift.is_first_ever_shift(42) is True
+    assert cash_shift.is_first_ever_shift("Filial-Nonexistent") is True

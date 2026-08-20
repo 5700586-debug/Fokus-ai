@@ -43,6 +43,7 @@ _LABEL_TO_CATEGORY = {label: key for key, label in _CATEGORY_LABELS.items()}
 _STATUS_LABELS = {
     cash_shift.STATUS_CLEAN_CLOSED: "🟢 Toza yopildi",
     cash_shift.STATUS_WITHIN_TOLERANCE: "🟡 Tolerance ichida yopildi",
+    cash_shift.STATUS_PENDING_HANDOVER: "🟡 Topshirish jarayonida (qabul qiluvchi tasdiqlashi kutilmoqda)",
     cash_shift.STATUS_RECHECK_REQUIRED: "🔴 Qayta tekshirish kerak",
     cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL: "🔴 Nazoratchi/Founder tekshiruvida",
     cash_shift.STATUS_APPROVED_BY_SUPERVISOR: "✅ Nazoratchi/Founder tasdiqladi",
@@ -109,6 +110,11 @@ def _format_shift_summary(shift: dict) -> str:
 
 class OpenShiftStates(StatesGroup):
     manual_opening_balance = State()
+    counted_cash_balance = State()
+    confirm_counted_balance = State()
+    discrepancy_choice = State()
+    discrepancy_preset_reason = State()
+    discrepancy_reason = State()
 
 
 class CloseShiftStates(StatesGroup):
@@ -117,7 +123,9 @@ class CloseShiftStates(StatesGroup):
     cash_sales = State()
     card_sales = State()
     other_payments = State()
+    confirm_handover_start = State()
     actual_cash_balance = State()
+    confirm_actual_balance = State()
 
 
 class ExpenseStates(StatesGroup):
@@ -132,6 +140,60 @@ def _parse_amount(text: str) -> int | None:
     if not cleaned.lstrip("-").isdigit():
         return None
     return int(cleaned)
+
+
+def _format_signed_amount(value: int) -> str:
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,}".replace(",", " ")
+
+
+def _format_amount(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _confirm_handover_start_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, topshiraman", callback_data="csui_close_start_yes"),
+        InlineKeyboardButton(text="❌ Orqaga", callback_data="csui_close_start_back"),
+    ]])
+
+
+def _confirm_close_amount_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_close_amount_ok"),
+        InlineKeyboardButton(text="🔄 Qayta yozaman", callback_data="csui_close_amount_retry"),
+    ]])
+
+
+def _confirm_received_amount_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_recv_amount_ok"),
+        InlineKeyboardButton(text="🔄 Yana sanayman", callback_data="csui_recv_amount_retry"),
+    ]])
+
+
+def _discrepancy_choice_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔄 Yana sanayman", callback_data="csui_disc_retry"),
+        InlineKeyboardButton(text="📝 Sababini yozaman", callback_data="csui_disc_reason"),
+    ]])
+
+
+_DISCREPANCY_PRESET_REASONS = {
+    "qaytim": "💵 Qaytimda xato",
+    "xarajat": "🧾 Xarajat bo'lgan",
+    "tolov": "💳 To'lovda xato",
+    "bilmayman": "❓ Bilmayman",
+}
+
+
+def _discrepancy_preset_reason_kb() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"csui_reason:{key}")]
+        for key, label in _DISCREPANCY_PRESET_REASONS.items()
+    ]
+    rows.append([InlineKeyboardButton(text="✍️ Boshqa sabab", callback_data="csui_reason:other")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _send_shift_for_review(message: Message, shift: dict) -> None:
@@ -155,6 +217,39 @@ async def _send_shift_for_review(message: Message, shift: dict) -> None:
         await message.bot.send_message(recipient_id, text, reply_markup=_review_keyboard(shift["id"]))
 
 
+async def _send_discrepancy_alert(
+    message: Message, shift: dict, handed_over_employee_id: int | None, reason: str
+) -> None:
+    """Topshirish/qabul qilish kassa tafovuti — mavjud Founder/Nazoratchi
+    kanaliga (``_send_shift_for_review`` bilan bir xil qabul qiluvchilar)
+    faqat ma'lumot uchun xabar. Tasdiqlash tugmasi yo'q, smena yopilmaydi.
+    """
+    difference = shift["received_cash_balance"] - shift["opening_balance"]
+    topshiruvchi = _employee_name(handed_over_employee_id) if handed_over_employee_id is not None else "-"
+    text = (
+        "⚠️ KASSA TAFOVUTI\n\n"
+        f"Filial: {shift.get('branch') or '-'}\n"
+        f"Topshiruvchi kassir: {topshiruvchi}\n"
+        f"Qabul qiluvchi kassir: {_employee_name(shift['employee_id'])}\n"
+        f"Topshirilgan summa: {shift['opening_balance']} so'm\n"
+        f"Qabul qilingan summa: {shift['received_cash_balance']} so'm\n"
+        f"Tafovut: {_format_signed_amount(difference)} so'm\n"
+        f"Sabab: {reason}"
+    )
+
+    recipients = {FOUNDER_ID}
+    # Nazoratchi bitta va filialga bog'lanmagan (single-slot rol) —
+    # roles.find_user_by_role orqali topiladi.
+    from roles import find_user_by_role
+
+    nazoratchi_id = find_user_by_role("nazoratchi")
+    if nazoratchi_id is not None:
+        recipients.add(nazoratchi_id)
+
+    for recipient_id in recipients:
+        await message.bot.send_message(recipient_id, text)
+
+
 def register(dp: Dispatcher) -> None:
 
     # ---------------------------------------------------------- /openshift --
@@ -169,12 +264,13 @@ def register(dp: Dispatcher) -> None:
 
         existing = cash_shift.get_open_shift(user_id, today)
         if existing is not None:
-            await message.answer(
-                f"ℹ️ Bugungi smena allaqachon ochilgan (boshlang'ich qoldiq: {existing['opening_balance']})."
-            )
+            await message.answer("ℹ️ Bugungi smena allaqachon ochilgan.")
             return
 
-        if cash_shift.is_first_ever_shift(user_id):
+        profile = get_profile(user_id)
+        branch = profile.get("branch") if profile else None
+
+        if cash_shift.is_first_ever_shift(branch):
             await state.set_state(OpenShiftStates.manual_opening_balance)
             await message.answer(
                 "👋 Bu sizning birinchi smenangiz. Kassadagi boshlang'ich pul qoldig'ini kiriting "
@@ -182,12 +278,14 @@ def register(dp: Dispatcher) -> None:
             )
             return
 
-        profile = get_profile(user_id)
-        branch = profile.get("branch") if profile else None
-        shift = cash_shift.open_shift_for_today(user_id, branch, today)
-        await message.answer(
-            f"✅ Smena ochildi.\nBoshlang'ich qoldiq (kechagi kassadan): {shift['opening_balance']} so'm."
-        )
+        # Topshiruvchi kassir sanagan real kassa summasi (avvalgi yopilgan
+        # smenaning ``actual_cash_balance``i) qabul qiluvchiga HECH QACHON
+        # ko'rsatilmaydi — qabul qiluvchi kassa pulini mustaqil sanab, o'z
+        # natijasini kiritadi.
+        await state.set_state(OpenShiftStates.counted_cash_balance)
+        await message.answer("💵 Kassadagi pulni o'zingiz sanang.")
+        await message.answer("Oldingi kassir yozgan summa ko'rinmaydi.")
+        await message.answer("Sanagan summangizni yozing:")
 
     @dp.message(StateFilter(OpenShiftStates.manual_opening_balance))
     async def openshift_manual_balance(message: Message, state: FSMContext) -> None:
@@ -201,9 +299,141 @@ def register(dp: Dispatcher) -> None:
         profile = get_profile(user_id)
         branch = profile.get("branch") if profile else None
         shift = cash_shift.open_shift_for_today(
-            user_id, branch, company_time.today().isoformat(), manual_opening_balance=amount
+            user_id, branch, company_time.today().isoformat(),
+            manual_opening_balance=amount, received_cash_balance=amount,
         )
         await message.answer(f"✅ Smena ochildi.\nBoshlang'ich qoldiq: {shift['opening_balance']} so'm.")
+
+    @dp.message(StateFilter(OpenShiftStates.counted_cash_balance))
+    async def openshift_counted_balance(message: Message, state: FSMContext) -> None:
+        amount = _parse_amount(message.text or "")
+        if amount is None or amount < 0:
+            await message.answer("❌ Faqat musbat raqam kiriting.")
+            return
+
+        await state.update_data(counted_amount=amount)
+        await state.set_state(OpenShiftStates.confirm_counted_balance)
+        await message.answer(
+            f"Siz sanadingiz: {_format_amount(amount)} so'm", reply_markup=_confirm_received_amount_kb()
+        )
+
+    @dp.callback_query(F.data == "csui_recv_amount_retry", StateFilter(OpenShiftStates.confirm_counted_balance))
+    async def openshift_counted_balance_retry(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(OpenShiftStates.counted_cash_balance)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Sanagan summangizni yozing:")
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csui_recv_amount_ok", StateFilter(OpenShiftStates.confirm_counted_balance))
+    async def openshift_counted_balance_confirmed(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        amount = data["counted_amount"]
+        user_id = callback.from_user.id
+        profile = get_profile(user_id)
+        branch = profile.get("branch") if profile else None
+        today = company_time.today().isoformat()
+
+        from repositories import cash_shifts as cash_shifts_repo
+
+        # ``opening_balance`` shu smenaning ``actual_cash_balance``idan
+        # olinadi (topshiruvchi kassir, hali ``PENDING_HANDOVER`` holatida
+        # — closeshift'da darhol yopilmagan). Solishtirishdan oldin
+        # topib olinadi, chunki mos kelsa aynan shu smenani yopish kerak.
+        handed_over_shift = cash_shifts_repo.get_last_closed_shift(branch)
+
+        # "🔄 Yana sanayman" bilan qayta urinishda smena qatori
+        # allaqachon mavjud — ``open_shift_for_today`` uni qayta
+        # yaratmasdan aynan shu qatorni qaytaradi, shuning uchun
+        # ``received_cash_balance`` shu holatda alohida yangilanadi.
+        existing_shift = cash_shift.get_open_shift(user_id, today)
+        if existing_shift is None:
+            shift = cash_shift.open_shift_for_today(user_id, branch, today, received_cash_balance=amount)
+        else:
+            cash_shifts_repo.set_received_cash_balance(existing_shift["id"], amount)
+            shift = cash_shift.get_shift(existing_shift["id"])
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+        # Qabul qiluvchi mustaqil sanagan summa (``received_cash_balance``)
+        # topshiruvchining real summasi (``opening_balance``) bilan
+        # solishtiriladi. Tafovut bo'lsa smena hozircha yakunlanmaydi —
+        # sabab/jarima/formula qo'shilmaydi, faqat ogohlantirish chiqadi.
+        if shift["received_cash_balance"] == shift["opening_balance"]:
+            if handed_over_shift is not None:
+                cash_shift.confirm_handover(handed_over_shift["id"])
+
+            await state.clear()
+            await callback.message.answer("✅ Kassa mos.")
+            await callback.message.answer("Smena topshirildi.")
+            await callback.answer()
+            return
+
+        difference = shift["received_cash_balance"] - shift["opening_balance"]
+
+        await state.update_data(
+            shift_id=shift["id"],
+            handed_over_employee_id=handed_over_shift["employee_id"] if handed_over_shift else None,
+        )
+        await state.set_state(OpenShiftStates.discrepancy_choice)
+        await callback.message.answer(f"⚠️ Kassa farqi: {_format_signed_amount(difference)} so'm")
+        await callback.message.answer("Nima qilamiz?", reply_markup=_discrepancy_choice_kb())
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csui_disc_retry", StateFilter(OpenShiftStates.discrepancy_choice))
+    async def openshift_discrepancy_retry(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(OpenShiftStates.counted_cash_balance)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Sanagan summangizni yozing:")
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csui_disc_reason", StateFilter(OpenShiftStates.discrepancy_choice))
+    async def openshift_discrepancy_choose_reason(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(OpenShiftStates.discrepancy_preset_reason)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Sababni tanlang:", reply_markup=_discrepancy_preset_reason_kb())
+        await callback.answer()
+
+    @dp.callback_query(
+        F.data.startswith("csui_reason:"), StateFilter(OpenShiftStates.discrepancy_preset_reason)
+    )
+    async def openshift_discrepancy_preset_reason(callback: CallbackQuery, state: FSMContext) -> None:
+        key = callback.data.split(":", 1)[1]
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+        if key == "other":
+            await state.set_state(OpenShiftStates.discrepancy_reason)
+            await callback.message.answer("Sababini qisqa yozing:")
+            await callback.answer()
+            return
+
+        label = _DISCREPANCY_PRESET_REASONS[key]
+        data = await state.get_data()
+        await state.clear()
+        from repositories import cash_shifts as cash_shifts_repo
+
+        cash_shifts_repo.set_discrepancy_reason(data["shift_id"], label)
+        await callback.message.answer("✅ Sabab saqlandi.")
+
+        shift = cash_shifts_repo.get_shift(data["shift_id"])
+        await _send_discrepancy_alert(callback.message, shift, data.get("handed_over_employee_id"), label)
+        await callback.answer()
+
+    @dp.message(StateFilter(OpenShiftStates.discrepancy_reason))
+    async def openshift_discrepancy_reason(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("❌ Iltimos, sababini qisqacha yozing.")
+            return
+
+        data = await state.get_data()
+        await state.clear()
+        from repositories import cash_shifts as cash_shifts_repo
+
+        cash_shifts_repo.set_discrepancy_reason(data["shift_id"], text)
+        await message.answer("✅ Sabab saqlandi.")
+
+        shift = cash_shifts_repo.get_shift(data["shift_id"])
+        await _send_discrepancy_alert(message, shift, data.get("handed_over_employee_id"), text)
 
     # -------------------------------------------------------------- /expense --
 
@@ -307,6 +537,12 @@ def register(dp: Dispatcher) -> None:
             await message.answer("⏳ Smenangiz hozir Nazoratchi/Founder tekshiruvida. Javobni kuting.")
             return
 
+        if shift["status"] == cash_shift.STATUS_PENDING_HANDOVER:
+            await message.answer(
+                "⏳ Smenangiz allaqachon topshirilgan — qabul qiluvchi kassir tasdiqlashini kutmoqda."
+            )
+            return
+
         if shift["status"] in (
             cash_shift.STATUS_CLEAN_CLOSED, cash_shift.STATUS_WITHIN_TOLERANCE,
             cash_shift.STATUS_APPROVED_BY_SUPERVISOR, cash_shift.STATUS_REJECTED_BY_SUPERVISOR,
@@ -394,8 +630,22 @@ def register(dp: Dispatcher) -> None:
             return
 
         await state.update_data(other_payments=amount)
+        await state.set_state(CloseShiftStates.confirm_handover_start)
+        await message.answer("Smenani topshirasizmi?", reply_markup=_confirm_handover_start_kb())
+
+    @dp.callback_query(F.data == "csui_close_start_yes", StateFilter(CloseShiftStates.confirm_handover_start))
+    async def closeshift_start_yes(callback: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CloseShiftStates.actual_cash_balance)
-        await message.answer("Kassada real qolgan naqd pulni kiriting:")
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csui_close_start_back", StateFilter(CloseShiftStates.confirm_handover_start))
+    async def closeshift_start_back(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("❌ Bekor qilindi.")
+        await callback.answer()
 
     @dp.message(StateFilter(CloseShiftStates.actual_cash_balance))
     async def closeshift_actual_cash_balance(message: Message, state: FSMContext) -> None:
@@ -404,8 +654,24 @@ def register(dp: Dispatcher) -> None:
             await message.answer("❌ Faqat musbat raqam kiriting.")
             return
 
+        await state.update_data(actual_cash_balance=amount)
+        await state.set_state(CloseShiftStates.confirm_actual_balance)
+        await message.answer(
+            f"{_format_amount(amount)} so'm. To'g'rimi?", reply_markup=_confirm_close_amount_kb()
+        )
+
+    @dp.callback_query(F.data == "csui_close_amount_retry", StateFilter(CloseShiftStates.confirm_actual_balance))
+    async def closeshift_amount_retry(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(CloseShiftStates.actual_cash_balance)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csui_close_amount_ok", StateFilter(CloseShiftStates.confirm_actual_balance))
+    async def closeshift_amount_confirmed(callback: CallbackQuery, state: FSMContext) -> None:
         data = await state.get_data()
         shift_id = data["shift_id"]
+        amount = data["actual_cash_balance"]
         cash_expenses = cash_expense.total_expenses_for_shift(shift_id)
 
         result = cash_shift.submit_close_attempt(
@@ -413,24 +679,27 @@ def register(dp: Dispatcher) -> None:
             cash_expenses, amount,
         )
 
+        await callback.message.edit_reply_markup(reply_markup=None)
+
         if result.finalized:
             await state.clear()
             shift = cash_shift.get_shift(shift_id)
-            await message.answer(_format_shift_summary(shift), reply_markup=ReplyKeyboardRemove())
+            await callback.message.answer(_format_shift_summary(shift))
+            await callback.answer()
             return
 
         if result.needs_supervisor:
             await state.clear()
             shift = cash_shift.get_shift(shift_id)
-            await message.answer(
-                "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi.",
-                reply_markup=ReplyKeyboardRemove(),
+            await callback.message.answer(
+                "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi."
             )
-            await _send_shift_for_review(message, shift)
+            await _send_shift_for_review(callback.message, shift)
+            await callback.answer()
             return
 
         await state.set_state(CloseShiftStates.cash_sales)
-        await message.answer(
+        await callback.message.answer(
             f"🔴 Farq {result.difference} so'm.\n\n"
             "Qayta tekshiring:\n"
             "• naqd savdo\n"
@@ -440,6 +709,7 @@ def register(dp: Dispatcher) -> None:
             f"Qolgan urinishlar: {result.retries_left}\n\n"
             "Bugungi naqd savdo summasini qayta kiriting:"
         )
+        await callback.answer()
 
     # ------------------------------------------------------- supervisor review --
 

@@ -65,7 +65,56 @@ async def test_founder_start_greets_founder(bot_dp):
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
 
     assert len(sent) == 1
-    assert "Asoschi" in sent[0].text
+    assert sent[0].text == (
+        "Assalomu alaykum, Muhammadiy! 👋\n"
+        "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
+    )
+
+
+async def test_founder_start_shows_new_greeting_and_five_menu_buttons(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+
+    assert sent[0].text == (
+        "Assalomu alaykum, Muhammadiy! 👋\n"
+        "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
+    )
+    assert "Founder" not in sent[0].text
+    assert "Asoschi" not in sent[0].text
+
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert buttons == [
+        "👤 Xodim qo'shish", "👥 Xodimlar", "🏪 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
+    ]
+
+
+async def test_add_employee_button_asks_role_with_existing_role_buttons(bot_dp):
+    main, bot = bot_dp
+    from roles import ROLES
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+
+    assert sent[0].text == "Kim bo'lib ishlaydi?"
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    for key, name in ROLES.items():
+        if key != "founder":
+            assert name in buttons
+    assert "⬅️ Orqaga" in buttons
+
+
+async def test_add_employee_role_and_branch_selection_produces_invite_link(bot_dp):
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    assert sent[0].text == "Qaysi do'konda ishlaydi?"
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="Filial-1")
+    assert sent[0].text.startswith("✅ Link tayyor\n")
+    assert "https://t.me/" in sent[0].text
+    assert "invite" not in sent[0].text.lower()
+    assert "token" not in sent[0].text.lower()
 
 
 async def test_stranger_start_is_rejected(bot_dp):

@@ -2,8 +2,9 @@ import asyncio
 import os
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiogram.types import (
     ErrorEvent,
@@ -50,7 +51,7 @@ import performance_bot  # noqa: E402
 import recruiting_bot  # noqa: E402
 import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
-from config import ENVIRONMENT, FOUNDER_ID  # noqa: E402
+from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES  # noqa: E402
 from services import messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
@@ -272,8 +273,25 @@ def _visible_commands(user_id: int, category_key: str) -> list[str]:
     ]
 
 
+_FOUNDER_MENU_LABELS = [
+    "👤 Xodim qo'shish",
+    "👥 Xodimlar",
+    "🏪 Do'konlar",
+    "💰 Smenalarni ko'rish",
+    "⚙️ Sozlamalar",
+]
+
+
 def build_menu(user_id: int) -> ReplyKeyboardMarkup:
-    """Foydalanuvchining HAQIQIY (joriy) ruxsatlariga mos yagona menyu."""
+    """Foydalanuvchining HAQIQIY (joriy) ruxsatlariga mos yagona menyu.
+
+    Founder uchun soddalashtirilgan sodda menyu (``_FOUNDER_MENU_LABELS``)
+    — boshqa rollar uchun mantiq o'zgarmagan.
+    """
+    if get_role(user_id) == "founder":
+        rows = [[KeyboardButton(text=label)] for label in _FOUNDER_MENU_LABELS]
+        return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
     rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
 
     for category_key in _visible_categories(user_id):
@@ -407,7 +425,10 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
     role = get_role(message.from_user.id)
     if message.from_user.id == FOUNDER_ID:
-        greeting = "Assalomu alaykum, Asoschi! 👑\nFokus AI botingiz tayyor!"
+        greeting = (
+            "Assalomu alaykum, Muhammadiy! 👋\n"
+            "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
+        )
     else:
         greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(role)}"
 
@@ -437,6 +458,134 @@ async def settings_handler(message: Message) -> None:
         ai_users.discard(message.from_user.id)
 
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
+
+
+# Founderning yangi sodda menyusidagi tugmalar — mavjud buyruqlarni faqat
+# qayta nomlab ko'rsatadi, yangi funksiya qo'shmaydi (qarang
+# ``_FOUNDER_MENU_LABELS``).
+
+
+class InviteFlowStates(StatesGroup):
+    choosing_role = State()
+    choosing_branch = State()
+
+
+_INVITE_BACK_TEXT = "⬅️ Orqaga"
+_ROLE_NAME_TO_KEY = {name: key for key, name in ROLES.items() if key != "founder"}
+
+
+def _invite_role_kb() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=name)] for key, name in ROLES.items() if key != "founder"]
+    rows.append([KeyboardButton(text=_INVITE_BACK_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def _invite_branch_kb() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=name)] for name in RECRUITING_BRANCH_NAMES]
+    rows.append([KeyboardButton(text=_INVITE_BACK_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+async def _finish_invite_creation(message: Message, role_key: str, branch: str | None) -> None:
+    # ``/invite``dagi bilan bir xil mavjud tekshiruvlar (biznes mantiq
+    # o'zgartirilmagan) — faqat ko'rinadigan matn soddalashtirilgan.
+    if is_single_slot_role(role_key):
+        existing_user = find_user_by_role(role_key)
+        if existing_user is not None:
+            await message.answer(
+                f"❌ {role_name(role_key)} lavozimida allaqachon xodim bor.",
+                reply_markup=build_menu(message.from_user.id),
+            )
+            return
+
+        if invites.has_pending_invite_for_role(role_key):
+            await message.answer(
+                f"❌ {role_name(role_key)} uchun allaqachon faol havola mavjud.",
+                reply_markup=build_menu(message.from_user.id),
+            )
+            return
+
+    token = invites.create_invite(role_key, branch, created_by=FOUNDER_ID)
+    me = await message.bot.get_me()
+    link = f"https://t.me/{me.username}?start={token}"
+
+    await message.answer(
+        f"✅ Link tayyor\n{link}", reply_markup=build_menu(message.from_user.id)
+    )
+
+
+@dp.message(F.text == "👤 Xodim qo'shish")
+async def founder_add_employee_handler(message: Message, state: FSMContext) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await state.set_state(InviteFlowStates.choosing_role)
+    await message.answer("Kim bo'lib ishlaydi?", reply_markup=_invite_role_kb())
+
+
+@dp.message(StateFilter(InviteFlowStates.choosing_role), F.text == _INVITE_BACK_TEXT)
+async def invite_flow_role_back(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Asosiy menyu.", reply_markup=build_menu(message.from_user.id))
+
+
+@dp.message(StateFilter(InviteFlowStates.choosing_role))
+async def invite_flow_choose_role(message: Message, state: FSMContext) -> None:
+    role_key = _ROLE_NAME_TO_KEY.get((message.text or "").strip())
+    if role_key is None:
+        await message.answer("Iltimos, tugmalardan birini tanlang.", reply_markup=_invite_role_kb())
+        return
+
+    if is_single_slot_role(role_key):
+        await state.clear()
+        await _finish_invite_creation(message, role_key, None)
+        return
+
+    await state.update_data(role_key=role_key)
+    await state.set_state(InviteFlowStates.choosing_branch)
+    await message.answer("Qaysi do'konda ishlaydi?", reply_markup=_invite_branch_kb())
+
+
+@dp.message(StateFilter(InviteFlowStates.choosing_branch), F.text == _INVITE_BACK_TEXT)
+async def invite_flow_branch_back(message: Message, state: FSMContext) -> None:
+    await state.set_state(InviteFlowStates.choosing_role)
+    await message.answer("Kim bo'lib ishlaydi?", reply_markup=_invite_role_kb())
+
+
+@dp.message(StateFilter(InviteFlowStates.choosing_branch))
+async def invite_flow_choose_branch(message: Message, state: FSMContext) -> None:
+    branch = (message.text or "").strip()
+    if branch not in RECRUITING_BRANCH_NAMES:
+        await message.answer("Iltimos, tugmalardan birini tanlang.", reply_markup=_invite_branch_kb())
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    await _finish_invite_creation(message, data["role_key"], branch)
+
+
+@dp.message(F.text.in_({"👥 Xodimlar", "🏪 Do'konlar"}))
+async def founder_employees_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await list_users_handler(message)
+
+
+@dp.message(F.text == "💰 Smenalarni ko'rish")
+async def founder_shift_summary_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    import company_time
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(message.from_user.id, company_time.today().isoformat())
+    if shift is None:
+        await message.answer("ℹ️ Bugun uchun smena topilmadi.")
+        return
+
+    await message.answer(cash_shift_bot._format_shift_summary(shift))
 
 
 @dp.message(F.text.in_(_ALL_MENU_BUTTON_TEXTS))

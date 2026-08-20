@@ -92,8 +92,9 @@ async def test_start_shows_founder_category_for_founder(bot_dp):
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
     buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
 
-    assert "👑 Asoschi" in buttons
-    assert "💰 Kassa" not in buttons
+    assert buttons == {
+        "👤 Xodim qo'shish", "👥 Xodimlar", "🏪 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
+    }
 
 
 async def test_category_button_lists_commands_and_back(bot_dp):
@@ -314,7 +315,7 @@ async def test_start_after_stale_button_shows_fresh_description_free_menu(bot_dp
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
 
     buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
-    assert "👑 Asoschi" in buttons
+    assert "👤 Xodim qo'shish" in buttons
     assert not any("—" in b for b in buttons)
 
 

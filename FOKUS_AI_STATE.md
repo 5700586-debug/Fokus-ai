@@ -5,8 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `6417274` — "Make CI Linux-only and machine-independent: smoke tests on push, full suite on demand" (bu qatorning o'zi commit hashini o'zgartirishi mumkin — ziddiyat bo'lsa `git log -1` ustuvor)
+- **Commit:** `8838ab1` — "Make CI Linux-only and machine-independent: smoke tests on push, full suite on demand"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `8838ab1` uchun — **PASSED** (run 32524012097: checkout, dependency install, haqiqiy `psycopg2` import, 4 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.

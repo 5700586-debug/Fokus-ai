@@ -66,12 +66,19 @@ async def test_saturntest_sends_requested_post_type(bot_dp, monkeypatch):
 async def test_saturntest_tip_sends_only_tip_no_financial_dashboard(bot_dp):
     """1-MUAMMO: ``/saturntest tip`` guruhga FAQAT qisqa motivatsion
     tip yuborishi kerak — moliyaviy dashboard (reja/savdo/foiz/chek)
-    umuman qo'shilmasin."""
+    umuman qo'shilmasin.
+
+    Guruh ID oldindan ``/setrule`` orqali sozlangan holat sinaladi
+    (xuddi ``test_saturntest_sends_requested_post_type``dagidek) —
+    buyruq guruhning o'zida birinchi marta yuborilganda "Guruh ID
+    saqlandi" tasdig'i ham o'sha guruhga ketadi, bu esa tip mazmuniga
+    aloqasi yo'q, alohida (allaqachon boshqa testda qamrab olingan)
+    holat."""
     main, bot = bot_dp
 
-    sent = await send(
-        main.dp, bot, FOUNDER_ID, text="/saturntest tip", chat_id=-100777, chat_type="supergroup"
-    )
+    rules_service.set_rule("saturn.group_chat_id", "-100777", updated_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest tip")
 
     group_messages = [m for m in sent if getattr(m, "chat_id", None) == -100777]
     assert len(group_messages) == 1

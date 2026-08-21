@@ -25,7 +25,14 @@ import re
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+import company_time
+
 _YES_NO = {1: "ha", 0: "yo'q", None: "-"}
+
+_MONTH_NUMBER_TO_NAME = {
+    1: "yanvar", 2: "fevral", 3: "mart", 4: "aprel", 5: "may", 6: "iyun",
+    7: "iyul", 8: "avgust", 9: "sentabr", 10: "oktabr", 11: "noyabr", 12: "dekabr",
+}
 
 _RETENTION_LABELS = {
     "6oygacha": "6 oygacha",
@@ -75,6 +82,23 @@ def _job_stability_needs_clarification(text: str | None) -> bool:
     return int(match.group(1)) >= 3
 
 
+def _format_birth_date_line(application: dict) -> str:
+    """Nomzod allaqachon saqlagan ``birth_day``/``birth_month``/
+    ``birth_year``dan (recruiting_bot.py'dagi parser natijasi) odam
+    o'qiydigan qator quradi — yosh bugungi (kompaniya) sana bo'yicha
+    hisoblanadi."""
+    day = application.get("birth_day")
+    month = application.get("birth_month")
+    year = application.get("birth_year")
+    if not (day and month and year):
+        return "🎂 Tug'ilgan sana: -"
+
+    month_name = _MONTH_NUMBER_TO_NAME.get(month, str(month))
+    today = company_time.today()
+    age = today.year - year - ((today.month, today.day) < (month, day))
+    return f"🎂 Tug'ilgan sana: {day} {month_name} {year} — {age} yosh"
+
+
 def _reason_text(overall_result: str, red_flags: list[dict], clarify_questions: list[str], fit_reason: str | None) -> str:
     """Tavsiya ostidagi bitta qisqa "Sabab:" qatori — DETERMINISTIK
     (AI matniga bog'liq emas, hech qachon uzun/texnik bo'lmaydi)."""
@@ -121,6 +145,7 @@ def format_candidate_card(
     lines = [
         f"🧑‍💼 {_sanitize(application.get('full_name'), 50)} — {vacancy['title']}",
         f"📞 {application.get('phone') or '-'}   🏢 {_sanitize(application.get('preferred_branch'), 30)}",
+        _format_birth_date_line(application),
         f"📍 {_sanitize(application.get('residence_area'), 40)}",
         f"📋 {', '.join(experience_bits)} — \"{leave_reason}\"",
         f"💰 Oldingi: {application.get('prev_salary_text') or '-'} → Kutilayotgan: {application.get('expected_salary') or '-'}",

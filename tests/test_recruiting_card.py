@@ -55,10 +55,23 @@ def _rubric_version():
     return {"version": 2}
 
 
-def test_card_shows_birth_year_with_no_score_impact_disclaimer():
-    text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(), _rubric_version(), [])
-    assert "1998" in text
-    assert "ballga ta'sir qilmaydi" in text
+def test_card_shows_birth_date():
+    application = _application(birth_day=15, birth_month=10, birth_year=1998)
+    text = recruiting_card.format_candidate_card(application, _vacancy(), _assessment(), _rubric_version(), [])
+    assert "🎂 Tug'ilgan sana:" in text
+    assert "15 oktabr 1998" in text
+
+
+def test_card_computes_age_correctly_from_birth_date():
+    import company_time
+
+    today = company_time.today()
+    # Tug'ilgan kuni aynan bugun bo'lgan nomzod uchun yosh doim aniq
+    # butun son bo'ladi — test qachon ishga tushirilishidan qat'i nazar.
+    birth_year = today.year - 25
+    application = _application(birth_day=today.day, birth_month=today.month, birth_year=birth_year)
+    text = recruiting_card.format_candidate_card(application, _vacancy(), _assessment(), _rubric_version(), [])
+    assert "25 yosh" in text
 
 
 def test_card_truncates_long_raw_evidence_text():

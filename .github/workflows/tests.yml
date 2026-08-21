@@ -1,8 +1,9 @@
 name: Tests
 
+# To'liq (900+) test to'plami endi HAR bir pushda emas, faqat qo'lda
+# so'ralganda ishlaydi (GitHub UI: Actions -> Tests -> Run workflow) —
+# odatiy push uchun ``smoke-tests.yml`` (tez, kichik) ishlatiladi.
 on:
-  push:
-  pull_request:
   workflow_dispatch: {}
 
 jobs:

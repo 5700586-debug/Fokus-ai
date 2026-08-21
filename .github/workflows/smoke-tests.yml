@@ -1,12 +1,19 @@
-name: Verify 4 tests (temporary)
+name: Smoke tests
+
+# Har pushda ishlaydi — TEZ va KICHIK: haqiqiy dependency (shu jumladan
+# haqiqiy psycopg2, hech qanday stub yo'q) o'rnatiladi va faqat eng
+# muhim, barqaror ishlaydigan bir nechta test ishga tushiriladi. To'liq
+# (900+) to'plam uchun qarang ``tests.yml`` (endi faqat qo'lda
+# ishga tushiriladi).
 
 on:
   push:
     branches:
       - feature/hr-conversational-interview
+  workflow_dispatch: {}
 
 jobs:
-  test:
+  smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +25,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run the 4 target tests
+      - name: Verify real psycopg2 import (no stub/workaround)
+        run: python -c "import psycopg2; print('psycopg2 import OK:', psycopg2.__version__)"
+
+      - name: Smoke tests
         run: >
           pytest -v
           tests/test_saturn_group_bot_flows.py::test_saturntest_tip_sends_only_tip_no_financial_dashboard

@@ -35,6 +35,18 @@ _PAGE_SIZE = 8
 _MEDALS = ["🥇", "🥈", "🥉"]
 _MANAGEMENT_ROLES = {"founder", "nazoratchi"}
 
+# ``baholash_enter_rule`` FSM holatni tozalagandan keyin AI tasdig'ini
+# (haqiqiy tarmoq so'rovi) kutadi, keyingina jarimani yozadi —
+# ``discipline_penalties``da bitta xodimga bir kunda bir nechta HAQIQIY
+# jarima qo'llash qonuniy bo'lgani uchun DB darajasida UNIQUE cheklov
+# qo'yib bo'lmaydi. Shu oraliqda bir xil nazoratchidan deyarli bir
+# vaqtda ikkinchi xabar kelsa (masalan ikki marta yuborilgan/qayta
+# urinilgan xabar), ``bonus_bank`` ikki marta kamayib ketmasligi uchun
+# — ``main.py``dagi ``ai_users`` bilan bir xil uslubda, jarayon-ichi
+# himoya. Bitta nazoratchi bir vaqtning o'zida faqat bitta jarima
+# yozuvini qayta ishlashi mumkin.
+_PENDING_PENALTY_APPLICATIONS: set[int] = set()
+
 
 def _resolve_timezone():
     try:
@@ -240,54 +252,67 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not message.from_user:
             return
 
-        text = (message.text or "").strip()
-        rule_number = discipline.extract_rule_number(text)
-        if rule_number is None:
-            await message.answer("❌ Nizom raqamini aniqlay olmadim. Masalan: \"3-nizom\" deb yozing.")
+        nazoratchi_id = message.from_user.id
+        # Atomic band qilish: awaitdan OLDIN, sinxron tekshir+qo'sh — shu
+        # nazoratchidan deyarli bir vaqtda kelgan ikkinchi xabar (masalan
+        # ikki marta yuborilgan) AI tasdig'ini qayta kutmasdan, jarimani
+        # ikkinchi marta qo'llamasdan darhol chiqib ketadi (qarang
+        # ``_PENDING_PENALTY_APPLICATIONS`` izohi).
+        if nazoratchi_id in _PENDING_PENALTY_APPLICATIONS:
             return
-
-        rule = discipline.get_rule(rule_number)
-        if rule is None:
-            await message.answer(
-                f"❌ {rule_number}-nizom bazada topilmadi. Boshqa raqam kiriting yoki "
-                "Founder'dan /addnizom orqali qo'shishini so'rang."
-            )
-            return
-
-        data = await state.get_data()
-        employee_id = data["penalty_employee_id"]
-        amount = data["penalty_amount"]
-        await state.clear()
-
-        waiting = await message.answer("⏳ AI nizomni tasdiqlayapti...")
-        ai_note = await discipline_ai.confirm_rule_match(openai_client, text, rule)
-
-        result = discipline.apply_penalty(
-            employee_id,
-            message.from_user.id,
-            _today().isoformat(),
-            amount,
-            rule_number,
-            comment=text,
-            ai_note=ai_note,
-        )
-
-        name = _employee_name(employee_id)
-        await waiting.edit_text(
-            f"{ai_note}\n\n"
-            f"🚫 {name} uchun -{amount} ball jarima qo'llanildi ({rule_number}-nizom).\n"
-            f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
-            "ℹ️ Fiks oylikka ta'sir qilmaydi."
-        )
+        _PENDING_PENALTY_APPLICATIONS.add(nazoratchi_id)
 
         try:
-            await message.bot.send_message(
+            text = (message.text or "").strip()
+            rule_number = discipline.extract_rule_number(text)
+            if rule_number is None:
+                await message.answer("❌ Nizom raqamini aniqlay olmadim. Masalan: \"3-nizom\" deb yozing.")
+                return
+
+            rule = discipline.get_rule(rule_number)
+            if rule is None:
+                await message.answer(
+                    f"❌ {rule_number}-nizom bazada topilmadi. Boshqa raqam kiriting yoki "
+                    "Founder'dan /addnizom orqali qo'shishini so'rang."
+                )
+                return
+
+            data = await state.get_data()
+            employee_id = data["penalty_employee_id"]
+            amount = data["penalty_amount"]
+            await state.clear()
+
+            waiting = await message.answer("⏳ AI nizomni tasdiqlayapti...")
+            ai_note = await discipline_ai.confirm_rule_match(openai_client, text, rule)
+
+            result = discipline.apply_penalty(
                 employee_id,
-                f"⚠️ Sizga -{amount} ball jarima qo'llanildi ({rule_number}-nizom: {rule['title']}).\n"
-                "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring.",
+                nazoratchi_id,
+                _today().isoformat(),
+                amount,
+                rule_number,
+                comment=text,
+                ai_note=ai_note,
             )
-        except Exception as error:
-            print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
+
+            name = _employee_name(employee_id)
+            await waiting.edit_text(
+                f"{ai_note}\n\n"
+                f"🚫 {name} uchun -{amount} ball jarima qo'llanildi ({rule_number}-nizom).\n"
+                f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
+                "ℹ️ Fiks oylikka ta'sir qilmaydi."
+            )
+
+            try:
+                await message.bot.send_message(
+                    employee_id,
+                    f"⚠️ Sizga -{amount} ball jarima qo'llanildi ({rule_number}-nizom: {rule['title']}).\n"
+                    "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring.",
+                )
+            except Exception as error:
+                print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
+        finally:
+            _PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
     # ------------------------------------------------------- /kunniyop --
 

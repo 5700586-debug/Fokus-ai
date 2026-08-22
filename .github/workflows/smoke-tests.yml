@@ -49,3 +49,5 @@ jobs:
           tests/test_employees.py::test_duplicate_approve_only_succeeds_once
           tests/test_recruiting_permissions.py::test_founder_hire_creates_active_employee_with_role_branch_and_auto_menu
           tests/test_recruiting_permissions.py::test_double_hire_click_does_not_crash_or_duplicate
+          tests/test_recruiting_permissions.py::test_set_founder_decision_if_only_claims_when_status_matches
+          tests/test_recruiting_permissions.py::test_hire_does_not_touch_employees_when_application_already_claimed

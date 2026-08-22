@@ -241,6 +241,33 @@ def set_founder_decision(application_id: int, decision: str, decided_by: int) ->
         conn.close()
 
 
+def set_founder_decision_if(
+    application_id: int, expected_status: str, decision: str, decided_by: int
+) -> bool:
+    """``set_founder_decision`` bilan bir xil, lekin FAQAT ariza joriy
+    statusi ``expected_status``ga teng bo'lsagina yozadi (atomic
+    ``UPDATE ... WHERE id = ? AND status = ?``) — parallel ikkinchi
+    chaqiruv (masalan ikki xil worker bir vaqtda "Ishga olish" bossa)
+    hech narsa o'zgartirmaydi. Qaytadi: ``True`` — yozildi (shu
+    chaqiruv arizani "band qildi"), ``False`` — joriy status
+    kutilganidan farq qiladi (boshqa chaqiruv allaqachon band qilgan).
+    """
+    now = _now()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE recruiting_applications SET founder_decision = ?, founder_decision_by = ?, "
+            "founder_decision_at = ?, status = 'reviewed', updated_at = ? WHERE id = ? AND status = ?",
+            (decision, decided_by, now, now, application_id, expected_status),
+        )
+        conn.commit()
+        claimed = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    return claimed
+
+
 def list_applications_past_retention(now_iso: str | None = None) -> list[dict]:
     now_iso = now_iso or _now()
     conn = get_connection()

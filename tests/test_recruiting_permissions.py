@@ -183,6 +183,50 @@ async def test_double_hire_click_does_not_crash_or_duplicate(bot_dp):
     assert profile["status"] == "approved"
 
 
+def test_set_founder_decision_if_only_claims_when_status_matches():
+    """Atomic guard: ikkita "parallel worker" bir xil arizani bir
+    vaqtda "Ishga olish" deb band qilishga urinsa (masalan ikki xil
+    bot worker yoki ikki marta tez ketma-ket bosilgan tugma), faqat
+    BIRINCHISI muvaffaqiyatli bo'lishi kerak.
+    """
+    application_id = _create_awaiting_review_application(700001)
+
+    first = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 999)
+    second = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 888)
+
+    assert first is True
+    assert second is False
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision_by"] == 999  # ikkinchisi qayta yozmadi
+    assert application["status"] == "reviewed"
+
+
+async def test_hire_does_not_touch_employees_when_application_already_claimed(bot_dp):
+    """Regressiya (multi-worker idempotency): agar ariza allaqachon
+    (masalan parallel boshqa worker tomonidan) "band qilingan" bo'lsa,
+    ``handle_hire`` ``employees.submit_profile``ga UMUMAN yetib
+    bormasligi kerak — xodim yozuvi yaratilmaydi/tegilmaydi, rol
+    berilmaydi, nomzodga xabar yuborilmaydi.
+    """
+    main, bot = bot_dp
+    candidate_id = 700002
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    # "Boshqa worker" arizani allaqachon band qilgan deb simulyatsiya qilamiz.
+    claimed = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 999999)
+    assert claimed is True
+
+    import employees
+    import roles
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert employees.get_profile(candidate_id) is None
+    assert roles.get_role(candidate_id) is None
+    assert [m for m in sent if getattr(m, "chat_id", None) == candidate_id] == []
+
+
 # --------------------------------------------------------- karta manzili --
 
 

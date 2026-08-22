@@ -1245,6 +1245,23 @@ async def handle_hire(callback: CallbackQuery) -> None:
             )
             return
 
+    decided_by = callback.from_user.id if callback.from_user else FOUNDER_ID
+
+    # Atomik "band qilish": ariza FAQAT hali 'awaiting_review' bo'lsa
+    # "hired" deb belgilanadi (``UPDATE ... WHERE id = ? AND status = ?``).
+    # Parallel ikkinchi worker (masalan ikki marta bosilgan tugma yoki
+    # ikki worker bir vaqtda) shu yerda to'xtaydi — ``employees.
+    # submit_profile``ga UMUMAN yetib bormaydi, shuning uchun mavjud
+    # (allaqachon tasdiqlangan) xodim yozuvini qayta 'submitted'
+    # holatiga tushirib yubormaydi va rol/menyu/xabar side-effectlarini
+    # qayta bajarmaydi (qarang ``set_founder_decision_if``).
+    claimed = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", decided_by)
+    if not claimed:
+        await callback.answer(
+            "Bu nomzod allaqachon ko'rib chiqilgan (parallel urinish aniqlandi).", show_alert=True
+        )
+        return
+
     # Faqat filialga bog'lanadigan (single-slot BO'LMAGAN) rollarga
     # filial biriktiriladi — xuddi mavjud ``SINGLE_SLOT_ROLES`` mantig'i
     # bilan bir xil (qarang ``main.py``dagi ``_invite_branch_kb`` izohi).
@@ -1279,8 +1296,6 @@ async def handle_hire(callback: CallbackQuery) -> None:
 
     roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
 
-    decided_by = callback.from_user.id if callback.from_user else FOUNDER_ID
-    recruiting_repo.set_founder_decision(application_id, "hired", decided_by)
     audit.log_event(
         audit.EVENT_RECRUITING_FOUNDER_DECISION, actor_id=decided_by, target_id=application_id, new_value="hired"
     )

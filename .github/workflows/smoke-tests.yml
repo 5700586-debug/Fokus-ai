@@ -43,3 +43,6 @@ jobs:
           tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_still_triggers_real_command
           tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_escapes_stale_expense_state
           tests/test_menu_and_fsm_escape.py::test_start_shows_role_specific_category_for_kassir
+          tests/test_cash_shifts_repo.py::test_set_shift_status_if_only_updates_when_status_matches
+          tests/test_cash_shift_service.py::test_duplicate_supervisor_decision_only_applies_once
+          tests/test_cash_shift_service.py::test_duplicate_confirm_handover_only_succeeds_once

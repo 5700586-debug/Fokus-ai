@@ -163,34 +163,48 @@ def submit_close_attempt(
     )
 
 
-def apply_supervisor_decision(shift_id: int, reviewed_by: int, decision: str, comment: str | None) -> str:
+def apply_supervisor_decision(shift_id: int, reviewed_by: int, decision: str, comment: str | None) -> bool:
     """``decision``: ``"approved"`` | ``"rejected"`` | ``"recheck"``.
 
     ``recheck`` — kassirga yana urinish imkoniyati beriladi (retry_count
     nolga tushiriladi, cheksiz emas — supervisor har safar ongli
     ravishda qayta ochadi).
-    """
-    repo.record_shift_approval(shift_id, reviewed_by, decision, comment)
 
+    Atomic: status hali ``STATUS_NEEDS_SUPERVISOR_APPROVAL`` bo'lsagina
+    qo'llanadi (qarang ``repo.set_shift_status_if``) — parallel ikkinchi
+    chaqiruv (masalan ikki marta bosilgan tugma) hech narsa qilmaydi va
+    ``False`` qaytaradi, shuning uchun ``record_shift_approval`` ham
+    faqat haqiqatda qo'llangan holatda yoziladi (ikki marta yozilmasin).
+    """
     if decision == "approved":
-        repo.set_shift_status(shift_id, STATUS_APPROVED_BY_SUPERVISOR, close=True)
+        target_status, close, reset_retry = STATUS_APPROVED_BY_SUPERVISOR, True, False
     elif decision == "rejected":
-        repo.set_shift_status(shift_id, STATUS_REJECTED_BY_SUPERVISOR, close=True)
+        target_status, close, reset_retry = STATUS_REJECTED_BY_SUPERVISOR, True, False
     elif decision == "recheck":
-        repo.set_shift_status(shift_id, STATUS_RECHECK_REQUIRED, close=False, reset_retry=True)
+        target_status, close, reset_retry = STATUS_RECHECK_REQUIRED, False, True
     else:
         raise ValueError(f"Noma'lum qaror: {decision}")
 
-    return decision
+    applied = repo.set_shift_status_if(
+        shift_id, STATUS_NEEDS_SUPERVISOR_APPROVAL, target_status, close=close, reset_retry=reset_retry
+    )
+    if applied:
+        repo.record_shift_approval(shift_id, reviewed_by, decision, comment)
+
+    return applied
 
 
-def confirm_handover(shift_id: int) -> None:
+def confirm_handover(shift_id: int) -> bool:
     """Qabul qiluvchi kassir mustaqil sanagan summasi topshiruvchining
     real summasiga (``opening_balance``) mos kelganda chaqiriladi —
     ``PENDING_HANDOVER``dagi topshiruvchi smenasini haqiqiy yopadi
     (``closed_at`` shu yerda o'rnatiladi).
+
+    Atomic: status hali ``STATUS_PENDING_HANDOVER`` bo'lsagina yopiladi
+    — parallel ikkinchi chaqiruv hech narsa qilmaydi va ``False``
+    qaytaradi (boshqa so'rov allaqachon yopib ulgurgan).
     """
-    repo.set_shift_status(shift_id, STATUS_CLEAN_CLOSED, close=True)
+    return repo.set_shift_status_if(shift_id, STATUS_PENDING_HANDOVER, STATUS_CLEAN_CLOSED, close=True)
 
 
 def get_shift(shift_id: int) -> dict | None:

@@ -467,7 +467,16 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Bu tafovut allaqachon hal qilingan.", show_alert=True)
             return
 
-        cash_shift.confirm_handover(handed_over_shift["id"])
+        confirmed = cash_shift.confirm_handover(handed_over_shift["id"])
+        if not confirmed:
+            # Boshqa so'rov (masalan ikki marta bosilgan tugma) shu
+            # smenani allaqachon yopib ulgurgan — qayta approval yozuvi
+            # qo'shilmaydi (qarang ``set_shift_status_if``).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer("Bu tafovut allaqachon hal qilingan.", show_alert=True)
+            return
+
         cash_shifts_repo.record_shift_approval(
             handed_over_shift["id"], callback.from_user.id, "discrepancy_accepted",
             shift.get("discrepancy_reason_text"),
@@ -808,7 +817,15 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Bu smena hozir tekshiruv kutmayapti.", show_alert=True)
             return
 
-        cash_shift.apply_supervisor_decision(shift_id, callback.from_user.id, decision, comment=None)
+        applied = cash_shift.apply_supervisor_decision(shift_id, callback.from_user.id, decision, comment=None)
+        if not applied:
+            # Boshqa so'rov (masalan ikki marta bosilgan tugma yoki ikki
+            # xil Nazoratchi/Founder) shu smena bo'yicha qarorni
+            # allaqachon qo'llab ulgurgan (qarang ``set_shift_status_if``).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer("Bu smena allaqachon boshqa qaror bilan hal qilingan.", show_alert=True)
+            return
 
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)

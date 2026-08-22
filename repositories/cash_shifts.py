@@ -208,6 +208,40 @@ def set_shift_status(shift_id: int, status: str, close: bool, reset_retry: bool 
         conn.close()
 
 
+def set_shift_status_if(
+    shift_id: int, expected_status: str, status: str, close: bool, reset_retry: bool = False
+) -> bool:
+    """``set_shift_status`` bilan bir xil, lekin FAQAT joriy status
+    ``expected_status``ga teng bo'lsagina yangilaydi (atomic
+    ``UPDATE ... WHERE id = ? AND status = ?``) — parallel ikkita so'rov
+    (masalan ikki marta bosilgan tugma) bir smenani ikki marta
+    o'zgartirmasligi uchun. Qaytadi: ``True`` — yangilandi, ``False`` —
+    joriy status kutilganidan farq qilgani uchun hech narsa
+    o'zgarmadi (boshqa so'rov allaqachon bajargan).
+    """
+    now = _now()
+    conn = get_connection()
+    try:
+        if reset_retry:
+            cursor = conn.execute(
+                "UPDATE cash_shifts SET status = ?, retry_count = 0, updated_at = ?, "
+                "closed_at = CASE WHEN ? THEN ? ELSE closed_at END WHERE id = ? AND status = ?",
+                (status, now, close, now, shift_id, expected_status),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE cash_shifts SET status = ?, updated_at = ?, "
+                "closed_at = CASE WHEN ? THEN ? ELSE closed_at END WHERE id = ? AND status = ?",
+                (status, now, close, now, shift_id, expected_status),
+            )
+        conn.commit()
+        updated = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    return updated
+
+
 def increment_retry_count(shift_id: int) -> int:
     conn = get_connection()
     try:

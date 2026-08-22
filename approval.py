@@ -69,7 +69,18 @@ def register(dp: Dispatcher) -> None:
                 )
                 return
 
-        employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+        approved_profile = employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+        if approved_profile is None:
+            # Boshqa so'rov (masalan ikki marta bosilgan tugma yoki
+            # parallel ikkinchi chaqiruv) shu nomzodni allaqachon ko'rib
+            # chiqib ulgurgan — rol qayta berilmasin, kalibratsiya qayta
+            # ishga tushmasin, xabar qayta yuborilmasin (qarang
+            # ``employees.approve_profile``).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer("Bu profil allaqachon ko'rib chiqilgan.", show_alert=True)
+            return
+
         roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
 
         try:

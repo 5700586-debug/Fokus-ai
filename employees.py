@@ -125,23 +125,33 @@ def get_profile(user_id: int) -> dict | None:
 
 
 def approve_profile(user_id: int, approved_by: int) -> dict | None:
-    profile = get_profile(user_id)
-    if profile is None:
-        return None
-
+    """FAQAT profil hali ``'submitted'`` holatida bo'lsa tasdiqlaydi
+    (atomic ``UPDATE ... WHERE user_id = ? AND status = 'submitted'``,
+    natija ``rowcount`` orqali tekshiriladi) — parallel ikkinchi
+    chaqiruv (masalan ikki marta bosilgan "✅ Tasdiqlash" tugmasi) hech
+    narsa o'zgartirmaydi. Qaytaradi: yangilangan profil, yoki ``None``
+    — profil topilmadi YOKI hali ``'submitted'`` holatida emas edi
+    (allaqachon tasdiqlangan/rad etilgan). Chaqiruvchi (``approval.py``)
+    ``None`` qaytganda rolni qayta bermasligi, kalibratsiyani qayta
+    ishga tushirmasligi va xodimga xabarni qayta yubormasligi kerak.
+    """
     now = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE employees SET status = 'approved', approved_at = ?, approved_by = ? "
-            "WHERE user_id = ?",
+            "WHERE user_id = ? AND status = 'submitted'",
             (now, approved_by, user_id),
         )
         conn.commit()
+        updated = cursor.rowcount > 0
     finally:
         conn.close()
 
-    return profile
+    if not updated:
+        return None
+
+    return get_profile(user_id)
 
 
 def reject_profile(user_id: int, rejected_by: int) -> None:

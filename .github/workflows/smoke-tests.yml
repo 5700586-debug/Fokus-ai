@@ -46,3 +46,4 @@ jobs:
           tests/test_cash_shifts_repo.py::test_set_shift_status_if_only_updates_when_status_matches
           tests/test_cash_shift_service.py::test_duplicate_supervisor_decision_only_applies_once
           tests/test_cash_shift_service.py::test_duplicate_confirm_handover_only_succeeds_once
+          tests/test_employees.py::test_duplicate_approve_only_succeeds_once

@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `3b2ab42` — "Fix kassir menu buttons getting swallowed by stale FSM state" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir bugli `56e8680`da live, `3b2ab42` hali deploy qilinmagan)
+- **Oxirgi commit:** `a7f817a` — "Add atomic guard to prevent duplicate cash-shift decision processing" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `a7f817a` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

@@ -5,12 +5,12 @@ muhim commit/deploydan keyin yangilanadi (qarang root `CLAUDE.md`).
 Ziddiyat bo'lsa, real Git/Render holati (`git log`, `render deploys
 list`) ustuvor — bu faylning o'zi emas.
 
-**Oxirgi tekshirilgan sana:** 2026-08-20
+**Oxirgi tekshirilgan sana:** 2026-08-23
 
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `7d6791c` — "Add simple 30-day daily greeting content module" (`content/daily_greetings/` — hali deploy qilinmagan, rasmlar hali qo'yilmagan)
+- **Oxirgi commit:** `3027936` — "Make new-hire/cashier menu persistent and auto-send it after HR approval" (GitHub Actions Linux'da PASSED, `fokus-ai-test`ga hali deploy qilinmagan)
 
 ## Render — test muhiti
 

@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `8838ab1` — "Make CI Linux-only and machine-independent: smoke tests on push, full suite on demand"
+- **Commit:** `3027936` — "Make new-hire/cashier menu persistent and auto-send it after HR approval"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `8838ab1` uchun — **PASSED** (run 32524012097: checkout, dependency install, haqiqiy `psycopg2` import, 4 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `3027936` uchun — **PASSED** (run 32593788131: checkout, dependency install, haqiqiy `psycopg2` import, 8 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,11 +16,10 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
-- Saturn moliyaviy guruh xabari muammosi tuzatildi (`saturn_group_bot.py`) — dashboard/moliyaviy blok (reja/savdo/foiz/chek) endi xodimlar guruhiga avtomatik yoki `/saturntest` orqali umuman yuborilmaydi.
-- Founder nomzod kartasiga tug'ilgan sana + yosh qatori qo'shildi (`services/recruiting_card.py`).
-- Ikkala tuzatish uchun 4 ta test yozilgan (`tests/test_saturn_group_bot_flows.py`, `tests/test_recruiting_card.py`) va GitHub Actions (haqiqiy Linux, haqiqiy `psycopg2`, hech qanday stub) da **4/4 PASSED** tasdiqlangan.
-- Kassir smena topshirish, Founder UX (yangi menyu/xodim qo'shish oqimi), tugilgan sana parseri kabi oldingi ishlar allaqachon shu branchda.
-- Ish muhiti barqarorlashtirildi: doimiy test endi Windows'da emas, GitHub Actions Linux'da; to'liq (900+) to'plam endi har pushda emas, faqat qo'lda.
+- HR/Xodim UX 1-bosqich: `main.py`dagi `build_menu`/`build_category_menu` klaviaturalari endi `is_persistent=True` (ishga kiruvchi va kassir menyusi doim ko'rinadi, alohida buyruq shart emas).
+- `approval.py`da Founder "✅ Tasdiqlash" bosgach, xodimga endi "/start ni bosing" deyilmaydi — greeting + `build_menu` avtomatik yuboriladi (`main.greeting_for_user`/`main.build_menu`, funksiya ichidagi deferred import orqali aylanma import oldi olingan).
+- Ikkala tuzatish uchun 2 ta test qo'shilgan (`tests/test_bot_flows.py::test_approve_sends_employee_menu_without_requiring_start`, `::test_build_menu_and_category_menu_are_persistent`) va GitHub Actions Linux'da **PASSED** (run 32593788131, commit `3027936`).
+- Saturn moliyaviy guruh xabari muammosi, Founder nomzod kartasiga tug'ilgan sana, Kassa nazorati: Nazoratchi qarori (qabul qilish/qayta sanash tugmalari), ish muhitini GitHub Actions Linux'ga o'tkazish — barchasi allaqachon shu branchda va PASSED.
 
 ## Hali tugallanmagan ish
 
@@ -29,7 +28,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - `RECRUITING_BRANCH_NAMES` hamon placeholder qiymatlarda (`Filial-1,Filial-2`) — production'ga chiqishdan oldin haqiqiy filial nomlari kerak.
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
 - Founder menyusidagi "🏪 Do'konlar" tugmasi hozircha `/listusers`ga bog'langan (vaqtinchalik qaror) — haqiqiy filiallar ro'yxatiga bog'lash kerak.
+- `fokus-ai-test` Render servisiga `3027936` hali deploy qilinmagan (bu topshiriqda deploy so'ralmagan).
 
 ## Keyingi bitta qadam
 
-`🏪 Do'konlar` tugmasini haqiqiy filiallar ro'yxatiga bog'lash.
+`3027936`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda tekshirish (keyin `🏪 Do'konlar` tugmasini haqiqiy filiallar ro'yxatiga bog'lash).

@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `692009b` — "Add post-hire flow: recruiting candidates become active employees on hire" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `692009b` hali deploy qilinmagan)
+- **Oxirgi commit:** `f52d960` — "Add multi-worker idempotency guard to post-hire flow" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `f52d960` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `3027936` — "Make new-hire/cashier menu persistent and auto-send it after HR approval"
+- **Commit:** `56e8680` — "Simplify kassir menu button labels and pair them two-per-row"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `3027936` uchun — **PASSED** (run 32593788131: checkout, dependency install, haqiqiy `psycopg2` import, 8 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `56e8680` uchun — **PASSED** (run 32594291185: checkout, dependency install, haqiqiy `psycopg2` import, 10 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,10 +16,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
-- HR/Xodim UX 1-bosqich: `main.py`dagi `build_menu`/`build_category_menu` klaviaturalari endi `is_persistent=True` (ishga kiruvchi va kassir menyusi doim ko'rinadi, alohida buyruq shart emas).
-- `approval.py`da Founder "✅ Tasdiqlash" bosgach, xodimga endi "/start ni bosing" deyilmaydi — greeting + `build_menu` avtomatik yuboriladi (`main.greeting_for_user`/`main.build_menu`, funksiya ichidagi deferred import orqali aylanma import oldi olingan).
-- Ikkala tuzatish uchun 2 ta test qo'shilgan (`tests/test_bot_flows.py::test_approve_sends_employee_menu_without_requiring_start`, `::test_build_menu_and_category_menu_are_persistent`) va GitHub Actions Linux'da **PASSED** (run 32593788131, commit `3027936`).
-- Saturn moliyaviy guruh xabari muammosi, Founder nomzod kartasiga tug'ilgan sana, Kassa nazorati: Nazoratchi qarori (qabul qilish/qayta sanash tugmalari), ish muhitini GitHub Actions Linux'ga o'tkazish — barchasi allaqachon shu branchda va PASSED.
+- Kassir menyusini sodda qil: `/openshift`/`/closeshift`/`/expense` tugmalari endi kassir uchun "🟢 Smenani boshlash"/"🔴 Smenani topshirish"/"💸 Xarajat kiritish" sifatida ko'rinadi, 2 tadan yonma-yon; eski buyruqlar orqada o'zgarishsiz ishlaydi (mavjud stale-label normalizatsiya xaritasi orqali). Boshqa rollar menyusiga tegilmagan.
+- Shu tuzatish uchun 2 ta test qo'shilgan (`tests/test_menu_and_fsm_escape.py::test_kassir_menu_buttons_are_paired_two_per_row`, `::test_kassir_friendly_button_still_triggers_real_command`) va bir nechta eski kassir-menyu testi yangi matnlarga moslab yangilangan; GitHub Actions Linux'da **PASSED** (run 32594291185, commit `56e8680`).
+- HR/Xodim UX 1-bosqich (menyu `is_persistent=True`, tasdiqdan keyin "/start" so'ralmasligi), Saturn moliyaviy guruh xabari muammosi, Founder nomzod kartasiga tug'ilgan sana, Kassa nazorati: Nazoratchi qarori, ish muhitini GitHub Actions Linux'ga o'tkazish — barchasi allaqachon shu branchda va PASSED.
 
 ## Hali tugallanmagan ish
 
@@ -28,8 +27,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - `RECRUITING_BRANCH_NAMES` hamon placeholder qiymatlarda (`Filial-1,Filial-2`) — production'ga chiqishdan oldin haqiqiy filial nomlari kerak.
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
 - Founder menyusidagi "🏪 Do'konlar" tugmasi hozircha `/listusers`ga bog'langan (vaqtinchalik qaror) — haqiqiy filiallar ro'yxatiga bog'lash kerak.
-- `fokus-ai-test` Render servisiga `3027936` hali deploy qilinmagan (bu topshiriqda deploy so'ralmagan).
+- `fokus-ai-test` Render servisiga `56e8680` hali deploy qilinmagan (bu topshiriqda deploy so'ralmagan).
 
 ## Keyingi bitta qadam
 
-`3027936`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda tekshirish (keyin `🏪 Do'konlar` tugmasini haqiqiy filiallar ro'yxatiga bog'lash).
+`56e8680`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda tekshirish (keyin `🏪 Do'konlar` tugmasini haqiqiy filiallar ro'yxatiga bog'lash).

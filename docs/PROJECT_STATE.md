@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `3027936` — "Make new-hire/cashier menu persistent and auto-send it after HR approval" (GitHub Actions Linux'da PASSED, `fokus-ai-test`ga hali deploy qilinmagan)
+- **Oxirgi commit:** `56e8680` — "Simplify kassir menu button labels and pair them two-per-row" (GitHub Actions Linux'da PASSED, `fokus-ai-test`ga hali deploy qilinmagan)
 
 ## Render — test muhiti
 

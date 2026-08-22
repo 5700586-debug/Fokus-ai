@@ -1294,7 +1294,22 @@ async def handle_hire(callback: CallbackQuery) -> None:
         await callback.answer("Xodim profilini tasdiqlashda xato yuz berdi.", show_alert=True)
         return
 
-    roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+    role_assigned = roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+    if not role_assigned:
+        # DB darajasidagi race (masalan single-slot rolga deyarli bir
+        # vaqtdagi ikkinchi urinish) — yuqoridagi ilova darajasidagi
+        # tekshiruv buni ko'ra olmagan bo'lishi mumkin. Xodim "approved"
+        # holatida qoladi, lekin rolisiz ishlay olmaydi — shuning uchun
+        # tabriklash xabari/menyu YUBORILMAYDI, Founder holatni ko'rib
+        # qo'lda hal qilishi kerak (masalan /setrole orqali).
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer(
+            f"⚠️ Profil tasdiqlandi, lekin {roles.role_name(role_key)} lavozimi band bo'lib qoldi "
+            f"(parallel urinish). /setrole {user_id} orqali qo'lda rol bering.",
+            show_alert=True,
+        )
+        return
 
     audit.log_event(
         audit.EVENT_RECRUITING_FOUNDER_DECISION, actor_id=decided_by, target_id=application_id, new_value="hired"

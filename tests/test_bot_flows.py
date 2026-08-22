@@ -435,6 +435,35 @@ async def test_approve_sends_employee_menu_without_requiring_start(bot_dp):
     assert applicant_messages[0].reply_markup.keyboard
 
 
+async def test_approve_does_not_send_menu_when_role_assignment_fails(bot_dp, monkeypatch):
+    """Regressiya: agar ``roles.set_role`` DB darajasidagi race tufayli
+    ``False`` qaytarsa (masalan single-slot rolga deyarli bir vaqtdagi
+    ikkinchi urinish), nomzodga muvaffaqiyat xabari/menyu
+    yuborilmasligi kerak — bu holatda Founder ogohlantiriladi.
+    """
+    import approval
+
+    main, bot = bot_dp
+    user_id = 60012
+
+    invite_sent = await send(main.dp, bot, FOUNDER_ID, text="/invite nazoratchi")
+    token = invite_sent[0].text.split("start=")[1].split()[0]
+    await _complete_onboarding(main, bot, user_id, token)
+
+    monkeypatch.setattr(approval.roles, "set_role", lambda *args, **kwargs: False)
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{user_id}", target_chat_id=FOUNDER_ID
+    )
+
+    applicant_messages = [m for m in sent if getattr(m, "chat_id", None) == user_id]
+    assert applicant_messages == []
+
+    from employees import get_profile
+
+    assert get_profile(user_id)["status"] == "approved"
+
+
 def test_build_menu_and_category_menu_are_persistent(bot_dp):
     main, bot = bot_dp
 

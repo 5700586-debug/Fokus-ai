@@ -167,6 +167,30 @@ async def test_founder_hire_creates_active_employee_with_role_branch_and_auto_me
     assert application["founder_decision"] == "hired"
 
 
+async def test_hire_does_not_send_menu_when_role_assignment_fails(bot_dp, monkeypatch):
+    """Regressiya: agar ``roles.set_role`` DB darajasidagi race tufayli
+    ``False`` qaytarsa (masalan single-slot rolga deyarli bir vaqtdagi
+    ikkinchi urinish), nomzodga tabriklash xabari/menyu
+    yuborilmasligi kerak.
+    """
+    import recruiting_bot
+
+    main, bot = bot_dp
+    candidate_id = 700003
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    monkeypatch.setattr(recruiting_bot.roles, "set_role", lambda *args, **kwargs: False)
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    candidate_messages = [m for m in sent if getattr(m, "chat_id", None) == candidate_id]
+    assert candidate_messages == []
+
+    import employees
+
+    assert employees.get_profile(candidate_id)["status"] == "approved"
+
+
 async def test_double_hire_click_does_not_crash_or_duplicate(bot_dp):
     main, bot = bot_dp
     candidate_id = 600007

@@ -81,7 +81,24 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Bu profil allaqachon ko'rib chiqilgan.", show_alert=True)
             return
 
-        roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+        role_assigned = roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+        if not role_assigned:
+            # DB darajasidagi race (masalan single-slot rolga deyarli bir
+            # vaqtdagi ikkinchi urinish) — ilova darajasidagi tekshiruv
+            # (62-70 qatorlar) buni ko'ra olmagan bo'lishi mumkin, DB
+            # darajasidagi qisman UNIQUE indeks rad etgan (qarang
+            # ``roles.set_role``). Xodim "approved" holatida qoladi, lekin
+            # rolisiz ishlay olmaydi — shuning uchun muvaffaqiyat xabari/
+            # menyu YUBORILMAYDI, Founder holatni ko'rib qo'lda hal qilishi
+            # kerak (masalan /setrole orqali).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer(
+                f"⚠️ Profil tasdiqlandi, lekin {roles.role_name(role_key)} lavozimi band bo'lib qoldi "
+                f"(parallel urinish). /setrole {user_id} orqali qo'lda rol bering.",
+                show_alert=True,
+            )
+            return
 
         try:
             calibration_bot.on_employee_approved(user_id, role_key)

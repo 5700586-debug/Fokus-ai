@@ -416,6 +416,39 @@ async def test_full_onboarding_to_approval_flow(bot_dp):
     assert "Rolingiz" in sent[-1].text
 
 
+async def test_approve_sends_employee_menu_without_requiring_start(bot_dp):
+    main, bot = bot_dp
+    user_id = 60010
+
+    invite_sent = await send(main.dp, bot, FOUNDER_ID, text="/invite nazoratchi")
+    token = invite_sent[0].text.split("start=")[1].split()[0]
+    await _complete_onboarding(main, bot, user_id, token)
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{user_id}", target_chat_id=FOUNDER_ID
+    )
+
+    applicant_messages = [m for m in sent if getattr(m, "chat_id", None) == user_id]
+    assert len(applicant_messages) == 1
+    assert "/start" not in applicant_messages[0].text
+    assert "Rolingiz" in applicant_messages[0].text
+    assert applicant_messages[0].reply_markup.keyboard
+
+
+def test_build_menu_and_category_menu_are_persistent(bot_dp):
+    main, bot = bot_dp
+
+    from roles import set_role
+
+    assert main.build_menu(FOUNDER_ID).is_persistent is True
+
+    employee_id = 60011
+    set_role(employee_id, "nazoratchi", set_by=FOUNDER_ID)
+    assert main.build_menu(employee_id).is_persistent is True
+
+    assert main.build_category_menu(["/expense"]).is_persistent is True
+
+
 async def test_menu_buttons_still_work_for_founder(bot_dp):
     main, bot = bot_dp
 

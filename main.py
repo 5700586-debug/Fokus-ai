@@ -299,7 +299,7 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     """
     if get_role(user_id) == "founder":
         rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
-        return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+        return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
     rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
 
@@ -309,7 +309,7 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     rows.append([KeyboardButton(text=_SHARED_CATEGORY_TEXT)])
     rows.append([KeyboardButton(text="⚙️ Sozlamalar")])
 
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 def _bare_command(label: str) -> str:
@@ -331,7 +331,7 @@ def _bare_command(label: str) -> str:
 def build_category_menu(commands: list[str]) -> ReplyKeyboardMarkup:
     rows = [[KeyboardButton(text=_bare_command(command))] for command in commands]
     rows.append([KeyboardButton(text=BACK_TEXT)])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
 # Foydalanuvchi qurilmasida ESKI, hozirgi bot versiyasidan oldin
@@ -398,6 +398,15 @@ saturn_group_bot.register(dp, openai_client)
 recruiting_bot.register(dp, openai_client)
 
 
+def greeting_for_user(user_id: int) -> str:
+    if user_id == FOUNDER_ID:
+        return (
+            "Assalomu alaykum, Muhammadiy! 👋\n"
+            "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
+        )
+    return f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(get_role(user_id))}"
+
+
 @dp.message(CommandStart())
 async def start_handler(message: Message, state: FSMContext) -> None:
     if not message.from_user:
@@ -432,16 +441,10 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     if not await ensure_authorized(message):
         return
 
-    role = get_role(message.from_user.id)
-    if message.from_user.id == FOUNDER_ID:
-        greeting = (
-            "Assalomu alaykum, Muhammadiy! 👋\n"
-            "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
-        )
-    else:
-        greeting = f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(role)}"
-
-    await message.answer(greeting, reply_markup=build_menu(message.from_user.id))
+    await message.answer(
+        greeting_for_user(message.from_user.id),
+        reply_markup=build_menu(message.from_user.id),
+    )
 
 
 @dp.message(F.text == "🤖 AI Tahlil")

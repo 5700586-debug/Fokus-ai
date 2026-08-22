@@ -37,3 +37,5 @@ jobs:
           tests/test_recruiting_card.py::test_card_computes_age_correctly_from_birth_date
           tests/test_cash_shift_bot_flows.py::test_discrepancy_approve_finalizes_handed_over_shift
           tests/test_cash_shift_bot_flows.py::test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state
+          tests/test_bot_flows.py::test_approve_sends_employee_menu_without_requiring_start
+          tests/test_bot_flows.py::test_build_menu_and_category_menu_are_persistent

@@ -83,9 +83,12 @@ def register(dp: Dispatcher) -> None:
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
 
+        import main  # funksiya ichida — main approval'ni import qilgani uchun (aylanma import)
+
         await callback.bot.send_message(
             user_id,
-            "✅ Profilingiz tasdiqlandi! Botdan to'liq foydalanish uchun /start ni bosing.",
+            f"✅ Profilingiz tasdiqlandi!\n\n{main.greeting_for_user(user_id)}",
+            reply_markup=main.build_menu(user_id),
         )
         await callback.answer("Tasdiqlandi ✅")
 

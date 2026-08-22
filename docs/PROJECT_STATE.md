@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `f52d960` — "Add multi-worker idempotency guard to post-hire flow" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `f52d960` hali deploy qilinmagan)
+- **Oxirgi commit:** `6414327` — "Check roles.set_role return value in approval/hire flows (P1 HR consistency)" — overnight P0/P1 hardening pastning oxirgi commiti (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `6414327` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

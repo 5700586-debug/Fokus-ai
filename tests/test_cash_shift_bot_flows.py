@@ -678,16 +678,28 @@ async def test_discrepancy_reason_notifies_founder(bot_dp, monkeypatch):
     assert "Qaytimda xato bo'lishi mumkin" in alert_text
 
 
-async def _reach_discrepancy_alert(main, bot, topshiruvchi_id: int, qabul_id: int, tomorrow, branch="Filial-1"):
-    """Topshiruvchi smenani ochib-yopadi (600000), qabul qiluvchi
-    keyingi kunda tafovutli summa (580000) kiritib sababini yozadi —
-    Founderga "⚠️ KASSA TAFOVUTI" xabari ketguncha bo'lgan umumiy
-    tayyorgarlik (bir nechta testda qayta ishlatiladi)."""
+async def _reach_discrepancy_alert(main, bot, monkeypatch, topshiruvchi_id: int, qabul_id: int, branch="Filial-1"):
+    """Topshiruvchi smenani (REAL bugungi sanada) ochib-yopadi (600000),
+    keyin sana "ertaga"ga o'tkaziladi va qabul qiluvchi tafovutli summa
+    (580000) kiritib sababini yozadi — Founderga "⚠️ KASSA TAFOVUTI"
+    xabari ketguncha bo'lgan umumiy tayyorgarlik (bir nechta testda
+    qayta ishlatiladi). Ikkala smena ALOHIDA kunlarda bo'lishi shart —
+    aks holda topshiruvchi/qabul qiluvchi bir xil (filial, sana) qatorga
+    to'g'ri kelib qoladi.
+
+    Qaytaradi: ``(original_today, tomorrow)`` — ``date`` obyekti tomorrow.
+    """
+    from datetime import timedelta
+
     _make_kassir(topshiruvchi_id, branch=branch)
     _make_kassir(qabul_id, branch=branch)
 
+    original_today = company_time.today().isoformat()
     await _open_shift(main, bot, topshiruvchi_id, "500000")
     await _close_shift_happy_path(main, bot, topshiruvchi_id, actual="600000")
+
+    tomorrow = company_time.today() + timedelta(days=1)
+    monkeypatch.setattr(company_time, "today", lambda: tomorrow)
 
     await send(main.dp, bot, qabul_id, text="/openshift")
     await _confirm_received_amount(main, bot, qabul_id, "580000")  # tafovut: -20000
@@ -695,20 +707,16 @@ async def _reach_discrepancy_alert(main, bot, topshiruvchi_id: int, qabul_id: in
     await send_callback(main.dp, bot, qabul_id, data="csui_reason:other", target_chat_id=qabul_id)
     await send(main.dp, bot, qabul_id, text="Qaytimda xato bo'lishi mumkin")
 
+    return original_today, tomorrow
+
 
 async def test_discrepancy_approve_finalizes_handed_over_shift(bot_dp, monkeypatch):
     main, bot = bot_dp
-    from datetime import timedelta
-
     from aiogram.methods import AnswerCallbackQuery
 
     from services import cash_shift
 
-    original_today = company_time.today().isoformat()
-    tomorrow = company_time.today() + timedelta(days=1)
-    monkeypatch.setattr(company_time, "today", lambda: tomorrow)
-
-    await _reach_discrepancy_alert(main, bot, 111, 222, tomorrow)
+    original_today, tomorrow = await _reach_discrepancy_alert(main, bot, monkeypatch, 111, 222)
 
     received_shift = cash_shift.get_open_shift(222, tomorrow.isoformat())
 
@@ -731,15 +739,9 @@ async def test_discrepancy_approve_finalizes_handed_over_shift(bot_dp, monkeypat
 
 async def test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state(bot_dp, monkeypatch):
     main, bot = bot_dp
-    from datetime import timedelta
-
     from services import cash_shift
 
-    original_today = company_time.today().isoformat()
-    tomorrow = company_time.today() + timedelta(days=1)
-    monkeypatch.setattr(company_time, "today", lambda: tomorrow)
-
-    await _reach_discrepancy_alert(main, bot, 111, 222, tomorrow)
+    original_today, tomorrow = await _reach_discrepancy_alert(main, bot, monkeypatch, 111, 222)
 
     received_shift = cash_shift.get_open_shift(222, tomorrow.isoformat())
 

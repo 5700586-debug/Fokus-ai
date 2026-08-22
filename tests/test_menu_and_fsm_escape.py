@@ -135,6 +135,27 @@ async def test_kassir_friendly_button_still_triggers_real_command(bot_dp):
     assert sent != []
 
 
+async def test_kassir_friendly_button_escapes_stale_expense_state(bot_dp):
+    """Regressiya: kassirning yangi sodda tugma matni ("/" bilan
+    boshlanmaydi) ``_ClearStaleStateMiddleware`` tomonidan "qochish"
+    sifatida tanilmasa, ``/expense`` kategoriya kutayotgan holatda
+    qolib ketgan kassir "🟢 Smenani boshlash" bossa, bu matn noto'g'ri
+    kategoriya nomi sifatida yutib olinardi (generic/fallback javob) —
+    haqiqiy ``/openshift`` handleriga umuman yetib bormasdi.
+    """
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    await send(main.dp, bot, 111, text="/openshift")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="/expense")  # ExpenseStates.category holatida qoladi
+
+    sent = await send(main.dp, bot, 111, text="🟢 Smenani boshlash")
+
+    assert "tugmalardan birini tanlang" not in sent[0].text
+    assert "allaqachon ochilgan" in sent[0].text
+
+
 # --------------------------------- regressiya: tugma matnida izoh yubormasin --
 # Bug: bo'lim tugmasi to'liq "/invite — Yangi xodimga taklif havolasi" matnini
 # yuborardi — Command filtri buni "/invite" + argument ("— Yangi ...") deb

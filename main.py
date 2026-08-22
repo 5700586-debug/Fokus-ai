@@ -133,7 +133,18 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data: dict):
         message: Message | None = getattr(event, "message", None)
         text = getattr(message, "text", None) or ""
-        looks_like_escape = text.startswith("/") or text in (CANCEL_TEXT, BACK_TEXT)
+        # ``_STALE_LABEL_TO_COMMAND`` shu modulda pastroqda e'lon qilinadi,
+        # lekin bu yerda faqat CHAQIRILGANDA (modul to'liq yuklangandan
+        # keyin) o'qiladi — shuning uchun oldindan e'lon qilish shart emas.
+        # Kassirning yangi sodda tugmalari ("🟢 Smenani boshlash" va h.k.)
+        # "/" bilan boshlanmaydi, lekin baribir haqiqiy buyruqqa mos
+        # keladi — shuning uchun ular ham "qochish" sifatida hisoblanishi
+        # kerak, aks holda eski "qotib qolgan" holat ularni yutib oladi.
+        looks_like_escape = (
+            text.startswith("/")
+            or text in (CANCEL_TEXT, BACK_TEXT)
+            or text in _STALE_LABEL_TO_COMMAND
+        )
 
         if looks_like_escape:
             state: FSMContext | None = data.get("state")

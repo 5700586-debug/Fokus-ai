@@ -29,6 +29,19 @@ from services import cash_expense, cash_shift, permissions
 
 _SKIP_TEXT = "➖ O'tkazib yuborish"
 
+# ``_finish_expense``/``closeshift_amount_confirmed`` FSM holatni
+# tozalaydi va keyin ``await state.get_data()``/keyingi qadamlar orqali
+# yozadi — ikkalasida ham DB darajasida tabiiy UNIQUE kalit yo'q (bir
+# xodim bir kunda bir nechta HAQIQIY xarajat yozishi yoki bir necha
+# marta yopishga urinishi mumkin). Shu bilan bir vaqtda bitta
+# foydalanuvchidan deyarli bir vaqtda kelgan ikkinchi xabar/tugma
+# (masalan ikki marta bosilgan tugma) xuddi shu yozuvni ikki marta
+# yozib yubormasligi uchun — ``discipline_bot.py``dagi
+# ``_PENDING_PENALTY_APPLICATIONS`` bilan bir xil uslubda, jarayon-ichi
+# himoya (foydalanuvchi ID bo'yicha).
+_PENDING_EXPENSE_SUBMISSIONS: set[int] = set()
+_PENDING_CLOSE_SUBMISSIONS: set[int] = set()
+
 _CATEGORY_LABELS = {
     "taxi": "🚕 Taxi",
     "delivery": "📦 Yetkazib berish",
@@ -583,22 +596,33 @@ def register(dp: Dispatcher) -> None:
         await _finish_expense(message, state, description=description)
 
     async def _finish_expense(message: Message, state: FSMContext, description: str | None) -> None:
-        data = await state.get_data()
-        await state.clear()
-
         user_id = message.from_user.id
-        today_shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
-        profile = get_profile(user_id)
-        branch = profile.get("branch") if profile else None
+        # Atomic band qilish: awaitdan OLDIN, sinxron tekshir+qo'sh — shu
+        # foydalanuvchidan deyarli bir vaqtda kelgan ikkinchi xabar bir
+        # xarajatni ikki marta yozib yubormasligi uchun (qarang
+        # ``_PENDING_EXPENSE_SUBMISSIONS`` izohi).
+        if user_id in _PENDING_EXPENSE_SUBMISSIONS:
+            return
+        _PENDING_EXPENSE_SUBMISSIONS.add(user_id)
 
-        cash_expense.log_expense(
-            today_shift["id"], user_id, branch, data["category"], data["amount"],
-            description, company_time.today().isoformat(),
-        )
-        await message.answer(
-            f"✅ Xarajat qayd etildi: {_CATEGORY_LABELS[data['category']]} — {data['amount']} so'm.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        try:
+            data = await state.get_data()
+            await state.clear()
+
+            today_shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
+            profile = get_profile(user_id)
+            branch = profile.get("branch") if profile else None
+
+            cash_expense.log_expense(
+                today_shift["id"], user_id, branch, data["category"], data["amount"],
+                description, company_time.today().isoformat(),
+            )
+            await message.answer(
+                f"✅ Xarajat qayd etildi: {_CATEGORY_LABELS[data['category']]} — {data['amount']} so'm.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+        finally:
+            _PENDING_EXPENSE_SUBMISSIONS.discard(user_id)
 
     # ----------------------------------------------------------- /closeshift --
 
@@ -749,47 +773,61 @@ def register(dp: Dispatcher) -> None:
 
     @dp.callback_query(F.data == "csui_close_amount_ok", StateFilter(CloseShiftStates.confirm_actual_balance))
     async def closeshift_amount_confirmed(callback: CallbackQuery, state: FSMContext) -> None:
-        data = await state.get_data()
-        shift_id = data["shift_id"]
-        amount = data["actual_cash_balance"]
-        cash_expenses = cash_expense.total_expenses_for_shift(shift_id)
-
-        result = cash_shift.submit_close_attempt(
-            shift_id, data["cash_sales"], data["card_sales"], data["other_payments"],
-            cash_expenses, amount,
-        )
-
-        await callback.message.edit_reply_markup(reply_markup=None)
-
-        if result.finalized:
-            await state.clear()
-            shift = cash_shift.get_shift(shift_id)
-            await callback.message.answer(_format_shift_summary(shift))
+        user_id = callback.from_user.id
+        # Atomic band qilish: awaitdan OLDIN, sinxron tekshir+qo'sh — shu
+        # kassirdan deyarli bir vaqtda kelgan ikkinchi bosish
+        # ``submit_close_attempt``ni qayta chaqirib, urinish sonini ikki
+        # marta oshirib yubormasligi uchun (qarang
+        # ``_PENDING_CLOSE_SUBMISSIONS`` izohi).
+        if user_id in _PENDING_CLOSE_SUBMISSIONS:
             await callback.answer()
             return
+        _PENDING_CLOSE_SUBMISSIONS.add(user_id)
 
-        if result.needs_supervisor:
-            await state.clear()
-            shift = cash_shift.get_shift(shift_id)
-            await callback.message.answer(
-                "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi."
+        try:
+            data = await state.get_data()
+            shift_id = data["shift_id"]
+            amount = data["actual_cash_balance"]
+            cash_expenses = cash_expense.total_expenses_for_shift(shift_id)
+
+            result = cash_shift.submit_close_attempt(
+                shift_id, data["cash_sales"], data["card_sales"], data["other_payments"],
+                cash_expenses, amount,
             )
-            await _send_shift_for_review(callback.message, shift)
-            await callback.answer()
-            return
 
-        await state.set_state(CloseShiftStates.cash_sales)
-        await callback.message.answer(
-            f"🔴 Farq {result.difference} so'm.\n\n"
-            "Qayta tekshiring:\n"
-            "• naqd savdo\n"
-            "• karta/boshqa to'lov\n"
-            "• xarajat\n"
-            "• opening balance\n\n"
-            f"Qolgan urinishlar: {result.retries_left}\n\n"
-            "Bugungi naqd savdo summasini qayta kiriting:"
-        )
-        await callback.answer()
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+            if result.finalized:
+                await state.clear()
+                shift = cash_shift.get_shift(shift_id)
+                await callback.message.answer(_format_shift_summary(shift))
+                await callback.answer()
+                return
+
+            if result.needs_supervisor:
+                await state.clear()
+                shift = cash_shift.get_shift(shift_id)
+                await callback.message.answer(
+                    "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi."
+                )
+                await _send_shift_for_review(callback.message, shift)
+                await callback.answer()
+                return
+
+            await state.set_state(CloseShiftStates.cash_sales)
+            await callback.message.answer(
+                f"🔴 Farq {result.difference} so'm.\n\n"
+                "Qayta tekshiring:\n"
+                "• naqd savdo\n"
+                "• karta/boshqa to'lov\n"
+                "• xarajat\n"
+                "• opening balance\n\n"
+                f"Qolgan urinishlar: {result.retries_left}\n\n"
+                "Bugungi naqd savdo summasini qayta kiriting:"
+            )
+            await callback.answer()
+        finally:
+            _PENDING_CLOSE_SUBMISSIONS.discard(user_id)
 
     # ------------------------------------------------------- supervisor review --
 

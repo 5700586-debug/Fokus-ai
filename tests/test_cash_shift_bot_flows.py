@@ -133,6 +133,37 @@ async def test_expense_full_flow_no_anomaly(bot_dp):
     assert cash_expense.total_expenses_for_shift(shift["id"]) == 65000
 
 
+async def test_expense_finish_skipped_when_already_pending_for_same_kassir(bot_dp):
+    """Atomic guard: shu kassir uchun xarajat yozish jarayoni allaqachon
+    "band" bo'lsa (masalan deyarli bir vaqtda kelgan ikkinchi xabar),
+    ikkinchi urinish xarajatni QAYTA yozmasligi kerak (qarang
+    ``_PENDING_EXPENSE_SUBMISSIONS``).
+    """
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    await send(main.dp, bot, 111, text="/expense")
+    await send(main.dp, bot, 111, text="🚕 Taxi")
+    await send(main.dp, bot, 111, text="65000")  # izoh holatiga o'tadi
+
+    import cash_shift_bot
+    from repositories import cash_shifts as cash_shifts_repo
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    expenses_before = len(cash_shifts_repo.get_expenses_for_shift(shift["id"]))
+
+    cash_shift_bot._PENDING_EXPENSE_SUBMISSIONS.add(111)
+    try:
+        await send(main.dp, bot, 111, text="➖ O'tkazib yuborish")
+    finally:
+        cash_shift_bot._PENDING_EXPENSE_SUBMISSIONS.discard(111)
+
+    expenses_after = len(cash_shifts_repo.get_expenses_for_shift(shift["id"]))
+    assert expenses_after == expenses_before
+
+
 async def test_expense_anomaly_requires_reason(bot_dp):
     main, bot = bot_dp
     from repositories import cash_shifts as repo
@@ -174,6 +205,42 @@ async def test_closeshift_shows_confirm_amount_buttons(bot_dp):
     assert sent[0].text == "100 000 so'm. To'g'rimi?"
     buttons = sent[0].reply_markup.inline_keyboard[0]
     assert [b.text for b in buttons] == ["✅ To'g'ri", "🔄 Qayta yozaman"]
+
+
+async def test_closeshift_confirm_skipped_when_already_pending_for_same_kassir(bot_dp):
+    """Atomic guard: shu kassir uchun smenani yopish jarayoni allaqachon
+    "band" bo'lsa (masalan deyarli bir vaqtda ikkinchi marta bosilgan
+    "✅ To'g'ri" tugmasi), ikkinchi bosish ``submit_close_attempt``ni
+    qayta chaqirmasligi va urinish/statusni o'zgartirmasligi kerak
+    (qarang ``_PENDING_CLOSE_SUBMISSIONS``).
+    """
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send(main.dp, bot, 111, photo_file_id="sales_photo")
+    await send(main.dp, bot, 111, photo_file_id="cash_photo")
+    await send(main.dp, bot, 111, text="100000")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="0")
+    await send_callback(main.dp, bot, 111, data="csui_close_start_yes", target_chat_id=111)
+    await send(main.dp, bot, 111, text="100000")  # "confirm_actual_balance" holatiga o'tadi
+
+    import cash_shift_bot
+    from services import cash_shift
+
+    shift_before = cash_shift.get_open_shift(111, company_time.today().isoformat())
+
+    cash_shift_bot._PENDING_CLOSE_SUBMISSIONS.add(111)
+    try:
+        await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    finally:
+        cash_shift_bot._PENDING_CLOSE_SUBMISSIONS.discard(111)
+
+    shift_after = cash_shift.get_shift(shift_before["id"])
+    assert shift_after["retry_count"] == shift_before["retry_count"]
+    assert shift_after["status"] == shift_before["status"]
 
 
 async def test_closeshift_clean_close(bot_dp):

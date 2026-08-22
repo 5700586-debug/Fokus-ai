@@ -47,3 +47,5 @@ jobs:
           tests/test_cash_shift_service.py::test_duplicate_supervisor_decision_only_applies_once
           tests/test_cash_shift_service.py::test_duplicate_confirm_handover_only_succeeds_once
           tests/test_employees.py::test_duplicate_approve_only_succeeds_once
+          tests/test_recruiting_permissions.py::test_founder_hire_creates_active_employee_with_role_branch_and_auto_menu
+          tests/test_recruiting_permissions.py::test_double_hire_click_does_not_crash_or_duplicate

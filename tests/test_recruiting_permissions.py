@@ -127,6 +127,62 @@ async def test_decision_on_unknown_application_does_not_crash(bot_dp):
     assert sent  # AnswerCallbackQuery (alert) yuborilgan bo'lishi kerak, xato emas
 
 
+# --------------------------------------------------------------- post-hire --
+
+
+async def test_founder_hire_creates_active_employee_with_role_branch_and_auto_menu(bot_dp):
+    """Post-hire oqimi: "🎯 Ishga olish" bosilgach nomzod MAVJUD
+    employee/role mexanizmi orqali aktiv xodimga aylanishi, lavozim va
+    filiali biriktirilishi, "👥 Xodimlar" ro'yxatida (``roles.list_users``
+    orqali) darhol ko'rinishi va /start so'ramasdan o'z menyusini
+    avtomatik olishi kerak — Recruiting tarixi (``founder_decision``)
+    alohida saqlanadi.
+    """
+    import employees
+    import roles
+
+    main, bot = bot_dp
+    candidate_id = 600006
+    application_id = _create_awaiting_review_application(candidate_id)
+    recruiting_repo.update_application(
+        application_id, phone="+998901112233", residence_area="Toshkent",
+        preferred_branch="Chilonzor filiali",
+    )
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert roles.get_role(candidate_id) == "kassir"
+    profile = employees.get_profile(candidate_id)
+    assert profile["status"] == "approved"
+    assert profile["role_key"] == "kassir"
+    assert profile["branch"] == "Chilonzor filiali"
+    assert candidate_id in roles.list_users()
+
+    candidate_messages = [m for m in sent if getattr(m, "chat_id", None) == candidate_id]
+    assert len(candidate_messages) == 1
+    assert "/start" not in candidate_messages[0].text
+    assert candidate_messages[0].reply_markup is not None
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision"] == "hired"
+
+
+async def test_double_hire_click_does_not_crash_or_duplicate(bot_dp):
+    main, bot = bot_dp
+    candidate_id = 600007
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    first = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+    second = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert first and second  # ikkalasi ham javob yubordi, xato emas
+
+    import employees
+
+    profile = employees.get_profile(candidate_id)
+    assert profile["status"] == "approved"
+
+
 # --------------------------------------------------------- karta manzili --
 
 

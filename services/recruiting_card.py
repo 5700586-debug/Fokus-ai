@@ -225,6 +225,9 @@ def candidate_review_keyboard(application_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
+                InlineKeyboardButton(text="🎯 Ishga olish", callback_data=f"rec_hire:{application_id}"),
+            ],
+            [
                 InlineKeyboardButton(text="📞 Suhbatga chaqirish", callback_data=f"rec_interview:{application_id}"),
                 InlineKeyboardButton(text="❓ Qo'shimcha savol", callback_data=f"rec_question:{application_id}"),
             ],

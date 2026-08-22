@@ -42,6 +42,9 @@ from aiogram.types import (
 )
 from openai import AsyncOpenAI
 
+import company_time
+import employees
+import roles
 from config import (
     FOUNDER_ID,
     RECRUITING_BRANCH_NAMES,
@@ -1190,6 +1193,111 @@ async def _handle_founder_decision(callback: CallbackQuery, decision: str, confi
     await callback.answer(confirmation_text)
 
 
+def _birth_date_and_age(application: dict) -> tuple[str | None, int | None]:
+    day, month, year = application.get("birth_day"), application.get("birth_month"), application.get("birth_year")
+    if not (day and month and year):
+        return None, None
+
+    today = company_time.today()
+    age = today.year - year - ((today.month, today.day) < (month, day))
+    return f"{year:04d}-{month:02d}-{day:02d}", age
+
+
+async def handle_hire(callback: CallbackQuery) -> None:
+    """Nomzodni MAVJUD xodim mexanizmiga o'tkazadi — yangi parallel
+    tizim yaratilmaydi: ``employees.submit_profile`` + (endi atomic)
+    ``employees.approve_profile`` bilan bir xil qatorlar
+    ``employees``/``allowed_users`` jadvallariga yoziladi, xuddi oddiy
+    invite-onboarding oqimidagi kabi (qarang ``approval.py``). Rekruting
+    tarixi (``recruiting_applications.founder_decision``) alohida
+    saqlanadi — bu yerda o'chirilmaydi/qayta yozilmaydi, faqat "hired"
+    deb belgilanadi.
+    """
+    if not await permissions.ensure_permission(callback, permissions.ACTION_RECRUITING_REVIEW):
+        return
+
+    application_id = int(callback.data.split(":", 1)[1])
+    application = recruiting_repo.get_application(application_id)
+    if application is None or application["status"] != "awaiting_review":
+        await callback.answer("Ariza topilmadi yoki allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
+    vacancy = recruiting_repo.get_vacancy(application["vacancy_id"])
+    role_key = vacancy["position_key"] if vacancy else None
+    if role_key is None or role_key not in roles.ROLES:
+        await callback.answer("Vakansiya lavozimi noma'lum — qo'lda /invite orqali qo'shing.", show_alert=True)
+        return
+
+    user_id = application["candidate_telegram_id"]
+
+    existing_profile = employees.get_profile(user_id)
+    if existing_profile is not None and existing_profile["status"] == "approved":
+        await callback.answer("Bu nomzod allaqachon xodim sifatida ishga olingan.", show_alert=True)
+        return
+
+    if roles.is_single_slot_role(role_key):
+        existing_holder = roles.find_user_by_role(role_key)
+        if existing_holder is not None and existing_holder != user_id:
+            await callback.answer(
+                f"❌ {roles.role_name(role_key)} lavozimida allaqachon boshqa xodim bor "
+                f"(user_id: {existing_holder}). Avval uni bo'shating.",
+                show_alert=True,
+            )
+            return
+
+    # Faqat filialga bog'lanadigan (single-slot BO'LMAGAN) rollarga
+    # filial biriktiriladi — xuddi mavjud ``SINGLE_SLOT_ROLES`` mantig'i
+    # bilan bir xil (qarang ``main.py``dagi ``_invite_branch_kb`` izohi).
+    branch = None if roles.is_single_slot_role(role_key) else application.get("preferred_branch")
+    birth_date, age = _birth_date_and_age(application)
+
+    employees.submit_profile(
+        user_id,
+        {
+            "familiya": application.get("full_name"),
+            "birth_date": birth_date,
+            "age": age,
+            "phone": application.get("phone"),
+            "mahalla": application.get("residence_area"),
+            "branch": branch,
+            "role_key": role_key,
+            "hire_date": company_time.today().isoformat(),
+            "work_schedule": application.get("shift_preference"),
+            "planned_duration": application.get("retention_intent"),
+            "motivation": application.get("motivation_text"),
+            "prior_experience": application.get("experience_text") or application.get("prev_employer_text"),
+            "photo_file_id": application.get("candidate_photo_file_id"),
+            "prior_employer_reference_consent": application.get("reference_check_consent"),
+            "contacts": [],
+        },
+    )
+
+    approved_profile = employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+    if approved_profile is None:
+        await callback.answer("Xodim profilini tasdiqlashda xato yuz berdi.", show_alert=True)
+        return
+
+    roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+
+    decided_by = callback.from_user.id if callback.from_user else FOUNDER_ID
+    recruiting_repo.set_founder_decision(application_id, "hired", decided_by)
+    audit.log_event(
+        audit.EVENT_RECRUITING_FOUNDER_DECISION, actor_id=decided_by, target_id=application_id, new_value="hired"
+    )
+
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    import main  # funksiya ichida — main recruiting_bot'ni import qilgani uchun (aylanma import)
+
+    await callback.bot.send_message(
+        user_id,
+        f"✅ Tabriklaymiz! Ishga qabul qilindingiz.\n\n{main.greeting_for_user(user_id)}",
+        reply_markup=main.build_menu(user_id),
+    )
+    await callback.answer("✅ Ishga olindi.")
+
+
 async def handle_more_questions(callback: CallbackQuery) -> None:
     if not await permissions.ensure_permission(callback, permissions.ACTION_RECRUITING_REVIEW):
         return
@@ -1367,6 +1475,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     @dp.callback_query(F.data.startswith("rec_vac_toggle:"))
     async def vacancy_toggle_handler(callback: CallbackQuery) -> None:
         await handle_vacancy_toggle(callback)
+
+    @dp.callback_query(F.data.startswith("rec_hire:"))
+    async def hire_handler(callback: CallbackQuery) -> None:
+        await handle_hire(callback)
 
     @dp.callback_query(F.data.startswith("rec_interview:"))
     async def decision_interview_handler(callback: CallbackQuery) -> None:

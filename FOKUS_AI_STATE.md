@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `56e8680` — "Simplify kassir menu button labels and pair them two-per-row"
+- **Commit:** `3b2ab42` — "Fix kassir menu buttons getting swallowed by stale FSM state"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `56e8680` uchun — **PASSED** (run 32594291185: checkout, dependency install, haqiqiy `psycopg2` import, 10 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `3b2ab42` uchun — **PASSED** (run 32595351643: checkout, dependency install, haqiqiy `psycopg2` import, 12 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,9 +16,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
-- Kassir menyusini sodda qil: `/openshift`/`/closeshift`/`/expense` tugmalari endi kassir uchun "🟢 Smenani boshlash"/"🔴 Smenani topshirish"/"💸 Xarajat kiritish" sifatida ko'rinadi, 2 tadan yonma-yon; eski buyruqlar orqada o'zgarishsiz ishlaydi (mavjud stale-label normalizatsiya xaritasi orqali). Boshqa rollar menyusiga tegilmagan.
-- Shu tuzatish uchun 2 ta test qo'shilgan (`tests/test_menu_and_fsm_escape.py::test_kassir_menu_buttons_are_paired_two_per_row`, `::test_kassir_friendly_button_still_triggers_real_command`) va bir nechta eski kassir-menyu testi yangi matnlarga moslab yangilangan; GitHub Actions Linux'da **PASSED** (run 32594291185, commit `56e8680`).
-- HR/Xodim UX 1-bosqich (menyu `is_persistent=True`, tasdiqdan keyin "/start" so'ralmasligi), Saturn moliyaviy guruh xabari muammosi, Founder nomzod kartasiga tug'ilgan sana, Kassa nazorati: Nazoratchi qarori, ish muhitini GitHub Actions Linux'ga o'tkazish — barchasi allaqachon shu branchda va PASSED.
+- Kassir menyu routing xatosi tuzatildi: `_ClearStaleStateMiddleware` faqat "/" bilan boshlangan matnni "qochish" deb tanirdi — kassirning yangi sodda tugmalari ("🟢 Smenani boshlash" va h.k.) "/" bilan boshlanmagani uchun, kassir eski (masalan `/expense` kategoriya kutish) holatda qolib ketgan bo'lsa, tugma bosilganda bu holat tomonidan noto'g'ri yutib olinardi (haqiqiy `/openshift`/`/closeshift`/`/expense` handleriga yetib bormasdi). Endi `_STALE_LABEL_TO_COMMAND`dagi har qanday matn (shu jumladan yangi kassir tugmalari) ham "qochish" sifatida tan olinadi.
+- Shu tuzatish uchun 2 ta yangi test qo'shildi (`tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_escapes_stale_expense_state` — asosiy regressiya, `::test_start_shows_role_specific_category_for_kassir` — mavjud /start-kassir menyu tekshiruvi qayta tasdiqlash uchun ishlatildi); GitHub Actions Linux'da **PASSED** (run 32595351643, commit `3b2ab42`).
+- Kassir menyusini sodda qilish (`/openshift`/`/closeshift`/`/expense` → "🟢 Smenani boshlash"/"🔴 Smenani topshirish"/"💸 Xarajat kiritish", 2 tadan yonma-yon), HR/Xodim UX 1-bosqich, Saturn moliyaviy guruh xabari muammosi, Founder nomzod kartasiga tug'ilgan sana, Kassa nazorati: Nazoratchi qarori, ish muhitini GitHub Actions Linux'ga o'tkazish — barchasi allaqachon shu branchda va PASSED.
 
 ## Hali tugallanmagan ish
 
@@ -27,8 +27,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - `RECRUITING_BRANCH_NAMES` hamon placeholder qiymatlarda (`Filial-1,Filial-2`) — production'ga chiqishdan oldin haqiqiy filial nomlari kerak.
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
 - Founder menyusidagi "🏪 Do'konlar" tugmasi hozircha `/listusers`ga bog'langan (vaqtinchalik qaror) — haqiqiy filiallar ro'yxatiga bog'lash kerak.
-- `fokus-ai-test` Render servisiga `56e8680` hali deploy qilinmagan (bu topshiriqda deploy so'ralmagan).
+- `fokus-ai-test` Render servisi hozir `56e8680`da live — bu commit aynan routing xatosini o'z ichiga oladi, `3b2ab42` (tuzatish) hali deploy qilinmagan.
 
 ## Keyingi bitta qadam
 
-`56e8680`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda tekshirish (keyin `🏪 Do'konlar` tugmasini haqiqiy filiallar ro'yxatiga bog'lash).
+`3b2ab42`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda kassir menyusini (tugma bosish + eski holatdan qochish) tekshirish.

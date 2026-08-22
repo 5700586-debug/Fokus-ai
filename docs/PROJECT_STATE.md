@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `56e8680` — "Simplify kassir menu button labels and pair them two-per-row" (GitHub Actions Linux'da PASSED, `fokus-ai-test`ga hali deploy qilinmagan)
+- **Oxirgi commit:** `3b2ab42` — "Fix kassir menu buttons getting swallowed by stale FSM state" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir bugli `56e8680`da live, `3b2ab42` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

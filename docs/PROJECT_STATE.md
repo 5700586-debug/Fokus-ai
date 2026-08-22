@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `9f3af53` — "Add atomic guard to prevent duplicate HR approval processing" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `9f3af53` hali deploy qilinmagan)
+- **Oxirgi commit:** `692009b` — "Add post-hire flow: recruiting candidates become active employees on hire" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `692009b` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

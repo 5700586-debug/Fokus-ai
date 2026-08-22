@@ -39,3 +39,5 @@ jobs:
           tests/test_cash_shift_bot_flows.py::test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state
           tests/test_bot_flows.py::test_approve_sends_employee_menu_without_requiring_start
           tests/test_bot_flows.py::test_build_menu_and_category_menu_are_persistent
+          tests/test_menu_and_fsm_escape.py::test_kassir_menu_buttons_are_paired_two_per_row
+          tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_still_triggers_real_command

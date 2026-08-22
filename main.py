@@ -328,8 +328,31 @@ def _bare_command(label: str) -> str:
     return label.split(" — ", 1)[0].strip()
 
 
-def build_category_menu(commands: list[str]) -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=_bare_command(command))] for command in commands]
+# Kassir uchun sodda, emojili tugma matnlari — haqiqiy buyruq
+# (``/openshift`` va h.k.) o'zgarmaydi, faqat tugmada ko'rinadigan matn
+# almashadi. Haqiqiy marshrutlash ``_STALE_LABEL_TO_COMMAND`` orqali
+# (pastda) shu tugma bosilganda asl buyruqqa qaytariladi.
+_KASSIR_BUTTON_LABELS: dict[str, str] = {
+    "/openshift": "🟢 Smenani boshlash",
+    "/closeshift": "🔴 Smenani topshirish",
+    "/expense": "💸 Xarajat kiritish",
+}
+
+
+def build_category_menu(
+    commands: list[str],
+    *,
+    button_labels: dict[str, str] | None = None,
+    pair_buttons: bool = False,
+) -> ReplyKeyboardMarkup:
+    button_texts = [
+        (button_labels or {}).get(_bare_command(command), _bare_command(command))
+        for command in commands
+    ]
+    if pair_buttons:
+        rows = _paired_keyboard_rows(button_texts)
+    else:
+        rows = [[KeyboardButton(text=text)] for text in button_texts]
     rows.append([KeyboardButton(text=BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
@@ -348,6 +371,11 @@ _STALE_LABEL_TO_COMMAND: dict[str, str] = {
     label: _bare_command(label) for _category, label, _action in _MENU_ENTRIES
 }
 _STALE_LABEL_TO_COMMAND.update({label: _bare_command(label) for label in _SHARED_COMMANDS})
+
+# Kassirning yangi sodda tugma matnlari ("🟢 Smenani boshlash" va h.k.)
+# ham shu xarita orqali asl buyruqqa ("/openshift") normallashtiriladi —
+# stale (eski keshlangan) yorliqlar bilan bir xil mexanizm.
+_STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _KASSIR_BUTTON_LABELS.items()})
 
 
 class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
@@ -610,6 +638,7 @@ async def category_menu_handler(message: Message) -> None:
         ai_users.discard(message.from_user.id)
 
     if message.text == _SHARED_CATEGORY_TEXT:
+        category_key = None
         commands = _SHARED_COMMANDS
     else:
         category_key = _CATEGORY_LABEL_TO_KEY[message.text]
@@ -627,11 +656,16 @@ async def category_menu_handler(message: Message) -> None:
         )
         return
 
+    is_kassir = category_key == "kassir"
     command_list = "\n".join(commands)
     await message.answer(
         f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
         "qo'shimcha ma'lumot so'raydi):",
-        reply_markup=build_category_menu(commands),
+        reply_markup=build_category_menu(
+            commands,
+            button_labels=_KASSIR_BUTTON_LABELS if is_kassir else None,
+            pair_buttons=is_kassir,
+        ),
     )
 
 

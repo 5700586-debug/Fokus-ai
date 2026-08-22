@@ -104,10 +104,35 @@ async def test_category_button_lists_commands_and_back(bot_dp):
     sent = await send(main.dp, bot, 111, text="💰 Kassa")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
 
-    assert any(b.startswith("/openshift") for b in buttons)
-    assert any(b.startswith("/closeshift") for b in buttons)
-    assert any(b.startswith("/expense") for b in buttons)
+    assert "🟢 Smenani boshlash" in buttons
+    assert "🔴 Smenani topshirish" in buttons
+    assert "💸 Xarajat kiritish" in buttons
     assert "🔙 Orqaga" in buttons
+
+
+async def test_kassir_menu_buttons_are_paired_two_per_row(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+    rows = sent[0].reply_markup.keyboard
+
+    assert [btn.text for btn in rows[0]] == ["🟢 Smenani boshlash", "🔴 Smenani topshirish"]
+    assert [btn.text for btn in rows[1]] == ["💸 Xarajat kiritish"]
+    assert [btn.text for btn in rows[2]] == ["🔙 Orqaga"]
+
+
+async def test_kassir_friendly_button_still_triggers_real_command(bot_dp):
+    """Yangi sodda tugma matni ("🟢 Smenani boshlash") bosilganda ham
+    asl ``/openshift`` handleri ishga tushishi kerak — eski komanda
+    orqada o'zgarishsiz ishlab turadi, faqat foydalanuvchiga ko'rinmaydi.
+    """
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="🟢 Smenani boshlash")
+
+    assert sent != []
 
 
 # --------------------------------- regressiya: tugma matnida izoh yubormasin --
@@ -134,8 +159,9 @@ def test_bare_command_strips_description_from_every_menu_entry():
 
 
 async def test_category_menu_buttons_contain_no_description_text(bot_dp):
-    """Har bir bo'lim tugmasi FAQAT toza buyruq bo'lishi kerak — izohli
-    qism ("— ...") tugma matniga umuman kirmasin.
+    """Har bir bo'lim tugmasi FAQAT toza buyruq (yoki kassir uchun sodda
+    yorliq) bo'lishi kerak — izohli qism ("— ...") tugma matniga umuman
+    kirmasin.
     """
     main, bot = bot_dp
     _set_role(111, "kassir")
@@ -143,9 +169,9 @@ async def test_category_menu_buttons_contain_no_description_text(bot_dp):
     sent = await send(main.dp, bot, 111, text="💰 Kassa")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
 
-    assert "/openshift" in buttons
-    assert "/closeshift" in buttons
-    assert "/expense" in buttons
+    assert "🟢 Smenani boshlash" in buttons
+    assert "🔴 Smenani topshirish" in buttons
+    assert "💸 Xarajat kiritish" in buttons
     assert not any("—" in b for b in buttons)
 
 
@@ -217,7 +243,10 @@ async def test_every_role_category_buttons_are_description_free(bot_dp, role_key
 
     assert len(buttons) > 1  # kamida bitta buyruq + "Orqaga"
     assert not any("—" in b for b in buttons)
-    assert all(b == "🔙 Orqaga" or b.startswith("/") for b in buttons)
+    assert all(
+        b == "🔙 Orqaga" or b.startswith("/") or b in main._KASSIR_BUTTON_LABELS.values()
+        for b in buttons
+    )
 
 
 # ------------------------- eski (Telegram'da keshlangan) izohli tugma --
@@ -371,7 +400,8 @@ async def test_stale_category_button_after_role_change_is_rejected(bot_dp):
     _set_role(111, "kassir")
 
     sent = await send(main.dp, bot, 111, text="💰 Kassa")
-    assert any(b.startswith("/openshift") for row in sent[0].reply_markup.keyboard for b in [row[0].text])
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert "🟢 Smenani boshlash" in buttons
 
     _set_role(111, "sotuvchi")
 

@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `a7f817a` — "Add atomic guard to prevent duplicate cash-shift decision processing" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `a7f817a` hali deploy qilinmagan)
+- **Oxirgi commit:** `9f3af53` — "Add atomic guard to prevent duplicate HR approval processing" (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `9f3af53` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

@@ -678,6 +678,89 @@ async def test_discrepancy_reason_notifies_founder(bot_dp, monkeypatch):
     assert "Qaytimda xato bo'lishi mumkin" in alert_text
 
 
+async def _reach_discrepancy_alert(main, bot, topshiruvchi_id: int, qabul_id: int, tomorrow, branch="Filial-1"):
+    """Topshiruvchi smenani ochib-yopadi (600000), qabul qiluvchi
+    keyingi kunda tafovutli summa (580000) kiritib sababini yozadi —
+    Founderga "⚠️ KASSA TAFOVUTI" xabari ketguncha bo'lgan umumiy
+    tayyorgarlik (bir nechta testda qayta ishlatiladi)."""
+    _make_kassir(topshiruvchi_id, branch=branch)
+    _make_kassir(qabul_id, branch=branch)
+
+    await _open_shift(main, bot, topshiruvchi_id, "500000")
+    await _close_shift_happy_path(main, bot, topshiruvchi_id, actual="600000")
+
+    await send(main.dp, bot, qabul_id, text="/openshift")
+    await _confirm_received_amount(main, bot, qabul_id, "580000")  # tafovut: -20000
+    await send_callback(main.dp, bot, qabul_id, data="csui_disc_reason", target_chat_id=qabul_id)
+    await send_callback(main.dp, bot, qabul_id, data="csui_reason:other", target_chat_id=qabul_id)
+    await send(main.dp, bot, qabul_id, text="Qaytimda xato bo'lishi mumkin")
+
+
+async def test_discrepancy_approve_finalizes_handed_over_shift(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    from datetime import timedelta
+
+    from aiogram.methods import AnswerCallbackQuery
+
+    from services import cash_shift
+
+    original_today = company_time.today().isoformat()
+    tomorrow = company_time.today() + timedelta(days=1)
+    monkeypatch.setattr(company_time, "today", lambda: tomorrow)
+
+    await _reach_discrepancy_alert(main, bot, 111, 222, tomorrow)
+
+    received_shift = cash_shift.get_open_shift(222, tomorrow.isoformat())
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"csui_disc_approve:{received_shift['id']}", target_chat_id=FOUNDER_ID
+    )
+
+    acks = [m for m in sent if isinstance(m, AnswerCallbackQuery)]
+    assert any(a.text == "✅ Kassa tafovuti qabul qilindi." for a in acks)
+
+    # Yopilishi kerak bo'lgan — topshiruvchi kassirning smenasi.
+    handed_over_shift = cash_shift.get_open_shift(111, original_today)
+    assert handed_over_shift["status"] == cash_shift.STATUS_CLEAN_CLOSED
+    assert handed_over_shift["closed_at"] is not None
+
+    # Qabul qiluvchining YANGI smenasi tegilmagan — ochiq qolaveradi.
+    received_shift_after = cash_shift.get_open_shift(222, tomorrow.isoformat())
+    assert received_shift_after["status"] == cash_shift.STATUS_OPEN
+
+
+async def test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    from datetime import timedelta
+
+    from services import cash_shift
+
+    original_today = company_time.today().isoformat()
+    tomorrow = company_time.today() + timedelta(days=1)
+    monkeypatch.setattr(company_time, "today", lambda: tomorrow)
+
+    await _reach_discrepancy_alert(main, bot, 111, 222, tomorrow)
+
+    received_shift = cash_shift.get_open_shift(222, tomorrow.isoformat())
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"csui_disc_recount:{received_shift['id']}", target_chat_id=FOUNDER_ID
+    )
+
+    kassir_messages = [m for m in sent if getattr(m, "chat_id", None) == 222 and getattr(m, "text", None)]
+    assert kassir_messages[0].text == "🔄 Kassani yana bir marta sanang."
+
+    # Topshiruvchi kassirning smenasi yopilmagan — hali PENDING_HANDOVER.
+    handed_over_shift = cash_shift.get_open_shift(111, original_today)
+    assert handed_over_shift["status"] == cash_shift.STATUS_PENDING_HANDOVER
+    assert handed_over_shift["closed_at"] is None
+
+    # Kassir mavjud "summani qayta kiritish" bosqichiga qaytarilgan —
+    # yangi (mos) summa kiritilgach mavjud solishtirish logikasi ishlaydi.
+    sent = await _confirm_received_amount(main, bot, 222, "600000")
+    assert [m.text for m in sent] == ["✅ Kassa mos.", "Smena topshirildi."]
+
+
 async def test_kassir_choice_buttons_are_two_per_row(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)

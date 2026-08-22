@@ -35,3 +35,5 @@ jobs:
           tests/test_saturn_group_bot_flows.py::test_daily_greeting_messages_have_no_financial_block
           tests/test_recruiting_card.py::test_card_shows_birth_date
           tests/test_recruiting_card.py::test_card_computes_age_correctly_from_birth_date
+          tests/test_cash_shift_bot_flows.py::test_discrepancy_approve_finalizes_handed_over_shift
+          tests/test_cash_shift_bot_flows.py::test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state

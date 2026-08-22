@@ -197,6 +197,13 @@ def _discrepancy_preset_reason_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _discrepancy_supervisor_kb(shift_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Qabul qilish", callback_data=f"csui_disc_approve:{shift_id}"),
+        InlineKeyboardButton(text="🔄 Qayta sanash", callback_data=f"csui_disc_recount:{shift_id}"),
+    ]])
+
+
 async def _send_shift_for_review(message: Message, shift: dict) -> None:
     card = _format_shift_summary(shift)
     text = (
@@ -223,7 +230,8 @@ async def _send_discrepancy_alert(
 ) -> None:
     """Topshirish/qabul qilish kassa tafovuti — mavjud Founder/Nazoratchi
     kanaliga (``_send_shift_for_review`` bilan bir xil qabul qiluvchilar)
-    faqat ma'lumot uchun xabar. Tasdiqlash tugmasi yo'q, smena yopilmaydi.
+    yuboriladi, ostida "✅ Qabul qilish"/"🔄 Qayta sanash" tugmalari bilan
+    (qarang ``handle_discrepancy_approve``/``handle_discrepancy_recount``).
     """
     difference = shift["received_cash_balance"] - shift["opening_balance"]
     topshiruvchi = _employee_name(handed_over_employee_id) if handed_over_employee_id is not None else "-"
@@ -248,7 +256,7 @@ async def _send_discrepancy_alert(
         recipients.add(nazoratchi_id)
 
     for recipient_id in recipients:
-        await message.bot.send_message(recipient_id, text)
+        await message.bot.send_message(recipient_id, text, reply_markup=_discrepancy_supervisor_kb(shift["id"]))
 
 
 def register(dp: Dispatcher) -> None:
@@ -435,6 +443,68 @@ def register(dp: Dispatcher) -> None:
 
         shift = cash_shifts_repo.get_shift(data["shift_id"])
         await _send_discrepancy_alert(message, shift, data.get("handed_over_employee_id"), text)
+
+    # ------------------------------------------- Nazoratchi: kassa tafovuti --
+
+    @dp.callback_query(F.data.startswith("csui_disc_approve:"))
+    async def handle_discrepancy_approve(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_REVIEW_CASH_SHIFT):
+            return
+
+        shift_id = int(callback.data.split(":", 1)[1])
+        shift = cash_shift.get_shift(shift_id)
+        if shift is None:
+            await callback.answer("Smena topilmadi.", show_alert=True)
+            return
+
+        from repositories import cash_shifts as cash_shifts_repo
+
+        # Yopilishi kerak bo'lgan smena — topshiruvchi kassirning (hali
+        # ``PENDING_HANDOVER``dagi) smenasi, qabul qiluvchining YANGI
+        # smenasi emas (u ochiq qolib, oddiy ishlashda davom etadi).
+        handed_over_shift = cash_shifts_repo.get_last_closed_shift(shift.get("branch"))
+        if handed_over_shift is None or handed_over_shift["status"] != cash_shift.STATUS_PENDING_HANDOVER:
+            await callback.answer("Bu tafovut allaqachon hal qilingan.", show_alert=True)
+            return
+
+        cash_shift.confirm_handover(handed_over_shift["id"])
+        cash_shifts_repo.record_shift_approval(
+            handed_over_shift["id"], callback.from_user.id, "discrepancy_accepted",
+            shift.get("discrepancy_reason_text"),
+        )
+
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+        await callback.answer("✅ Kassa tafovuti qabul qilindi.")
+
+    @dp.callback_query(F.data.startswith("csui_disc_recount:"))
+    async def handle_discrepancy_recount(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_REVIEW_CASH_SHIFT):
+            return
+
+        shift_id = int(callback.data.split(":", 1)[1])
+        shift = cash_shift.get_shift(shift_id)
+        if shift is None:
+            await callback.answer("Smena topilmadi.", show_alert=True)
+            return
+
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+        # Topshiruvchi kassirning smenasi (``PENDING_HANDOVER``) tegilmaydi
+        # — faqat qabul qiluvchi kassir mavjud "summani qayta kiritish"
+        # bosqichiga qaytariladi (xuddi "🔄 Yana sanayman" tugmasidagidek).
+        kassir_id = shift["employee_id"]
+        from aiogram.fsm.storage.base import StorageKey
+
+        kassir_state = FSMContext(
+            storage=dp.storage, key=StorageKey(bot_id=callback.bot.id, chat_id=kassir_id, user_id=kassir_id)
+        )
+        await kassir_state.set_state(OpenShiftStates.counted_cash_balance)
+
+        await callback.bot.send_message(kassir_id, "🔄 Kassani yana bir marta sanang.")
+        await callback.answer("🔄 Kassirga qayta sanash so'raldi.")
 
     # -------------------------------------------------------------- /expense --
 

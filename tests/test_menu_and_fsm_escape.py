@@ -156,6 +156,27 @@ async def test_kassir_friendly_button_escapes_stale_expense_state(bot_dp):
     assert "allaqachon ochilgan" in sent[0].text
 
 
+async def test_top_level_menu_button_escapes_stale_expense_state(bot_dp):
+    """Regressiya: asosiy menyu/bo'lim tugmalari ("💰 Kassa" va h.k.) ham
+    "/" bilan boshlanmaydi — kassir ``/expense`` kategoriya kutayotgan
+    holatda qolib ketib, "💰 Kassa" tugmasini bossa, bu ham noto'g'ri
+    kategoriya nomi sifatida yutib olinmasligi, aksincha bo'lim
+    menyusini ochishi kerak (qarang ``_TOP_LEVEL_NAV_TEXTS``).
+    """
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    await send(main.dp, bot, 111, text="/openshift")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="/expense")  # ExpenseStates.category holatida qoladi
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+
+    assert "tugmalardan birini tanlang" not in sent[0].text
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert "🟢 Smenani boshlash" in buttons
+
+
 # --------------------------------- regressiya: tugma matnida izoh yubormasin --
 # Bug: bo'lim tugmasi to'liq "/invite — Yangi xodimga taklif havolasi" matnini
 # yuborardi — Command filtri buni "/invite" + argument ("— Yangi ...") deb

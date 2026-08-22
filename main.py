@@ -133,17 +133,20 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data: dict):
         message: Message | None = getattr(event, "message", None)
         text = getattr(message, "text", None) or ""
-        # ``_STALE_LABEL_TO_COMMAND`` shu modulda pastroqda e'lon qilinadi,
-        # lekin bu yerda faqat CHAQIRILGANDA (modul to'liq yuklangandan
-        # keyin) o'qiladi — shuning uchun oldindan e'lon qilish shart emas.
-        # Kassirning yangi sodda tugmalari ("🟢 Smenani boshlash" va h.k.)
-        # "/" bilan boshlanmaydi, lekin baribir haqiqiy buyruqqa mos
+        # ``_STALE_LABEL_TO_COMMAND``/``_TOP_LEVEL_NAV_TEXTS`` shu modulda
+        # pastroqda e'lon qilinadi, lekin bu yerda faqat CHAQIRILGANDA
+        # (modul to'liq yuklangandan keyin) o'qiladi — shuning uchun
+        # oldindan e'lon qilish shart emas. Kassirning sodda tugmalari
+        # ("🟢 Smenani boshlash" va h.k.) va asosiy menyu/bo'lim tugmalari
+        # ("💰 Kassa", "👥 Xodimlar", "🤖 AI Tahlil" va h.k.) "/" bilan
+        # boshlanmaydi, lekin baribir haqiqiy navigatsiya/buyruqqa mos
         # keladi — shuning uchun ular ham "qochish" sifatida hisoblanishi
         # kerak, aks holda eski "qotib qolgan" holat ularni yutib oladi.
         looks_like_escape = (
             text.startswith("/")
             or text in (CANCEL_TEXT, BACK_TEXT)
             or text in _STALE_LABEL_TO_COMMAND
+            or text in _TOP_LEVEL_NAV_TEXTS
         )
 
         if looks_like_escape:
@@ -291,6 +294,16 @@ _FOUNDER_MENU_LABELS = [
     "💰 Smenalarni ko'rish",
     "⚙️ Sozlamalar",
 ]
+
+# Asosiy (top-level) navigatsiya tugmalari — bo'lim tugmalari
+# (``_ALL_MENU_BUTTON_TEXTS``), Foundening sodda menyusi va "AI
+# Tahlil"/"Sozlamalar" tugmalari. "/" bilan boshlanmaydi, shuning uchun
+# ``_ClearStaleStateMiddleware`` ularni ham "qochish" deb tanishi kerak
+# (qarang shu klassning docstringi) — aks holda foydalanuvchi ko'p
+# bosqichli oqimda (masalan onboarding yoki /expense) qotib qolgan
+# holatda shu tugmalardan birini bossa, eski holat uni yutib olishi
+# mumkin edi.
+_TOP_LEVEL_NAV_TEXTS = _ALL_MENU_BUTTON_TEXTS | set(_FOUNDER_MENU_LABELS) | {"🤖 AI Tahlil", "⚙️ Sozlamalar"}
 
 
 def _paired_keyboard_rows(labels: list[str]) -> list[list[KeyboardButton]]:

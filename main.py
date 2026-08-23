@@ -878,6 +878,7 @@ async def main() -> None:
     calibration_scheduler = calibration_bot.start_scheduler(bot)
     discipline_scheduler = discipline_bot.start_scheduler(bot)
     saturn_group_scheduler = saturn_group_bot.start_scheduler(bot, openai_client)
+    recruiting_retention_scheduler = recruiting_bot.start_scheduler(bot)
     # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
@@ -891,6 +892,7 @@ async def main() -> None:
         calibration_scheduler.shutdown(wait=False)
         discipline_scheduler.shutdown(wait=False)
         saturn_group_scheduler.shutdown(wait=False)
+        recruiting_retention_scheduler.shutdown(wait=False)
         await bot.session.close()
 
 

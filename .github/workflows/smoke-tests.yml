@@ -68,3 +68,5 @@ jobs:
           tests/test_chat_cleanup.py::test_cleanup_survives_telegram_delete_failure
           tests/test_chat_cleanup.py::test_cleanup_only_touches_its_own_workflow_key
           tests/test_cash_shift_bot_flows.py::test_closeshift_clean_close_deletes_tracked_dialog_messages
+          tests/test_recruiting_retention_scheduler.py::test_retention_purge_tick_deletes_only_expired_applications
+          tests/test_recruiting_retention_scheduler.py::test_start_scheduler_registers_job_and_can_shutdown

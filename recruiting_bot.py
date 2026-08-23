@@ -1541,3 +1541,28 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     @dp.callback_query(F.data.startswith("rec_raw:"))
     async def raw_answers_handler(callback: CallbackQuery) -> None:
         await handle_raw_answers(callback)
+
+
+# --------------------------------------------------------------- scheduler --
+
+
+async def _retention_purge_tick() -> None:
+    try:
+        recruiting_privacy.purge_expired_applications()
+    except Exception as error:  # noqa: BLE001
+        logger.error("Muddati o'tgan arizalarni tozalashda xato: %r", error)
+
+
+def start_scheduler(bot):
+    """``main.py`` bot ishga tushganda chaqiradi — ``discipline_bot.start_scheduler``
+    bilan bir xil uslub. Kunlik bir marta muddati o'tgan (``RECRUITING_RETENTION_DAYS``)
+    nomzod arizalarini (javoblar, tahlil va foto bilan birga) o'chiradi
+    — ``services/recruiting_privacy.purge_expired_applications()`` allaqachon
+    mavjud, faqat hech qachon avtomatik chaqirilmagan edi.
+    """
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    scheduler = AsyncIOScheduler(timezone=company_time.resolve_timezone())
+    scheduler.add_job(_retention_purge_tick, "interval", hours=24, id="recruiting_retention_purge")
+    scheduler.start()
+    return scheduler

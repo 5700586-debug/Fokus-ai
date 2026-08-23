@@ -58,3 +58,5 @@ jobs:
           tests/test_bot_flows.py::test_approve_does_not_send_menu_when_role_assignment_fails
           tests/test_recruiting_permissions.py::test_hire_does_not_send_menu_when_role_assignment_fails
           tests/test_recruiting_bot_flow.py::test_photo_send_is_isolated_from_founder_card_notification
+          tests/test_bot_flows.py::test_stores_button_lists_branches_and_does_not_call_employees_handler
+          tests/test_bot_flows.py::test_employees_button_still_lists_users_not_branches

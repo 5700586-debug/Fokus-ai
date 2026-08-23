@@ -89,6 +89,28 @@ async def test_founder_start_shows_new_greeting_and_five_menu_buttons(bot_dp):
     ]
 
 
+async def test_stores_button_lists_branches_and_does_not_call_employees_handler(bot_dp):
+    main, bot = bot_dp
+    from config import RECRUITING_BRANCH_NAMES
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="🏪 Do'konlar")
+
+    assert len(sent) == 1
+    for branch in RECRUITING_BRANCH_NAMES:
+        assert branch in sent[0].text
+    assert "Ruxsat etilgan foydalanuvchilar" not in sent[0].text
+
+
+async def test_employees_button_still_lists_users_not_branches(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👥 Xodimlar")
+
+    assert len(sent) == 1
+    assert "Ruxsat etilgan foydalanuvchilar" in sent[0].text or "Ro‘yxat bo‘sh" in sent[0].text
+    assert "Mavjud do'konlar" not in sent[0].text
+
+
 async def test_add_employee_button_asks_role_with_existing_role_buttons(bot_dp):
     main, bot = bot_dp
     from roles import ROLES

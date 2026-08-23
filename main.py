@@ -629,12 +629,21 @@ async def invite_flow_choose_branch(message: Message, state: FSMContext) -> None
     await _finish_invite_creation(message, data["role_key"], branch)
 
 
-@dp.message(F.text.in_({"👥 Xodimlar", "🏪 Do'konlar"}))
+@dp.message(F.text == "👥 Xodimlar")
 async def founder_employees_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
 
     await list_users_handler(message)
+
+
+@dp.message(F.text == "🏪 Do'konlar")
+async def founder_branches_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    lines = "\n".join(f"🏪 {name}" for name in RECRUITING_BRANCH_NAMES)
+    await message.answer(f"Mavjud do'konlar:\n{lines}")
 
 
 @dp.message(F.text == "💰 Smenalarni ko'rish")

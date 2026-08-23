@@ -4,6 +4,7 @@ ettirish, moslik filtri (fit) va real Telegram sinovida topilgan
 kamchiliklarning tuzatilganini tekshiruvchi regression testlar."""
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from aiogram.methods import SendMessage, SendPhoto
@@ -125,6 +126,18 @@ async def _answer_math_correctly(main, bot, candidate_id: int) -> int:
     return application_id
 
 
+def _mock_openai_text(monkeypatch, main, text: str) -> None:
+    """AI xulosa chaqiruvini deterministik qiladi — Founderga karta
+    yuborilishini sinovchi testlar haqiqiy tarmoq so'roviga bog'liq
+    bo'lmasligi kerak (qarang ``test_discipline_bot_flows.py``dagi bir
+    xil naqsh)."""
+
+    async def fake_create(**kwargs):
+        return SimpleNamespace(output_text=text)
+
+    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
+
+
 # --------------------------------------------------------------- to'liq oqim --
 
 
@@ -153,13 +166,14 @@ async def test_full_kassir_application_flow_sends_founder_card(bot_dp):
     assert "ballga ta'sir qilmaydi" in founder_card_text
 
 
-async def test_founder_receives_photo_when_candidate_uploads_one(bot_dp):
+async def test_founder_receives_photo_when_candidate_uploads_one(bot_dp, monkeypatch):
     """Regressiya: nomzod majburiy foto bosqichida haqiqiy rasm
     yuborsa, Founder shu fotoni (mavjud ``send_photo`` mexanizmi
     orqali, ``candidate_photo_file_id``) olishi kerak — karta matni/
     tugmalari o'zgarishsiz qoladi.
     """
     main, bot = bot_dp
+    _mock_openai_text(monkeypatch, main, "Javoblar ijobiy.")
 
     await _complete_intake(main, bot, CANDIDATE_ID)
     await _answer_role_questions_safely(main, bot, CANDIDATE_ID)
@@ -187,6 +201,7 @@ async def test_founder_card_still_sent_when_photo_send_fails(bot_dp, monkeypatch
     bo'lmasa oqim yiqilmasin, matnli karta ishlayversin").
     """
     main, bot = bot_dp
+    _mock_openai_text(monkeypatch, main, "Javoblar ijobiy.")
 
     async def _raise(*args, **kwargs):
         raise RuntimeError("Simulyatsiya: foto yuborib bo'lmadi")

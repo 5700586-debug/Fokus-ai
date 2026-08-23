@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `9013d5e` — "Give nazoratchi submenu buttons friendly labels, paired 2-per-row" — NAZORATCHI MODULE HARDENING (menyu/routing/filial-xavfsizlik tekshiruvi, bitta real UX xato tuzatildi), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `7d28cba`da live (UX+DATA HYGIENE HARDENING bilan), bu commit hali deploy qilinmagan
+- **Oxirgi commit:** `4996de7` — "Add Founder-only test-sandbox role preview (test env only)" — Founder uchun "🧪 Rol testi" xavfsiz sandbox (faqat `ENVIRONMENT=test`, real DB'ga tegmaydi), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `e635fd8`da live (NAZORATCHI MODULE HARDENING bilan), bu commit hali deploy qilinmagan
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `7d28cba` — UX+DATA HYGIENE HARDENING (AI Tahlil olib tashlash / kassa chat tozalash / recruiting retention scheduler) deploy qilindi. Branch HEAD (`9013d5e`, NAZORATCHI MODULE HARDENING) hali deploy qilinmagan.
+- **Live commit:** `e635fd8` — NAZORATCHI MODULE HARDENING deploy qilindi. Branch HEAD (`4996de7`, 🧪 ROL TESTI sandbox) hali deploy qilinmagan.
 
 ## Render — production
 

@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `5ebb8d1` — "Step 5: replace generic bot welcome text with a Saturn team greeting" — FOUNDER UX & STORE MANAGEMENT AUTONOMOUS HARDENING'ning 5-bosqichi (Do'konlar per-branch tugmalar / filial kartasi / xodimlar kartasi / kassir texnik matnlari tozalash / Saturn welcome matni), barchasi GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `fa5dac0`da live (🧪 ROL TESTI bilan), bu 5 bosqich hali deploy qilinmagan
+- **Oxirgi commit:** `9777f73` — "Fix sandbox exit not always clearing preview_role (real E2E bug)" — real Telegram E2E testida topilgan 🧪 Rol testi sandbox chiqish bugini tuzatadi (`/start` va Founder menyu tugmalari endi ishonchli zaxira chiqish yo'li), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `c30ce2e`da live (FOUNDER UX & STORE MANAGEMENT HARDENING bilan), bu tuzatish hali deploy qilinmagan
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `fa5dac0` — 🧪 ROL TESTI sandbox deploy qilindi. Branch HEAD (`5ebb8d1`, FOUNDER UX & STORE MANAGEMENT HARDENING) hali deploy qilinmagan.
+- **Live commit:** `c30ce2e` — FOUNDER UX & STORE MANAGEMENT HARDENING (5 bosqich) deploy qilindi. Branch HEAD (`9777f73`, Sandbox Exit bug tuzatishi) hali deploy qilinmagan.
 
 ## Render — production
 

@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `5ebb8d1` — "Step 5: replace generic bot welcome text with a Saturn team greeting"
+- **Commit:** `9777f73` — "Fix sandbox exit not always clearing preview_role (real E2E bug)"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `5ebb8d1` uchun — **PASSED** (run 32643723590, 51 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `9777f73` uchun — **PASSED** (run 32655766421, 56 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,6 +16,7 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
+- **🧪 ROL TESTI — Sandbox Exit E2E bug tuzatildi** (commit `9777f73`, hali `fokus-ai-test`ga deploy qilinmagan): Real Telegram E2E testida topilgan bug — "⬅️ Testdan chiqish" bosilganda `preview_role` ba'zan tozalanmay qolib, keyingi Founder tugmalari (masalan "🏬 Do'konlar") sandbox guard tomonidan bloklanishda davom etardi. Root cause: `_SandboxPreviewMiddleware` FAQAT aniq "⬅️ Testdan chiqish" matnini chiqish sifatida tanir edi — hech qanday boshqa zaxira yo'l yo'q edi (bu fayldagi boshqa barcha oqimlar xavfsiz `_ClearStaleStateMiddleware` orqali o'z-o'zini tuzatadi, lekin u sandbox aktiv paytda hech qachon ishga tushmaydi, chunki sandbox middleware'i undan OLDIN ro'yxatdan o'tib, tanilmagan matn uchun ham handlerga o'tkazmaydi). Yangi `_is_sandbox_escape_text()` — `/start` (deep-link tokeni bilan ham) va Founderning haqiqiy menyu tugmalari (`_SANDBOX_ESCAPE_TEXTS` = `_FOUNDER_MENU_LABELS` + "⚙️ Sozlamalar") endi sandboxni to'liq tozalab (`state.clear()`), so'ralgan HAQIQIY amalni bir zumda bajaradi — ataylab TOR qamrovli: boshqa "/" buyruqlar (masalan `/openshift`) va rol-kategoriya nomlari (masalan "💰 Kassa", preview ichida haqiqiy navigatsiya ma'nosiga ega) bu ro'yxatga KIRITILMAGAN — sandbox DB-yozuv himoyasi zaiflashtirilmagan. 4 ta yangi test (shu jumladan aniq repro: kategoriya ichidan chiqish → /start → Do'konlar). GitHub Actions Linux'da PASSED (run 32655766421, 56 ta test).
 - **FOUNDER UX & STORE MANAGEMENT AUTONOMOUS HARDENING** (5 bosqich, hali `fokus-ai-test`ga deploy qilinmagan):
   - **1-bosqich — 🏬 Do'konlar UX** (commit `969b9ca`): "🏪 Do'konlar" → "🏬 Do'konlar", bosilganda quruq matn ro'yxati o'rniga har bir filial (mavjud `RECRUITING_BRANCH_NAMES`dan) alohida tugma, "⬅️ Orqaga" bilan.
   - **2-bosqich — 📍 Filial kartasi** (commit `5543c0f`, test tuzatishi `d692d55`): filial tugmasi bosilganda faqat mavjud repository funksiyalaridan (yangi `employees.list_approved_by_branch`, yangi `repositories/cash_shifts.py::get_shifts_for_branch_date`, mavjud `get_last_closed_shift`) read-only karta — aktiv xodimlar soni, bugungi smena holati, ochiq tafovut, oxirgi smena. Ma'lumot yo'q bo'lsa "Ma'lumot yo'q", hech narsa o'ylab topilmagan. Nol DB yozuvi. Debugging subagent Step 2'da bitta test-assertion xatosini (ism tartibi) topdi — production kod to'g'ri edi.
@@ -48,8 +49,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - 🟡 **P2 (yangi, UX+DATA HYGIENE tekshiruvidan):** `providers/file_storage.py`dagi kategoriya B (kassa/ombor/moshina/market fotolari) retention muddati faqat e'lon qilingan, haqiqiy avtomatik o'chirish yo'q — real amalga oshirish uchun Founder/Nazoratchi review chatidagi tegishli xabarlarni o'chirish kerak bo'ladi (Telegram'da faylni "abadiy o'chirish" API'si yo'q, faqat xabarni o'chirish mumkin).
 - 🟡 **P2:** `employees.photo_file_id` (doimiy xodim profil fotosi) Founder tasdiqlagandan keyin hech qachon qayta o'qilmaydi (na onboarding, na recruiting-hire yo'lida) — hozircha zararsiz, lekin kelajakda yoki tozalanishi, yoki haqiqiy foydalanish joyi (masalan `/profile`ga foto qo'shish) topilishi kerak.
 - 🟡 **P2 (yangi, NAZORATCHI MODULE HARDENING'dan):** `repositories/discipline.py:decide_penalty_appeal` (apellyatsiya tasdiqlash/rad etish) shartsiz `UPDATE` — `try_close_day`/`try_record_supervisor_audit`dagi kabi atomik `WHERE status = expected` guard yo'q. Hozircha xavfsiz, chunki `services/discipline.py:decide_appeal` tekshiruv+yozish orasida hech qanday `await` yo'q (butunlay sinxron SQLite) — lekin bu tasodifiy xavfsizlik, ataylab qo'yilgan guard emas. Agar shu yo'lga kelajakda AI-yordamchi qadam (masalan jarima-qo'llash oqimidagi kabi) qo'shilsa, atomik guard zarur bo'ladi.
-- `fokus-ai-test` Render servisi hozir `fa5dac0`da live (🧪 ROL TESTI, `4996de7`, bilan birga deploy qilingan). FOUNDER UX & STORE MANAGEMENT HARDENING (`5ebb8d1`) hali deploy QILINMAGAN.
+- `fokus-ai-test` Render servisi hozir `c30ce2e`da live (FOUNDER UX & STORE MANAGEMENT HARDENING, `5ebb8d1`, bilan birga deploy qilingan). Sandbox Exit bug tuzatishi (`9777f73`) hali deploy QILINMAGAN.
 
 ## Keyingi bitta qadam
 
-FOUNDER UX & STORE MANAGEMENT HARDENING branch HEAD'ini (`5ebb8d1` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda Founder sifatida yangi Do'konlar/Xodimlar UX'ni va yangi welcome matnini sinab ko'rish.
+Sandbox Exit bug tuzatishining branch HEAD'ini (`9777f73` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda "⬅️ Testdan chiqish" (va /start hamda boshqa Founder tugmalari sandbox aktiv paytda) endi ishonchli ishlashini qayta tekshirish.

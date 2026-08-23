@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `4996de7` — "Add Founder-only test-sandbox role preview (test env only)" — Founder uchun "🧪 Rol testi" xavfsiz sandbox (faqat `ENVIRONMENT=test`, real DB'ga tegmaydi), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `e635fd8`da live (NAZORATCHI MODULE HARDENING bilan), bu commit hali deploy qilinmagan
+- **Oxirgi commit:** `5ebb8d1` — "Step 5: replace generic bot welcome text with a Saturn team greeting" — FOUNDER UX & STORE MANAGEMENT AUTONOMOUS HARDENING'ning 5-bosqichi (Do'konlar per-branch tugmalar / filial kartasi / xodimlar kartasi / kassir texnik matnlari tozalash / Saturn welcome matni), barchasi GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `fa5dac0`da live (🧪 ROL TESTI bilan), bu 5 bosqich hali deploy qilinmagan
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `e635fd8` — NAZORATCHI MODULE HARDENING deploy qilindi. Branch HEAD (`4996de7`, 🧪 ROL TESTI sandbox) hali deploy qilinmagan.
+- **Live commit:** `fa5dac0` — 🧪 ROL TESTI sandbox deploy qilindi. Branch HEAD (`5ebb8d1`, FOUNDER UX & STORE MANAGEMENT HARDENING) hali deploy qilinmagan.
 
 ## Render — production
 

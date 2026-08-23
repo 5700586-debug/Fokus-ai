@@ -99,3 +99,7 @@ jobs:
           tests/test_role_test_sandbox.py::test_preview_nazoratchi_menu_shows_nazoratchi_category
           tests/test_role_test_sandbox.py::test_preview_mutating_action_is_blocked_and_writes_nothing
           tests/test_role_test_sandbox.py::test_exit_preview_returns_real_founder_menu
+          tests/test_role_test_sandbox.py::test_exit_from_inside_category_subview_then_start_then_dokonlar
+          tests/test_role_test_sandbox.py::test_start_while_preview_active_safely_escapes_sandbox
+          tests/test_role_test_sandbox.py::test_founder_menu_button_while_preview_active_safely_escapes_and_runs
+          tests/test_role_test_sandbox.py::test_slash_command_while_picking_role_safely_escapes

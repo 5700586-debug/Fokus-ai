@@ -113,3 +113,83 @@ async def test_exit_preview_returns_real_founder_menu(bot_dp, monkeypatch):
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
     assert "👤 Xodim qo'shish" in buttons
     assert "💰 Kassa" not in buttons
+
+
+async def test_exit_from_inside_category_subview_then_start_then_dokonlar(bot_dp, monkeypatch):
+    """Real E2E'da topilgan bug: kategoriya ichidan (masalan "💰 Kassa")
+    "⬅️ Testdan chiqish" bosilsa, keyingi /start va "🏬 Do'konlar"
+    bosilganda ham sandbox hali aktiv bo'lib qolib, haqiqiy Founder
+    tugmalarini bloklashi mumkin edi.
+    """
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    await send(main.dp, bot, FOUNDER_ID, text="💰 Kassa")
+    exit_sent = await send(main.dp, bot, FOUNDER_ID, text="⬅️ Testdan chiqish")
+
+    exit_buttons = [btn.text for row in exit_sent[0].reply_markup.keyboard for btn in row]
+    assert "👤 Xodim qo'shish" in exit_buttons
+
+    start_sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+    assert "Assalomu alaykum, Muhammadiy" in start_sent[0].text
+
+    stores_sent = await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
+    assert "bazaga yozilmadi" not in stores_sent[0].text
+    store_buttons = [btn.text for row in stores_sent[0].reply_markup.keyboard for btn in row]
+    assert "⬅️ Orqaga" in store_buttons
+
+
+async def test_start_while_preview_active_safely_escapes_sandbox(bot_dp, monkeypatch):
+    """Real bug: agar aynan '⬅️ Testdan chiqish' matni yetib bormasa
+    (sandbox 'qotib' qolgan holatda), /start baribir xavfsiz tarzda
+    sandboxdan chiqib, haqiqiy Founder salomini berishi kerak — faqat
+    bitta aniq tugma emas, har qanday haqiqiy tizim navigatsiyasi
+    zaxira chiqish yo'li bo'lishi kerak.
+    """
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    await send(main.dp, bot, FOUNDER_ID, text="💰 Kassa")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+
+    assert "Assalomu alaykum, Muhammadiy" in sent[0].text
+    assert "bazaga yozilmadi" not in sent[0].text
+
+
+async def test_founder_menu_button_while_preview_active_safely_escapes_and_runs(bot_dp, monkeypatch):
+    """Founderga xos menyu tugmasi (masalan '🏬 Do'konlar') preview
+    aktiv paytda bosilsa ham, faqat blok qilinmasdan sandboxni tozalab
+    haqiqiy amalni bajarishi kerak (bir tugma bosishda chiqish+ishlash).
+    """
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
+
+    assert "bazaga yozilmadi" not in sent[0].text
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert "⬅️ Orqaga" in buttons
+
+    from roles import get_role
+    assert get_role(FOUNDER_ID) == "founder"
+
+
+async def test_slash_command_while_picking_role_safely_escapes(bot_dp, monkeypatch):
+    """Rol tanlash ekranida (hali rol tanlanmagan) ham '/' buyrug'i
+    xavfsiz chiqish yo'li bo'lishi kerak."""
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+
+    assert "Assalomu alaykum, Muhammadiy" in sent[0].text
+    assert "rollardan birini tanlang" not in sent[0].text

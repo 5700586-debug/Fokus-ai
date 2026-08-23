@@ -168,16 +168,20 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
     """Founder uchun '🧪 Rol testi' — boshqa rol menyusini xavfsiz
     ko'rib chiqish, HAQIQIY rol/DB holatiga tegmasdan.
 
-    ENG YUQORI ``dp.update`` darajasida, ``_ClearStaleStateMiddleware``dan
-    ham OLDIN ro'yxatdan o'tadi (shu fayldagi middleware'lar birinchi
-    ro'yxatdan o'tgani birinchi ishlaydi — ``MiddlewareManager.wrap_middlewares``
-    ro'yxatni teskari aylanib har birini oldingisiga o'raydi, shuning
-    uchun birinchi ro'yxatdan o'tgan ENG TASHQI qatlam bo'ladi). Preview
-    rejimi aktiv bo'lganda bu middleware ``handler(event, data)``ni
+    Shu fayldagi ikkita ``dp.update.outer_middleware``dan (bu va
+    ``_ClearStaleStateMiddleware``) BIRINCHI ro'yxatdan o'tadi, shuning
+    uchun ular orasida ENG TASHQI qatlam bo'ladi (``MiddlewareManager.
+    wrap_middlewares`` ro'yxatni teskari aylanib har birini oldingisiga
+    o'raydi — birinchi ro'yxatdan o'tgan birinchi ishlaydi). Aiogram'ning
+    o'zining FSM-kontekst middleware'i esa bulardan ham oldin ishlaydi
+    (shuning uchun ``data.get("state")`` bu yerda ishonchli mavjud).
+    Preview rejimi aktiv bo'lganda bu middleware ``handler(event, data)``ni
     UMUMAN CHAQIRMAYDI — demak hech qanday haqiqiy handler, demak hech
-    qanday DB yozuvi ishga tushmaydi. Faqat ``ROLES``/``_MENU_ENTRIES``/
-    ``permissions.ROLE_PERMISSIONS`` kabi MAVJUD, statik konfiguratsiyani
-    o'qiydi — yangi parallel rol/menyu tizimi yaratilmagan.
+    qanday DB yozuvi ishga tushmaydi (faqat ``_is_sandbox_escape_text``ga
+    mos zaxira chiqish holatlari bundan mustasno — pastda qarang). Faqat
+    ``ROLES``/``_MENU_ENTRIES``/``permissions.ROLE_PERMISSIONS`` kabi
+    MAVJUD, statik konfiguratsiyani o'qiydi — yangi parallel rol/menyu
+    tizimi yaratilmagan.
     """
 
     async def __call__(self, handler, event, data: dict):
@@ -221,6 +225,9 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
                 await state.update_data(preview_picking=False)
                 await message.answer("Asosiy menyu:", reply_markup=build_menu(user.id))
                 return
+            if _is_sandbox_escape_text(text):
+                await state.clear()
+                return await handler(event, data)
             role_key = _PREVIEW_ROLE_NAME_TO_KEY.get(text or "")
             if role_key is None:
                 await message.answer(
@@ -249,6 +256,20 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
             await state.clear()
             await message.answer("✅ Test rejimidan chiqdingiz.", reply_markup=build_menu(user.id))
             return
+
+        # Zaxira chiqish yo'li: aniq "⬅️ Testdan chiqish" tugmasi
+        # bosilmagan bo'lsa ham (masalan eski/keshlangan klaviatura holati
+        # tufayli haqiqiy tugma matni yetib bormasa), ``/start`` yoki
+        # Founderning o'ziga xos — rol preview'ida HECH QACHON mavjud
+        # bo'lmagan — menyu tugmasi baribir sandboxni to'liq tozalab,
+        # so'ralgan HAQIQIY amalni bajarishi kerak. Rol kategoriyasi
+        # nomlari (masalan "💰 Kassa") bu ro'yxatda YO'Q — ular preview
+        # ichida haqiqiy navigatsiya ma'nosiga ega. Boshqa "/" buyruqlar
+        # (masalan ``/openshift``) ATAYLAB bu yerga kiritilmagan — sandbox
+        # DB-yozuv himoyasi zaiflashtirilmasin.
+        if _is_sandbox_escape_text(text):
+            await state.clear()
+            return await handler(event, data)
 
         preview_category = state_data.get("preview_category")
 
@@ -455,6 +476,24 @@ _FOUNDER_MENU_LABELS = [
     "💰 Smenalarni ko'rish",
     "⚙️ Sozlamalar",
 ]
+
+# ``_SandboxPreviewMiddleware``ning zaxira chiqish yo'li uchun — rol
+# preview'ida HECH QACHON haqiqiy kategoriya nomi bo'lmaydigan,
+# Founderga xos menyu tugmalari (qarang shu klass docstringi).
+_SANDBOX_ESCAPE_TEXTS = set(_FOUNDER_MENU_LABELS) | {"⚙️ Sozlamalar"}
+
+
+def _is_sandbox_escape_text(text: str | None) -> bool:
+    """``/start`` (deep-link tokeni bilan ham) va Founderga xos real
+    menyu tugmalari — sandbox "qotib" qolgan taqdirda ham (masalan
+    aniq "⬅️ Testdan chiqish" matni yetib bormasa) xavfsiz zaxira
+    chiqish yo'li. ATAYLAB faqat shu ikkitasi — boshqa "/" buyruqlar
+    (masalan ``/openshift``) sandbox DB-yozuv himoyasini zaiflashtirib
+    qo'ymasligi uchun bu ro'yxatga kiritilmagan.
+    """
+    if text is None:
+        return False
+    return text == "/start" or text.startswith("/start ") or text in _SANDBOX_ESCAPE_TEXTS
 
 # Asosiy (top-level) navigatsiya tugmalari — bo'lim tugmalari
 # (``_ALL_MENU_BUTTON_TEXTS``), Foundening sodda menyusi va "AI

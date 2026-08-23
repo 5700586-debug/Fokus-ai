@@ -4,7 +4,6 @@ ettirish, moslik filtri (fit) va real Telegram sinovida topilgan
 kamchiliklarning tuzatilganini tekshiruvchi regression testlar."""
 
 from datetime import date
-from types import SimpleNamespace
 
 import pytest
 from aiogram.methods import SendMessage, SendPhoto
@@ -12,7 +11,7 @@ from aiogram.types import Contact, Voice
 
 from config import FOUNDER_ID
 from repositories import recruiting as recruiting_repo
-from services import recruiting_voice
+from services import recruiting_privacy, recruiting_voice
 from tests.bot_harness import make_message, send, send_callback
 
 pytestmark = pytest.mark.anyio
@@ -126,18 +125,6 @@ async def _answer_math_correctly(main, bot, candidate_id: int) -> int:
     return application_id
 
 
-def _mock_openai_text(monkeypatch, main, text: str) -> None:
-    """AI xulosa chaqiruvini deterministik qiladi — Founderga karta
-    yuborilishini sinovchi testlar haqiqiy tarmoq so'roviga bog'liq
-    bo'lmasligi kerak (qarang ``test_discipline_bot_flows.py``dagi bir
-    xil naqsh)."""
-
-    async def fake_create(**kwargs):
-        return SimpleNamespace(output_text=text)
-
-    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
-
-
 # --------------------------------------------------------------- to'liq oqim --
 
 
@@ -166,20 +153,48 @@ async def test_full_kassir_application_flow_sends_founder_card(bot_dp):
     assert "ballga ta'sir qilmaydi" in founder_card_text
 
 
-async def test_founder_receives_photo_when_candidate_uploads_one(bot_dp, monkeypatch):
+def _create_application_for_notify(candidate_id: int, photo_file_id: str | None) -> int:
+    """To'liq suhbatni simulyatsiya qilmasdan, to'g'ridan-to'g'ri DB
+    orqali "baholanishi kerak" holatidagi arizani yaratadi —
+    ``_run_assessment_and_notify_founder``ning o'zini (jumladan foto
+    yuborish qismini) izolyatsiyalab sinash uchun."""
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    application_id = recruiting_repo.create_application(
+        candidate_id, kassir["id"], recruiting_privacy.compute_retention_expiry()
+    )
+    recruiting_repo.record_consent(application_id)
+    recruiting_repo.update_application(
+        application_id,
+        full_name="Ali Valiyev",
+        phone="+998901234567",
+        residence_area="Toshkent",
+        preferred_branch="Chilonzor filiali",
+        shift_preference="kunduzgi",
+        holiday_available=1,
+        commute_issue=0,
+        accommodation_needed=0,
+        current_step="submitted",
+        status="awaiting_review",
+        candidate_photo_file_id=photo_file_id,
+    )
+    return application_id
+
+
+async def test_founder_receives_photo_when_candidate_uploads_one(bot_dp):
     """Regressiya: nomzod majburiy foto bosqichida haqiqiy rasm
     yuborsa, Founder shu fotoni (mavjud ``send_photo`` mexanizmi
     orqali, ``candidate_photo_file_id``) olishi kerak — karta matni/
     tugmalari o'zgarishsiz qoladi.
     """
-    main, bot = bot_dp
-    _mock_openai_text(monkeypatch, main, "Javoblar ijobiy.")
+    import recruiting_bot
 
-    await _complete_intake(main, bot, CANDIDATE_ID)
-    await _answer_role_questions_safely(main, bot, CANDIDATE_ID)
-    await _answer_math_correctly(main, bot, CANDIDATE_ID)
-    await send(main.dp, bot, CANDIDATE_ID, text="Mijozlarga xizmat qilishni yaxshi ko'raman")
-    sent = await send(main.dp, bot, CANDIDATE_ID, photo_file_id="candidate_photo_abc")
+    main, bot = bot_dp
+    application_id = _create_application_for_notify(900010, "candidate_photo_abc")
+    message = make_message(FOUNDER_ID, text="x").as_(bot)
+
+    bot.sent = []
+    await recruiting_bot._run_assessment_and_notify_founder(message, application_id, "kassir", None)
+    sent = bot.sent
 
     founder_photos = [
         m for m in sent if isinstance(m, SendPhoto) and getattr(m, "chat_id", None) == FOUNDER_ID
@@ -200,19 +215,20 @@ async def test_founder_card_still_sent_when_photo_send_fails(bot_dp, monkeypatch
     matnli nomzod kartasini — yo'qotib qo'ymasligi kerak (talab: "Foto
     bo'lmasa oqim yiqilmasin, matnli karta ishlayversin").
     """
+    import recruiting_bot
+
     main, bot = bot_dp
-    _mock_openai_text(monkeypatch, main, "Javoblar ijobiy.")
+    application_id = _create_application_for_notify(900011, "candidate_photo_abc")
+    message = make_message(FOUNDER_ID, text="x").as_(bot)
 
     async def _raise(*args, **kwargs):
         raise RuntimeError("Simulyatsiya: foto yuborib bo'lmadi")
 
     monkeypatch.setattr(bot, "send_photo", _raise)
 
-    await _complete_intake(main, bot, CANDIDATE_ID)
-    await _answer_role_questions_safely(main, bot, CANDIDATE_ID)
-    await _answer_math_correctly(main, bot, CANDIDATE_ID)
-    await send(main.dp, bot, CANDIDATE_ID, text="Mijozlarga xizmat qilishni yaxshi ko'raman")
-    sent = await send(main.dp, bot, CANDIDATE_ID, photo_file_id="candidate_photo_abc")
+    bot.sent = []
+    await recruiting_bot._run_assessment_and_notify_founder(message, application_id, "kassir", None)
+    sent = bot.sent
 
     founder_cards = [
         m for m in sent

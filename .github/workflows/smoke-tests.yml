@@ -63,6 +63,11 @@ jobs:
           tests/test_bot_flows.py::test_employees_button_shows_empty_placeholder_when_no_users
           tests/test_bot_flows.py::test_employees_button_shows_friendly_name_not_user_id
           tests/test_bot_flows.py::test_tapping_employee_shows_full_read_only_card
+          tests/test_cash_shift_bot_flows.py::test_expense_before_shift_open_shows_friendly_message_not_command
+          tests/test_cash_shift_bot_flows.py::test_closeshift_before_shift_open_shows_friendly_message_not_command
+          tests/test_cash_shift_bot_flows.py::test_first_shift_prompt_has_no_technical_command_wording
+          tests/test_cash_shift_bot_flows.py::test_kassa_category_body_text_has_no_raw_slash_commands
+          tests/test_cash_shift_bot_flows.py::test_supervisor_recheck_message_has_no_raw_slash_command
           tests/test_menu_and_fsm_escape.py::test_start_shows_founder_category_for_founder
           tests/test_bot_flows.py::test_founder_start_shows_new_greeting_and_five_menu_buttons
           tests/test_store_management.py::test_store_card_shows_no_data_placeholder_when_branch_is_empty

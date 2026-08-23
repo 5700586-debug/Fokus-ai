@@ -81,6 +81,48 @@ async def test_openshift_requires_kassir_role(bot_dp):
     _assert_denied(sent)
 
 
+async def test_expense_before_shift_open_shows_friendly_message_not_command(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+
+    sent = await send(main.dp, bot, 111, text="/expense")
+
+    assert "/openshift" not in sent[0].text
+    assert "🟢 Smenani boshlash" in sent[0].text
+
+
+async def test_closeshift_before_shift_open_shows_friendly_message_not_command(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+
+    sent = await send(main.dp, bot, 111, text="/closeshift")
+
+    assert "/openshift" not in sent[0].text
+    assert "🟢 Smenani boshlash" in sent[0].text
+
+
+async def test_first_shift_prompt_has_no_technical_command_wording(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+
+    sent = await send(main.dp, bot, 111, text="/openshift")
+
+    assert "birinchi smenangiz" in sent[0].text.lower()
+    assert "Pul bo'lmasa 0 yozing" in sent[0].text
+
+
+async def test_kassa_category_body_text_has_no_raw_slash_commands(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+
+    assert "/openshift" not in sent[0].text
+    assert "/closeshift" not in sent[0].text
+    assert "/expense" not in sent[0].text
+    assert "🟢 Smenani boshlash" in sent[0].text
+
+
 async def test_first_shift_asks_manual_opening_balance(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
@@ -369,6 +411,33 @@ async def test_supervisor_approve_finalizes_and_notifies_kassir(bot_dp):
 
     updated = cash_shift.get_shift(shift["id"])
     assert updated["status"] == cash_shift.STATUS_APPROVED_BY_SUPERVISOR
+
+
+async def test_supervisor_recheck_message_has_no_raw_slash_command(bot_dp):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    for i in range(3):
+        await send(main.dp, bot, 111, text="/closeshift")
+        if i == 0:
+            await send(main.dp, bot, 111, photo_file_id="sales_photo")
+            await send(main.dp, bot, 111, photo_file_id="cash_photo")
+        await send(main.dp, bot, 111, text="100000")
+        await send(main.dp, bot, 111, text="0")
+        await send(main.dp, bot, 111, text="0")
+        await _confirm_close_amount(main, bot, 111, "50000")
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift["status"] == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"cashshift_recheck:{shift['id']}", target_chat_id=FOUNDER_ID
+    )
+    kassir_messages = [m for m in sent if getattr(m, "chat_id", None) == 111]
+    assert "/closeshift" not in kassir_messages[0].text
+    assert "🔴 Smenani topshirish" in kassir_messages[0].text
 
 
 async def test_non_supervisor_cannot_approve(bot_dp):

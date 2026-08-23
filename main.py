@@ -1130,13 +1130,20 @@ async def category_menu_handler(message: Message) -> None:
 
     is_kassir = category_key == "kassir"
     is_nazoratchi = category_key == "nazoratchi"
-    command_list = "\n".join(commands)
     if is_kassir:
         button_labels = _KASSIR_BUTTON_LABELS
     elif is_nazoratchi:
         button_labels = _NAZORATCHI_BUTTON_LABELS
     else:
         button_labels = None
+    if button_labels:
+        # Xom "/buyruq — izoh" matni tugmalar allaqachon sodda bo'lgan
+        # bo'limlarda (kassir/nazoratchi) matn tanasida ham ko'rinmasin —
+        # tugma yozuvi bilan bir xil, izohsiz.
+        display_lines = [button_labels.get(_bare_command(c), _bare_command(c)) for c in commands]
+    else:
+        display_lines = commands
+    command_list = "\n".join(display_lines)
     await message.answer(
         f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
         "qo'shimcha ma'lumot so'raydi):",

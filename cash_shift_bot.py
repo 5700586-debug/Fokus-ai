@@ -297,8 +297,8 @@ def register(dp: Dispatcher) -> None:
         if cash_shift.is_first_ever_shift(branch):
             await state.set_state(OpenShiftStates.manual_opening_balance)
             await message.answer(
-                "👋 Bu sizning birinchi smenangiz. Kassadagi boshlang'ich pul qoldig'ini kiriting "
-                "(bo'lmasa 0 yozing):"
+                "👋 Bu sizning birinchi smenangiz.\n"
+                "💵 Kassadagi pulni sanab, summani yozing. Pul bo'lmasa 0 yozing."
             )
             return
 
@@ -539,7 +539,7 @@ def register(dp: Dispatcher) -> None:
 
         today_shift = cash_shift.get_open_shift(message.from_user.id, company_time.today().isoformat())
         if today_shift is None:
-            await message.answer("❌ Avval /openshift bilan bugungi smenani oching.")
+            await message.answer("⚠️ Avval 🟢 Smenani boshlash tugmasini bosing.")
             return
 
         await state.set_state(ExpenseStates.category)
@@ -636,7 +636,7 @@ def register(dp: Dispatcher) -> None:
         user_id = message.from_user.id
         shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
         if shift is None:
-            await message.answer("❌ Avval /openshift bilan bugungi smenani oching.")
+            await message.answer("⚠️ Avval 🟢 Smenani boshlash tugmasini bosing.")
             return
 
         if shift["status"] == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL:
@@ -893,7 +893,8 @@ def register(dp: Dispatcher) -> None:
         if decision == "recheck":
             await callback.bot.send_message(
                 shift["employee_id"],
-                "🔁 Nazoratchi/Founder smenangizni qayta tekshirishga qaytardi. /closeshift bilan qayta urining.",
+                "🔁 Nazoratchi/Founder smenangizni qayta tekshirishga qaytardi. "
+                "🔴 Smenani topshirish tugmasi bilan qayta urining.",
             )
         else:
             # "approved"/"rejected" — smena bo'yicha yakuniy qaror, endi

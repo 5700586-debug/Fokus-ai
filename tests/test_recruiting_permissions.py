@@ -161,6 +161,9 @@ async def test_founder_hire_creates_active_employee_with_role_branch_and_auto_me
     candidate_messages = [m for m in sent if getattr(m, "chat_id", None) == candidate_id]
     assert len(candidate_messages) == 1
     assert "/start" not in candidate_messages[0].text
+    assert "Fokus AI botiga xush kelibsiz" not in candidate_messages[0].text
+    assert "Saturn jamoasiga xush kelibsiz" in candidate_messages[0].text
+    assert "💼 Lavozimingiz" in candidate_messages[0].text
     assert candidate_messages[0].reply_markup is not None
 
     application = recruiting_repo.get_application(application_id)

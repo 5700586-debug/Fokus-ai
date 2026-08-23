@@ -494,7 +494,7 @@ async def test_full_onboarding_to_approval_flow(bot_dp):
     assert profile["status"] == "approved"
 
     sent = await send(main.dp, bot, new_user_id, text="/start")
-    assert "Rolingiz" in sent[-1].text
+    assert "💼 Lavozimingiz" in sent[-1].text
 
 
 async def test_approve_sends_employee_menu_without_requiring_start(bot_dp):
@@ -512,7 +512,7 @@ async def test_approve_sends_employee_menu_without_requiring_start(bot_dp):
     applicant_messages = [m for m in sent if getattr(m, "chat_id", None) == user_id]
     assert len(applicant_messages) == 1
     assert "/start" not in applicant_messages[0].text
-    assert "Rolingiz" in applicant_messages[0].text
+    assert "💼 Lavozimingiz" in applicant_messages[0].text
     assert applicant_messages[0].reply_markup.keyboard
 
 

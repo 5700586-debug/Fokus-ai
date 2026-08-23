@@ -48,7 +48,7 @@ async def test_stale_penalty_state_does_not_swallow_start(bot_dp):
     await send_callback(main.dp, bot, 1, data="bos:pen:111:10", target_chat_id=1)
 
     sent = await send(main.dp, bot, 1, text="/start")
-    assert any("Rolingiz" in (m.text or "") or "Asoschi" in (m.text or "") for m in sent)
+    assert any("💼 Lavozimingiz" in (m.text or "") or "Asoschi" in (m.text or "") for m in sent)
 
 
 async def test_cancel_button_clears_stale_state(bot_dp):

@@ -674,7 +674,15 @@ def greeting_for_user(user_id: int) -> str:
             "Assalomu alaykum, Muhammadiy! 👋\n"
             "Tadbirkorning vaqti qadrli. Ishlarni tez va sodda boshqaramiz."
         )
-    return f"Assalomu alaykum!\nFokus AI botiga xush kelibsiz! 🚀\nRolingiz: {role_name(get_role(user_id))}"
+    profile = employees.get_profile(user_id)
+    ism = profile.get("ism") if profile else None
+    name_part = f", {ism}" if ism else ""
+    return (
+        f"Assalomu alaykum{name_part}! 👋\n"
+        "Saturn jamoasiga xush kelibsiz!\n"
+        f"💼 Lavozimingiz: {role_name(get_role(user_id))}\n"
+        "Ishlaringizga omad!"
+    )
 
 
 @dp.message(CommandStart())

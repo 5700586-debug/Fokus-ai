@@ -7,8 +7,8 @@ doim ``services/discipline.get_rule`` orqali deterministik tekshiriladi
 (``discipline_bot.py``da) — AI bu yerda faqat inson o'qishi uchun
 tushuntirish/tavsiya matni qo'shadi, jarima yoki apellyatsiya oqimini
 to'xtatadigan qattiq shart emas. OpenAI chaqiruvi xato bersa (tarmoq/kvota),
-oddiy fallback matn bilan davom etiladi — ``main.py``dagi "AI Tahlil"
-xato ushlash uslubi bilan bir xil.
+oddiy fallback matn bilan davom etiladi — botni yiqitmaydigan try/except
+uslubida.
 """
 
 from openai import AsyncOpenAI

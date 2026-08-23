@@ -60,3 +60,7 @@ jobs:
           tests/test_recruiting_bot_flow.py::test_photo_send_is_isolated_from_founder_card_notification
           tests/test_bot_flows.py::test_stores_button_lists_branches_and_does_not_call_employees_handler
           tests/test_bot_flows.py::test_employees_button_still_lists_users_not_branches
+          tests/test_ai_flow.py::test_ai_tahlil_button_removed_from_founder_menu
+          tests/test_ai_flow.py::test_ai_tahlil_text_no_longer_triggers_open_ended_chat
+          tests/test_calibration_bot_flows.py::test_calibration_question_filter_ignores_users_without_active_question
+          tests/test_menu_and_fsm_escape.py::test_sotuvchi_menu_has_no_role_category_button

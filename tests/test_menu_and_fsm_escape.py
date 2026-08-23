@@ -417,7 +417,7 @@ async def test_back_button_returns_to_main_menu(bot_dp):
 async def test_sotuvchi_menu_has_no_role_category_button(bot_dp):
     """``sotuvchi`` rolida ``ROLE_PERMISSIONS``da bironta amal yo'q —
     menyu markaziy permission-matrixdan shakllangani uchun uning uchun
-    HECH QANDAY bo'lim tugmasi chiqmasligi kerak (faqat AI/umumiy/
+    HECH QANDAY bo'lim tugmasi chiqmasligi kerak (faqat umumiy/
     sozlamalar), moliya/kassa/savdo tugmalari umuman ko'rinmaydi.
     """
     main, bot = bot_dp
@@ -429,7 +429,7 @@ async def test_sotuvchi_menu_has_no_role_category_button(bot_dp):
     role_category_buttons = set(main._CATEGORY_LABELS.values())
     assert buttons & role_category_buttons == set()
     assert "⭐ Mening natijalarim" in buttons
-    assert "🤖 AI Tahlil" in buttons
+    assert "🤖 AI Tahlil" not in buttons
 
 
 async def test_stale_category_button_after_role_change_is_rejected(bot_dp):

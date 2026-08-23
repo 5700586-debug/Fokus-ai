@@ -97,9 +97,6 @@ print(f"🚀 Fokus AI ishga tushmoqda — ENVIRONMENT={ENVIRONMENT}, bot_id={_bo
 dp = Dispatcher(storage=SQLiteStorage(), events_isolation=SimpleEventIsolation())
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# AI Tahlil rejimiga kirgan foydalanuvchilar
-ai_users: set[int] = set()
-
 # Markaziy "Saturncha" xabar katalogidan (``services/messages.py``) —
 # begona/ro'yxatdan o'tmagan foydalanuvchi uchun ham matn shu yerda
 # takrorlanmaydi, bitta manbadan olinadi.
@@ -138,7 +135,7 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
         # (modul to'liq yuklangandan keyin) o'qiladi — shuning uchun
         # oldindan e'lon qilish shart emas. Kassirning sodda tugmalari
         # ("🟢 Smenani boshlash" va h.k.) va asosiy menyu/bo'lim tugmalari
-        # ("💰 Kassa", "👥 Xodimlar", "🤖 AI Tahlil" va h.k.) "/" bilan
+        # ("💰 Kassa", "👥 Xodimlar" va h.k.) "/" bilan
         # boshlanmaydi, lekin baribir haqiqiy navigatsiya/buyruqqa mos
         # keladi — shuning uchun ular ham "qochish" sifatida hisoblanishi
         # kerak, aks holda eski "qotib qolgan" holat ularni yutib oladi.
@@ -303,7 +300,7 @@ _FOUNDER_MENU_LABELS = [
 # bosqichli oqimda (masalan onboarding yoki /expense) qotib qolgan
 # holatda shu tugmalardan birini bossa, eski holat uni yutib olishi
 # mumkin edi.
-_TOP_LEVEL_NAV_TEXTS = _ALL_MENU_BUTTON_TEXTS | set(_FOUNDER_MENU_LABELS) | {"🤖 AI Tahlil", "⚙️ Sozlamalar"}
+_TOP_LEVEL_NAV_TEXTS = _ALL_MENU_BUTTON_TEXTS | set(_FOUNDER_MENU_LABELS) | {"⚙️ Sozlamalar"}
 
 
 def _paired_keyboard_rows(labels: list[str]) -> list[list[KeyboardButton]]:
@@ -325,7 +322,7 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
         rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
         return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
-    rows = [[KeyboardButton(text="🤖 AI Tahlil")]]
+    rows = []
 
     for category_key in _visible_categories(user_id):
         rows.append([KeyboardButton(text=_CATEGORY_LABELS[category_key])])
@@ -464,8 +461,6 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     if not message.from_user:
         return
 
-    ai_users.discard(message.from_user.id)
-
     parts = (message.text or "").split(maxsplit=1)
     invite_token = parts[1].strip() if len(parts) > 1 else None
 
@@ -499,27 +494,10 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     )
 
 
-@dp.message(F.text == "🤖 AI Tahlil")
-async def analysis_handler(message: Message) -> None:
-    if not await ensure_authorized(message):
-        return
-
-    if message.from_user:
-        ai_users.add(message.from_user.id)
-
-    await message.answer(
-        "🤖 AI Tahlil rejimi yoqildi.\n"
-        "Savolingizni yoki tahlil qilinadigan raqamlarni yozing."
-    )
-
-
 @dp.message(F.text == "⚙️ Sozlamalar")
 async def settings_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
-
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
 
     await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
 
@@ -667,9 +645,6 @@ async def category_menu_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
 
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
-
     if message.text == _SHARED_CATEGORY_TEXT:
         category_key = None
         commands = _SHARED_COMMANDS
@@ -707,9 +682,6 @@ async def menu_back_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
 
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
-
     await message.answer(
         "🔙 Asosiy menyu.", reply_markup=build_menu(message.from_user.id)
     )
@@ -723,9 +695,6 @@ async def menu_cancel_handler(message: Message) -> None:
     # qaytariladi.
     if not await ensure_authorized(message):
         return
-
-    if message.from_user:
-        ai_users.discard(message.from_user.id)
 
     await message.answer(
         "✅ Amal bekor qilindi.", reply_markup=build_menu(message.from_user.id)
@@ -877,44 +846,6 @@ async def profile_handler(message: Message) -> None:
         return
 
     await message.answer(card)
-
-
-@dp.message(F.text)
-async def ai_message_handler(message: Message) -> None:
-    if not message.from_user or message.from_user.id not in ai_users:
-        return
-
-    if not await ensure_authorized(message):
-        return
-
-    user_text = message.text
-    if not user_text:
-        return
-
-    waiting_message = await message.answer("⏳ Tahlil qilinyapti...")
-
-    try:
-        response = await openai_client.responses.create(
-            model="gpt-5-mini",
-            instructions=(
-                "Sen Fokus AI nomli biznes yordamchisisan. "
-                "O‘zbek tilida sodda, aniq va amaliy javob ber. "
-                "Moliyaviy raqamlarni ehtiyotkorlik bilan tahlil qil. "
-                "Ma’lumot yetarli bo‘lmasa, taxmin qilmay, qo‘shimcha "
-                "ma’lumot so‘ra."
-            ),
-            input=user_text,
-        )
-
-        answer = response.output_text or "Javob olinmadi."
-        await waiting_message.edit_text(answer)
-
-    except Exception as error:
-        print(f"OpenAI xatosi: {error}")
-        await waiting_message.edit_text(
-            "❌ AI bilan bog‘lanishda xato yuz berdi.\n"
-            "Terminaldagi xatoni tekshirish kerak."
-        )
 
 
 @dp.errors()

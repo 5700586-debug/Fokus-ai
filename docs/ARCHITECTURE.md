@@ -143,7 +143,9 @@ aks holda kesh eski qiymatni ko'rsatib qolardi).
 **Yagona menyu:** `build_menu(role_key)` — har bir foydalanuvchiga
 FAQAT o'z roliga tegishli bo'lim (masalan kassirga "💰 Kassa",
 nazoratchiga "🧑‍💼 Nazoratchi") + umumiy "⭐ Mening natijalarim" +
-"🤖 AI Tahlil" + "⚙️ Sozlamalar" ko'rsatadi. Bo'lim ichidagi tugmalar
+"⚙️ Sozlamalar" ko'rsatadi (erkin/umumiy AI-chat menyusi yo'q — AI
+faqat aniq belgilangan ichki vazifalarda, masalan recruiting va
+intizom oqimlarida, ishlatiladi). Bo'lim ichidagi tugmalar
 mavjud buyruqning O'ZI (masalan "/openshift — Kassa smenasini ochish")
 — bosilganda aynan shu buyruqning o'zgartirilmagan handleri ishga
 tushadi, hech qanday yangi biznes mantiq yozilmagan, faqat

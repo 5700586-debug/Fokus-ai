@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from config import FOUNDER_ID
@@ -13,44 +11,19 @@ def anyio_backend():
     return "asyncio"
 
 
-async def test_ai_tahlil_flow_with_mocked_openai(bot_dp, monkeypatch):
+async def test_ai_tahlil_button_removed_from_founder_menu(bot_dp):
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
+
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert "🤖 AI Tahlil" not in buttons
+
+
+async def test_ai_tahlil_text_no_longer_triggers_open_ended_chat(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="🤖 AI Tahlil")
-    assert "AI Tahlil rejimi yoqildi" in sent[0].text
-    assert FOUNDER_ID in main.ai_users
 
-    async def fake_create(**kwargs):
-        return SimpleNamespace(output_text="Tahlil natijasi: hammasi yaxshi.")
-
-    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
-
-    sent = await send(main.dp, bot, FOUNDER_ID, text="100000 so'mlik savdo qildik")
-    texts = [getattr(m, "text", None) for m in sent]
-    assert "⏳ Tahlil qilinyapti..." in texts
-    assert "Tahlil natijasi: hammasi yaxshi." in texts
-
-
-async def test_ai_tahlil_flow_handles_openai_error(bot_dp, monkeypatch):
-    main, bot = bot_dp
-
-    await send(main.dp, bot, FOUNDER_ID, text="🤖 AI Tahlil")
-
-    async def failing_create(**kwargs):
-        raise RuntimeError("API xatosi")
-
-    monkeypatch.setattr(main.openai_client.responses, "create", failing_create)
-
-    sent = await send(main.dp, bot, FOUNDER_ID, text="Savol")
-    texts = [getattr(m, "text", None) for m in sent]
-    assert any("xato yuz berdi" in (t or "") for t in texts)
-
-
-async def test_switching_to_ombor_exits_ai_mode(bot_dp):
-    main, bot = bot_dp
-
-    await send(main.dp, bot, FOUNDER_ID, text="🤖 AI Tahlil")
-    assert FOUNDER_ID in main.ai_users
-
-    await send(main.dp, bot, FOUNDER_ID, text="📦 Ombor")
-    assert FOUNDER_ID not in main.ai_users
+    assert not any("AI Tahlil rejimi yoqildi" in (getattr(m, "text", None) or "") for m in sent)
+    assert not hasattr(main, "ai_users")

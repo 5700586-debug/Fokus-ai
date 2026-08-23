@@ -235,22 +235,12 @@ async def test_vague_answer_triggers_follow_up_then_finalizes(bot_dp):
     assert question["answer_text"] == "ok"
 
 
-async def test_ai_tahlil_mode_unaffected_without_active_question(bot_dp, monkeypatch):
+async def test_calibration_question_filter_ignores_users_without_active_question(bot_dp):
     main, bot = bot_dp
 
-    sent = await send(main.dp, bot, FOUNDER_ID, text="🤖 AI Tahlil")
-    assert "AI Tahlil rejimi yoqildi" in sent[0].text
-
-    from types import SimpleNamespace
-
-    async def fake_create(**kwargs):
-        return SimpleNamespace(output_text="Javob")
-
-    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
-
     sent = await send(main.dp, bot, FOUNDER_ID, text="Savol matni")
-    texts = [getattr(m, "text", None) for m in sent]
-    assert "Javob" in texts
+
+    assert sent == []
 
 
 async def test_cross_check_discrepancy_notifies_founder(bot_dp):

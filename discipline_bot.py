@@ -42,8 +42,8 @@ _MANAGEMENT_ROLES = {"founder", "nazoratchi"}
 # qo'yib bo'lmaydi. Shu oraliqda bir xil nazoratchidan deyarli bir
 # vaqtda ikkinchi xabar kelsa (masalan ikki marta yuborilgan/qayta
 # urinilgan xabar), ``bonus_bank`` ikki marta kamayib ketmasligi uchun
-# — ``main.py``dagi ``ai_users`` bilan bir xil uslubda, jarayon-ichi
-# himoya. Bitta nazoratchi bir vaqtning o'zida faqat bitta jarima
+# — jarayon-ichi (in-process) himoya, sinxron check-then-add uslubida.
+# Bitta nazoratchi bir vaqtning o'zida faqat bitta jarima
 # yozuvini qayta ishlashi mumkin.
 _PENDING_PENALTY_APPLICATIONS: set[int] = set()
 

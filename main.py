@@ -448,7 +448,7 @@ def _visible_commands_for_role(role_key: str, category_key: str) -> list[str]:
 _FOUNDER_MENU_LABELS = [
     "👤 Xodim qo'shish",
     "👥 Xodimlar",
-    "🏪 Do'konlar",
+    "🏬 Do'konlar",
     "💰 Smenalarni ko'rish",
     "⚙️ Sozlamalar",
 ]
@@ -833,13 +833,33 @@ async def founder_employees_handler(message: Message) -> None:
     await list_users_handler(message)
 
 
-@dp.message(F.text == "🏪 Do'konlar")
+_BRANCH_BACK_TEXT = "⬅️ Orqaga"
+
+
+def _branch_button_text(branch: str) -> str:
+    return f"📍 {branch}"
+
+
+def _branch_list_keyboard() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=_branch_button_text(name))] for name in RECRUITING_BRANCH_NAMES]
+    rows.append([KeyboardButton(text=_BRANCH_BACK_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+@dp.message(F.text == "🏬 Do'konlar")
 async def founder_branches_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
 
-    lines = "\n".join(f"🏪 {name}" for name in RECRUITING_BRANCH_NAMES)
-    await message.answer(f"Mavjud do'konlar:\n{lines}")
+    await message.answer("🏬 Do'konlar:", reply_markup=_branch_list_keyboard())
+
+
+@dp.message(F.text == _BRANCH_BACK_TEXT)
+async def founder_branches_back_handler(message: Message) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await message.answer("🔙 Asosiy menyu.", reply_markup=build_menu(message.from_user.id))
 
 
 @dp.message(F.text == "💰 Smenalarni ko'rish")

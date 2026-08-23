@@ -85,20 +85,32 @@ async def test_founder_start_shows_new_greeting_and_five_menu_buttons(bot_dp):
 
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
     assert buttons == [
-        "👤 Xodim qo'shish", "👥 Xodimlar", "🏪 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
+        "👤 Xodim qo'shish", "👥 Xodimlar", "🏬 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
     ]
 
 
-async def test_stores_button_lists_branches_and_does_not_call_employees_handler(bot_dp):
+async def test_stores_button_shows_one_button_per_branch(bot_dp):
     main, bot = bot_dp
     from config import RECRUITING_BRANCH_NAMES
 
-    sent = await send(main.dp, bot, FOUNDER_ID, text="🏪 Do'konlar")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
 
     assert len(sent) == 1
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
     for branch in RECRUITING_BRANCH_NAMES:
-        assert branch in sent[0].text
+        assert f"📍 {branch}" in buttons
+    assert "⬅️ Orqaga" in buttons
     assert "Ruxsat etilgan foydalanuvchilar" not in sent[0].text
+
+
+async def test_stores_back_button_returns_founder_menu(bot_dp):
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="⬅️ Orqaga")
+
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+    assert "🏬 Do'konlar" in buttons
 
 
 async def test_employees_button_still_lists_users_not_branches(bot_dp):
@@ -108,7 +120,7 @@ async def test_employees_button_still_lists_users_not_branches(bot_dp):
 
     assert len(sent) == 1
     assert "Ruxsat etilgan foydalanuvchilar" in sent[0].text or "Ro‘yxat bo‘sh" in sent[0].text
-    assert "Mavjud do'konlar" not in sent[0].text
+    assert "🏬 Do'konlar" not in sent[0].text
 
 
 async def test_add_employee_button_asks_role_with_existing_role_buttons(bot_dp):

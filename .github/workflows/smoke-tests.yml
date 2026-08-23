@@ -64,3 +64,7 @@ jobs:
           tests/test_ai_flow.py::test_ai_tahlil_text_no_longer_triggers_open_ended_chat
           tests/test_calibration_bot_flows.py::test_calibration_question_filter_ignores_users_without_active_question
           tests/test_menu_and_fsm_escape.py::test_sotuvchi_menu_has_no_role_category_button
+          tests/test_chat_cleanup.py::test_cleanup_deletes_all_tracked_messages_for_workflow
+          tests/test_chat_cleanup.py::test_cleanup_survives_telegram_delete_failure
+          tests/test_chat_cleanup.py::test_cleanup_only_touches_its_own_workflow_key
+          tests/test_cash_shift_bot_flows.py::test_closeshift_clean_close_deletes_tracked_dialog_messages

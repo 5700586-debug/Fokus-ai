@@ -8,6 +8,7 @@ from datetime import datetime
 from aiogram import Bot
 from aiogram.methods import (
     AnswerCallbackQuery,
+    DeleteMessage,
     EditMessageReplyMarkup,
     EditMessageText,
     GetMe,
@@ -35,7 +36,7 @@ class RecordingBot(Bot):
             ).as_(self)
         if isinstance(method, GetMe):
             return TgUser(id=self.id, is_bot=True, first_name="TestBot", username="test_bot")
-        if isinstance(method, (EditMessageReplyMarkup, AnswerCallbackQuery)):
+        if isinstance(method, (EditMessageReplyMarkup, AnswerCallbackQuery, DeleteMessage)):
             self.sent.append(method)
             return True
 

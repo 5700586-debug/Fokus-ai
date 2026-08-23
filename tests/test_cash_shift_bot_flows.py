@@ -255,6 +255,30 @@ async def test_closeshift_clean_close(bot_dp):
     assert "🟡 Topshirish jarayonida" in sent[0].text
 
 
+async def test_closeshift_clean_close_deletes_tracked_dialog_messages(bot_dp):
+    """Smena toza yopilgandan keyin /closeshift dialogining oraliq
+    xabarlari chatdan o'chirib tashlanadi (yakuniy hisobot xabari esa
+    o'chirilmaydi) — DB'dagi smena yozuvi esa o'zgarishsiz qoladi.
+    """
+    from aiogram.methods import DeleteMessage
+
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    sent = await _close_shift_happy_path(main, bot, 111)
+    assert "KASSA — KUN YAKUNI" in sent[0].text
+
+    deletes = [m for m in bot.sent if isinstance(m, DeleteMessage)]
+    assert len(deletes) > 0
+    assert all(m.chat_id == 111 for m in deletes)
+
+    from services import cash_shift
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift is not None
+    assert shift["cash_sales"] == 100000
+
+
 async def test_closeshift_within_tolerance(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)

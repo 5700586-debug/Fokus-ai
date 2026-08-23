@@ -15,6 +15,7 @@ from . import (
     attendance,
     audit,
     baselines,
+    bot_messages,
     cash_shifts,
     checklists,
     core,
@@ -35,6 +36,7 @@ from . import (
 SCHEMA_STATEMENTS: list[str] = [
     core.SCHEMA,
     audit.SCHEMA,
+    bot_messages.SCHEMA,
     performance.SCHEMA,
     checklists.SCHEMA,
     meal_plans.SCHEMA,

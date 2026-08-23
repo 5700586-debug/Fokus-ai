@@ -25,7 +25,9 @@ from aiogram.types import (
 from config import FOUNDER_ID
 from employees import get_profile
 from providers.file_storage import get_file_storage_provider
-from services import cash_expense, cash_shift, permissions
+from services import cash_expense, cash_shift, chat_cleanup, permissions
+
+_CLOSESHIFT_WORKFLOW = "cash_shift_close"
 
 _SKIP_TEXT = "➖ O'tkazib yuborish"
 
@@ -659,17 +661,19 @@ def register(dp: Dispatcher) -> None:
         if shift.get("sales_report_photo_ref") and shift.get("cash_report_photo_ref"):
             # Qayta urinish — rasmlar allaqachon yuborilgan, qayta so'ralmaydi.
             await state.set_state(CloseShiftStates.cash_sales)
-            await message.answer(
+            sent = await message.answer(
                 "🔁 Qayta tekshiring. Bugungi naqd savdo summasini kiriting:",
                 reply_markup=ReplyKeyboardRemove(),
             )
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
             return
 
         await state.set_state(CloseShiftStates.sales_photo)
-        await message.answer(
+        sent = await message.answer(
             "📸 Kompyuterdagi kunlik savdo hisobotining rasmini yuboring:",
             reply_markup=ReplyKeyboardRemove(),
         )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.sales_photo), F.photo)
     async def closeshift_sales_photo(message: Message, state: FSMContext) -> None:
@@ -682,7 +686,8 @@ def register(dp: Dispatcher) -> None:
         cash_shifts_repo.set_sales_report_photo(data["shift_id"], file_id)
 
         await state.set_state(CloseShiftStates.cash_photo)
-        await message.answer("📸 Endi xarajat/kassa daftari rasmini yuboring:")
+        sent = await message.answer("📸 Endi xarajat/kassa daftari rasmini yuboring:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.sales_photo))
     async def closeshift_sales_photo_missing(message: Message) -> None:
@@ -698,7 +703,8 @@ def register(dp: Dispatcher) -> None:
         cash_shifts_repo.set_cash_report_photo(data["shift_id"], file_id)
 
         await state.set_state(CloseShiftStates.cash_sales)
-        await message.answer("Bugungi naqd savdo summasini kiriting:")
+        sent = await message.answer("Bugungi naqd savdo summasini kiriting:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.cash_photo))
     async def closeshift_cash_photo_missing(message: Message) -> None:
@@ -713,7 +719,9 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(cash_sales=amount)
         await state.set_state(CloseShiftStates.card_sales)
-        await message.answer("Bugungi karta savdo summasini kiriting:")
+        data = await state.get_data()
+        sent = await message.answer("Bugungi karta savdo summasini kiriting:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.card_sales))
     async def closeshift_card_sales(message: Message, state: FSMContext) -> None:
@@ -724,7 +732,9 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(card_sales=amount)
         await state.set_state(CloseShiftStates.other_payments)
-        await message.answer("Boshqa to'lovlar summasini kiriting (bo'lmasa 0 yozing):")
+        data = await state.get_data()
+        sent = await message.answer("Boshqa to'lovlar summasini kiriting (bo'lmasa 0 yozing):")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.other_payments))
     async def closeshift_other_payments(message: Message, state: FSMContext) -> None:
@@ -735,13 +745,17 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(other_payments=amount)
         await state.set_state(CloseShiftStates.confirm_handover_start)
-        await message.answer("Smenani topshirasizmi?", reply_markup=_confirm_handover_start_kb())
+        data = await state.get_data()
+        sent = await message.answer("Smenani topshirasizmi?", reply_markup=_confirm_handover_start_kb())
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.callback_query(F.data == "csui_close_start_yes", StateFilter(CloseShiftStates.confirm_handover_start))
     async def closeshift_start_yes(callback: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CloseShiftStates.actual_cash_balance)
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        data = await state.get_data()
+        sent = await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
         await callback.answer()
 
     @dp.callback_query(F.data == "csui_close_start_back", StateFilter(CloseShiftStates.confirm_handover_start))
@@ -760,9 +774,11 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(actual_cash_balance=amount)
         await state.set_state(CloseShiftStates.confirm_actual_balance)
-        await message.answer(
+        data = await state.get_data()
+        sent = await message.answer(
             f"{_format_amount(amount)} so'm. To'g'rimi?", reply_markup=_confirm_close_amount_kb()
         )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.callback_query(F.data == "csui_close_amount_retry", StateFilter(CloseShiftStates.confirm_actual_balance))
     async def closeshift_amount_retry(callback: CallbackQuery, state: FSMContext) -> None:
@@ -800,22 +816,27 @@ def register(dp: Dispatcher) -> None:
             if result.finalized:
                 await state.clear()
                 shift = cash_shift.get_shift(shift_id)
+                # Yakuniy hisobot xabari ATAYLAB kuzatilmaydi — kassir uchun
+                # kunning "cheki" sifatida chatda ko'rinib tursin, faqat
+                # oldingi ish-jarayon xabarlari tozalanadi.
                 await callback.message.answer(_format_shift_summary(shift))
+                await chat_cleanup.cleanup(callback.bot, _CLOSESHIFT_WORKFLOW, str(shift_id))
                 await callback.answer()
                 return
 
             if result.needs_supervisor:
                 await state.clear()
                 shift = cash_shift.get_shift(shift_id)
-                await callback.message.answer(
+                sent = await callback.message.answer(
                     "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi."
                 )
+                chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
                 await _send_shift_for_review(callback.message, shift)
                 await callback.answer()
                 return
 
             await state.set_state(CloseShiftStates.cash_sales)
-            await callback.message.answer(
+            sent = await callback.message.answer(
                 f"🔴 Farq {result.difference} so'm.\n\n"
                 "Qayta tekshiring:\n"
                 "• naqd savdo\n"
@@ -825,6 +846,7 @@ def register(dp: Dispatcher) -> None:
                 f"Qolgan urinishlar: {result.retries_left}\n\n"
                 "Bugungi naqd savdo summasini qayta kiriting:"
             )
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
             await callback.answer()
         finally:
             _PENDING_CLOSE_SUBMISSIONS.discard(user_id)
@@ -874,7 +896,11 @@ def register(dp: Dispatcher) -> None:
                 "🔁 Nazoratchi/Founder smenangizni qayta tekshirishga qaytardi. /closeshift bilan qayta urining.",
             )
         else:
+            # "approved"/"rejected" — smena bo'yicha yakuniy qaror, endi
+            # shu smenaning butun /closeshift dialogini kuzatuvdan tozalab
+            # tashlash mumkin (yakuniy xabar ATAYLAB kuzatilmagan edi).
             await callback.bot.send_message(shift["employee_id"], f"{ack_text}.")
+            await chat_cleanup.cleanup(callback.bot, _CLOSESHIFT_WORKFLOW, str(shift_id))
 
         await callback.answer(ack_text)
 

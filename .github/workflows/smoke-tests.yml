@@ -57,5 +57,4 @@ jobs:
           tests/test_cash_shift_bot_flows.py::test_closeshift_confirm_skipped_when_already_pending_for_same_kassir
           tests/test_bot_flows.py::test_approve_does_not_send_menu_when_role_assignment_fails
           tests/test_recruiting_permissions.py::test_hire_does_not_send_menu_when_role_assignment_fails
-          tests/test_recruiting_bot_flow.py::test_founder_receives_photo_when_candidate_uploads_one
-          tests/test_recruiting_bot_flow.py::test_founder_card_still_sent_when_photo_send_fails
+          tests/test_recruiting_bot_flow.py::test_photo_send_is_isolated_from_founder_card_notification

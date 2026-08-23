@@ -31,8 +31,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - `RECRUITING_BRANCH_NAMES` hamon placeholder qiymatlarda (`Filial-1,Filial-2`) — production'ga chiqishdan oldin haqiqiy filial nomlari kerak.
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
 - Founder menyusidagi "🏪 Do'konlar" tugmasi hozircha `/listusers`ga bog'langan (vaqtinchalik qaror) — haqiqiy filiallar ro'yxatiga bog'lash kerak.
-- `fokus-ai-test` Render servisi hozir `3139976`da live (overnight hardening'gacha, foto-izolyatsiya tuzatishisiz) — `955edac` hali deploy qilinmagan, bu topshiriqda deploy so'ralmagan.
+- `fokus-ai-test` Render servisi endi `955edac`da live (foto-izolyatsiya tuzatishi bilan) — deploy tasdiqlangan.
 
 ## Keyingi bitta qadam
 
-`955edac`ni `fokus-ai-test` Render servisiga deploy qilib, real Telegramda nomzod fotosi Founder kartasiga to'g'ri kelishini tekshirish.
+Real Telegramda `fokus-ai-test` orqali nomzod fotosi Founder kartasiga to'g'ri kelishini qo'lda tekshirish.

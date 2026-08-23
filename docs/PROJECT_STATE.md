@@ -15,7 +15,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `3139976` — branchdan bir necha commit orqada (overnight hardening + foto-izolyatsiya tuzatishi, `955edac` hali deploy qilinmagan)
+- **Live commit:** `955edac` — nomzod fotosi Founder kartasiga izolyatsiya qilingan tuzatish deploy qilindi. Branch HEAD (`df14d6a`) bittagina state-doc commit oldinda.
 
 ## Render — production
 

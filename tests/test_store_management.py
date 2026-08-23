@@ -79,7 +79,7 @@ async def test_store_card_employees_subview_shows_name_not_user_id(bot_dp):
     await send(main.dp, bot, FOUNDER_ID, text=f"📍 {_BRANCH}")
     sent = await send(main.dp, bot, FOUNDER_ID, text="👥 Xodimlar")
 
-    assert "Ali Valiyev" in sent[0].text
+    assert "Valiyev Ali" in sent[0].text
     assert "111" not in sent[0].text
     assert "Kassir" in sent[0].text
 

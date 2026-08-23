@@ -60,7 +60,9 @@ jobs:
           tests/test_recruiting_bot_flow.py::test_photo_send_is_isolated_from_founder_card_notification
           tests/test_bot_flows.py::test_stores_button_shows_one_button_per_branch
           tests/test_bot_flows.py::test_stores_back_button_returns_founder_menu
-          tests/test_bot_flows.py::test_employees_button_still_lists_users_not_branches
+          tests/test_bot_flows.py::test_employees_button_shows_empty_placeholder_when_no_users
+          tests/test_bot_flows.py::test_employees_button_shows_friendly_name_not_user_id
+          tests/test_bot_flows.py::test_tapping_employee_shows_full_read_only_card
           tests/test_menu_and_fsm_escape.py::test_start_shows_founder_category_for_founder
           tests/test_bot_flows.py::test_founder_start_shows_new_greeting_and_five_menu_buttons
           tests/test_store_management.py::test_store_card_shows_no_data_placeholder_when_branch_is_empty

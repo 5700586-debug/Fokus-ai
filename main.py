@@ -7,7 +7,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiogram.types import (
+    CallbackQuery,
     ErrorEvent,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
@@ -857,11 +860,54 @@ async def founder_branch_employees_handler(message: Message, viewing_branch: str
 
 
 @dp.message(F.text == "👥 Xodimlar")
+def _employee_list_keyboard() -> InlineKeyboardMarkup | None:
+    """"👥 Xodimlar" tugmasi uchun — har bir xodim F.I.Sh. bilan alohida
+    tugma (``user_id`` foydalanuvchiga ko'rsatilmaydi, faqat
+    ``callback_data``da yashirin identifikator sifatida). Mavjud
+    ``roles.list_users()``/``employees.get_profile()``dan qayta
+    ishlatiladi — yangi jadval yo'q."""
+    users = list_users()
+    if not users:
+        return None
+
+    rows = []
+    for user_id, info in sorted(users.items()):
+        profile = employees.get_profile(user_id)
+        full_name = (
+            " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part)
+            if profile else None
+        ) or "-"
+        text = f"👤 {full_name} — {role_name(info.get('role'))}"
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"founderux_emp:{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@dp.message(F.text == "👥 Xodimlar")
 async def founder_employees_handler(message: Message) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_LIST_USERS):
         return
 
-    await list_users_handler(message)
+    keyboard = _employee_list_keyboard()
+    if keyboard is None:
+        await message.answer("Ro'yxat bo'sh — hozircha faqat asoschi (siz) kira oladi.")
+        return
+
+    await message.answer("👥 Xodimlar:", reply_markup=keyboard)
+
+
+@dp.callback_query(F.data.startswith("founderux_emp:"))
+async def founder_employee_card_callback(callback: CallbackQuery) -> None:
+    if not await permissions.ensure_permission(callback, permissions.ACTION_LIST_USERS):
+        return
+
+    user_id = int(callback.data.split(":", 1)[1])
+    card = employees.format_founder_card(user_id)
+    if card is None:
+        await callback.answer("Ma'lumot topilmadi.", show_alert=True)
+        return
+
+    await callback.message.answer(card)
+    await callback.answer()
 
 
 _BRANCH_BACK_TEXT = "⬅️ Orqaga"

@@ -101,7 +101,9 @@ async def test_global_employees_button_unaffected_when_not_viewing_a_branch(bot_
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="👥 Xodimlar")
 
-    assert "Ruxsat etilgan foydalanuvchilar" in sent[0].text
+    assert sent[0].text == "👥 Xodimlar:"
+    buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert any("Valiyev Ali" in text for text in buttons)
 
 
 async def test_viewing_store_card_does_not_change_employee_or_shift_data(bot_dp):

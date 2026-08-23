@@ -113,14 +113,61 @@ async def test_stores_back_button_returns_founder_menu(bot_dp):
     assert "🏬 Do'konlar" in buttons
 
 
-async def test_employees_button_still_lists_users_not_branches(bot_dp):
+async def test_employees_button_shows_empty_placeholder_when_no_users(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="👥 Xodimlar")
 
     assert len(sent) == 1
-    assert "Ruxsat etilgan foydalanuvchilar" in sent[0].text or "Ro‘yxat bo‘sh" in sent[0].text
+    assert "Ro'yxat bo'sh" in sent[0].text
     assert "🏬 Do'konlar" not in sent[0].text
+
+
+async def test_employees_button_shows_friendly_name_not_user_id(bot_dp):
+    main, bot = bot_dp
+    from roles import set_role
+    import employees
+
+    set_role(222, "kassir", set_by=FOUNDER_ID)
+    employees.submit_profile(
+        222,
+        {
+            "familiya": "Karimov", "ism": "Bek", "otasining_ismi": "Alik",
+            "branch": "Filial-1", "role_key": "kassir", "contacts": [],
+        },
+    )
+    employees.approve_profile(222, approved_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👥 Xodimlar")
+
+    buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert any("Karimov Bek" in text and "Kassir" in text for text in buttons)
+    assert not any("222" in text for text in buttons)
+
+
+async def test_tapping_employee_shows_full_read_only_card(bot_dp):
+    from tests.bot_harness import send_callback
+
+    main, bot = bot_dp
+    from roles import set_role
+    import employees
+
+    set_role(222, "kassir", set_by=FOUNDER_ID)
+    employees.submit_profile(
+        222,
+        {
+            "familiya": "Karimov", "ism": "Bek", "otasining_ismi": "Alik",
+            "branch": "Filial-1", "role_key": "kassir", "contacts": [],
+        },
+    )
+    employees.approve_profile(222, approved_by=FOUNDER_ID)
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data="founderux_emp:222", target_chat_id=FOUNDER_ID
+    )
+
+    texts = [getattr(m, "text", None) for m in sent]
+    assert any(t and "Karimov Bek Alik" in t for t in texts)
 
 
 async def test_add_employee_button_asks_role_with_existing_role_buttons(bot_dp):

@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `955edac` — "Replace behavioral photo tests with a reliable source-structure check" — nomzod fotosi Founder kartasiga yuborilishi izolyatsiya qilindi (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `3139976`da live, `955edac` hali deploy qilinmagan)
+- **Oxirgi commit:** `104a400` — "Route Do'konlar button to branch list instead of employees handler" — "🏪 Do'konlar" endi "👥 Xodimlar" bilan bir xil handlerga tushmaydi, mavjud `RECRUITING_BRANCH_NAMES`dan do'konlar ro'yxatini ko'rsatadi (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `955edac`da live, `104a400` hali deploy qilinmagan)
 
 ## Render — test muhiti
 

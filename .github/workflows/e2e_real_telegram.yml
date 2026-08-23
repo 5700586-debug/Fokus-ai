@@ -1,0 +1,40 @@
+name: E2E (real Telegram, fokus-ai-test)
+
+# FAQAT QO'LDA ishga tushiriladi (Actions -> this workflow -> Run
+# workflow) — hech qachon push'da avtomatik ishlamaydi. Real Telethon
+# akkaunt orqali deploy qilingan `fokus-ai-test` botiga real Telegram
+# xabarlari yuboradi va javoblarni tekshiradi. main/production/real
+# botga umuman tegmaydi — faqat E2E_TEST_BOT_USERNAME orqali
+# ko'rsatilgan test botiga ulanadi.
+#
+# Kerakli GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   E2E_TELEGRAM_API_ID
+#   E2E_TELEGRAM_API_HASH
+#   E2E_TELEGRAM_SESSION
+#   E2E_TEST_BOT_USERNAME
+#
+# Bular yo'q bo'lsa ish FAILED bo'ladi — qarang e2e/README.md.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install E2E dependencies (Telethon only, main app deps not needed)
+        run: pip install -r e2e/requirements.txt
+
+      - name: Run real Telegram E2E scenario against fokus-ai-test
+        env:
+          E2E_TELEGRAM_API_ID: ${{ secrets.E2E_TELEGRAM_API_ID }}
+          E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
+          E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
+          E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
+        run: python -m e2e.run_e2e

@@ -103,3 +103,10 @@ jobs:
           tests/test_role_test_sandbox.py::test_start_while_preview_active_safely_escapes_sandbox
           tests/test_role_test_sandbox.py::test_founder_menu_button_while_preview_active_safely_escapes_and_runs
           tests/test_role_test_sandbox.py::test_slash_command_while_picking_role_safely_escapes
+          tests/test_e2e_scenario.py::test_scenario_has_expected_step_order
+          tests/test_e2e_scenario.py::test_response_matches_accepts_valid_response
+          tests/test_e2e_scenario.py::test_response_matches_rejects_missing_text
+          tests/test_e2e_scenario.py::test_response_matches_rejects_missing_button
+          tests/test_e2e_scenario.py::test_response_matches_rejects_timeout_none_response
+          tests/test_e2e_scenario.py::test_mutating_action_step_targets_sandbox_blocked_message_not_a_real_shift_action
+          tests/test_e2e_scenario.py::test_dokonlar_step_does_not_hardcode_a_specific_branch_name

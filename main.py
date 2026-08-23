@@ -2,7 +2,7 @@ import asyncio
 import os
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
-from aiogram.filters import Command, CommandStart, StateFilter
+from aiogram.filters import Command, CommandStart, Filter, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import SimpleEventIsolation
@@ -825,6 +825,37 @@ async def invite_flow_choose_branch(message: Message, state: FSMContext) -> None
     await _finish_invite_creation(message, data["role_key"], branch)
 
 
+class _HasViewingBranch(Filter):
+    """Founder hozir "🏬 Do'konlar" filial kartasini ko'rayotgan bo'lsagina
+    ishlaydi (``viewing_branch`` FSM ma'lumotida saqlanadi) — aks holda
+    boshqa (global) "👥 Xodimlar" handleri ishlashda davom etadi. Bir xil
+    tugma matni ikki xil kontekstda (asosiy menyu / filial kartasi)
+    ishlatilgani uchun kerak.
+    """
+
+    async def __call__(self, message: Message, state: FSMContext) -> bool | dict:
+        if not message.text:
+            return False
+
+        data = await state.get_data()
+        branch = data.get("viewing_branch")
+        if branch is None:
+            return False
+
+        return {"viewing_branch": branch}
+
+
+@dp.message(F.text == "👥 Xodimlar", _HasViewingBranch())
+async def founder_branch_employees_handler(message: Message, viewing_branch: str) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await message.answer(
+        _store_branch_employees_text(viewing_branch),
+        reply_markup=_store_subview_keyboard(),
+    )
+
+
 @dp.message(F.text == "👥 Xodimlar")
 async def founder_employees_handler(message: Message) -> None:
     if not await ensure_authorized(message):
@@ -847,19 +878,169 @@ def _branch_list_keyboard() -> ReplyKeyboardMarkup:
 
 
 @dp.message(F.text == "🏬 Do'konlar")
-async def founder_branches_handler(message: Message) -> None:
+async def founder_branches_handler(message: Message, state: FSMContext) -> None:
     if not await ensure_authorized(message):
         return
 
+    await state.update_data(viewing_branch=None)
     await message.answer("🏬 Do'konlar:", reply_markup=_branch_list_keyboard())
 
 
 @dp.message(F.text == _BRANCH_BACK_TEXT)
-async def founder_branches_back_handler(message: Message) -> None:
+async def founder_branches_back_handler(message: Message, state: FSMContext) -> None:
     if not await ensure_authorized(message):
         return
 
+    await state.update_data(viewing_branch=None)
     await message.answer("🔙 Asosiy menyu.", reply_markup=build_menu(message.from_user.id))
+
+
+# ------------------------------------------------------ 🏬 filial kartasi --
+
+_STORE_CARD_EMPLOYEES_TEXT = "👥 Xodimlar"
+_STORE_CARD_SHIFTS_TEXT = "💰 Smenalar"
+_STORE_CARD_BACK_TEXT = "⬅️ Do'konlar"
+_STORE_SUBVIEW_BACK_TEXT = "⬅️ Filial"
+
+_BRANCH_BUTTON_TEXT_TO_NAME: dict[str, str] = {
+    _branch_button_text(name): name for name in RECRUITING_BRANCH_NAMES
+}
+
+
+def _store_card_keyboard() -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text=_STORE_CARD_EMPLOYEES_TEXT), KeyboardButton(text=_STORE_CARD_SHIFTS_TEXT)],
+        [KeyboardButton(text=_STORE_CARD_BACK_TEXT)],
+    ]
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def _store_subview_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=_STORE_SUBVIEW_BACK_TEXT)]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def _store_card_text(branch: str) -> str:
+    """Faqat mavjud DB/repository ma'lumotlaridan — yangi jadval yoki
+    parallel store-management tizimi yaratmasdan. Ma'lumot topilmasa
+    "Ma'lumot yo'q" ko'rsatiladi, hech narsa o'ylab topilmaydi."""
+    from repositories import cash_shifts as cash_shifts_repo
+    import company_time
+    from services import cash_shift
+
+    active_employees = employees.list_approved_by_branch(branch)
+    today = company_time.today().isoformat()
+    today_shifts = cash_shifts_repo.get_shifts_for_branch_date(branch, today)
+    last_closed = cash_shifts_repo.get_last_closed_shift(branch)
+
+    lines = [f"🏬 {branch}", "", f"👥 Aktiv xodimlar: {len(active_employees)} kishi"]
+
+    if today_shifts:
+        latest = today_shifts[0]
+        if latest["status"] == cash_shift.STATUS_OPEN:
+            status_label = "🟢 Smena ochiq"
+        else:
+            status_label = cash_shift_bot._STATUS_LABELS.get(latest["status"], latest["status"])
+        lines.append(f"💰 Bugungi smena: {status_label}")
+    else:
+        lines.append("💰 Bugungi smena: Ma'lumot yo'q")
+
+    open_issue = next(
+        (s for s in today_shifts if s["status"] == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL),
+        None,
+    )
+    if open_issue:
+        lines.append(
+            f"⚠️ Ochiq muammo: Kassa tafovuti tekshiruv kutmoqda (farq: {open_issue.get('difference', 'N/A')})"
+        )
+    else:
+        lines.append("⚠️ Ochiq muammo: Yo'q")
+
+    if last_closed:
+        status_label = cash_shift_bot._STATUS_LABELS.get(last_closed["status"], last_closed["status"])
+        lines.append(f"🕒 Oxirgi smena: {last_closed['shift_date']} — {status_label}")
+    else:
+        lines.append("🕒 Oxirgi smena: Ma'lumot yo'q")
+
+    return "\n".join(lines)
+
+
+def _store_branch_employees_text(branch: str) -> str:
+    active_employees = employees.list_approved_by_branch(branch)
+    if not active_employees:
+        return f"🏬 {branch}\n\n👥 Xodimlar: Ma'lumot yo'q"
+
+    lines = [f"🏬 {branch}", "", "👥 Xodimlar:"]
+    for profile in active_employees:
+        full_name = " ".join(
+            part for part in (profile.get("familiya"), profile.get("ism")) if part
+        ) or "-"
+        lines.append(f"👤 {full_name} — {role_name(profile.get('role_key'))}")
+    return "\n".join(lines)
+
+
+def _store_branch_shifts_text(branch: str) -> str:
+    from repositories import cash_shifts as cash_shifts_repo
+    import company_time
+    from services import cash_shift
+
+    today = company_time.today().isoformat()
+    today_shifts = cash_shifts_repo.get_shifts_for_branch_date(branch, today)
+    if not today_shifts:
+        return f"🏬 {branch}\n\n💰 Bugungi smenalar: Ma'lumot yo'q"
+
+    summaries = []
+    for shift in today_shifts:
+        if shift["status"] == cash_shift.STATUS_OPEN:
+            summaries.append(
+                f"Kassir: {cash_shift_bot._employee_name(shift['employee_id'])}\n"
+                f"Status: 🟢 Smena ochiq — hali yopilmagan"
+            )
+        else:
+            summaries.append(cash_shift_bot._format_shift_summary(shift))
+
+    return f"🏬 {branch}\n\n💰 Bugungi smenalar:\n\n" + "\n\n".join(summaries)
+
+
+@dp.message(F.text.in_(_BRANCH_BUTTON_TEXT_TO_NAME))
+async def founder_branch_card_handler(message: Message, state: FSMContext) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    branch = _BRANCH_BUTTON_TEXT_TO_NAME[message.text]
+    await state.update_data(viewing_branch=branch)
+    await message.answer(_store_card_text(branch), reply_markup=_store_card_keyboard())
+
+
+@dp.message(F.text == _STORE_CARD_BACK_TEXT)
+async def founder_store_card_back_handler(message: Message, state: FSMContext) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await state.update_data(viewing_branch=None)
+    await message.answer("🏬 Do'konlar:", reply_markup=_branch_list_keyboard())
+
+
+@dp.message(F.text == _STORE_SUBVIEW_BACK_TEXT, _HasViewingBranch())
+async def founder_store_subview_back_handler(message: Message, viewing_branch: str) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await message.answer(_store_card_text(viewing_branch), reply_markup=_store_card_keyboard())
+
+
+@dp.message(F.text == _STORE_CARD_SHIFTS_TEXT, _HasViewingBranch())
+async def founder_branch_shifts_handler(message: Message, viewing_branch: str) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    await message.answer(
+        _store_branch_shifts_text(viewing_branch),
+        reply_markup=_store_subview_keyboard(),
+    )
 
 
 @dp.message(F.text == "💰 Smenalarni ko'rish")

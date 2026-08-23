@@ -88,6 +88,22 @@ def get_last_closed_shift(branch: str | None) -> dict | None:
     return dict(row) if row else None
 
 
+def get_shifts_for_branch_date(branch: str | None, shift_date: str) -> list[dict]:
+    """Shu filial va sanadagi barcha smenalar (statusidan qat'i nazar —
+    ``open`` ham) — Founder'ning "🏬 Do'konlar" filial kartasi uchun
+    (faqat o'qish)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM cash_shifts WHERE branch = ? AND shift_date = ? ORDER BY id DESC",
+            (branch, shift_date),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def set_sales_report_photo(shift_id: int, photo_ref: str) -> None:
     conn = get_connection()
     try:

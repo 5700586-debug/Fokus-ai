@@ -124,6 +124,22 @@ def get_profile(user_id: int) -> dict | None:
         conn.close()
 
 
+def list_approved_by_branch(branch: str) -> list[dict]:
+    """Shu filialga biriktirilgan, tasdiqlangan (``status='approved'``)
+    xodimlar — Founder'ning "🏬 Do'konlar" filial kartasi va xodimlar
+    ro'yxati uchun (faqat o'qish, hech qanday yozuv yo'q)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM employees WHERE branch = ? AND status = 'approved' ORDER BY familiya, ism",
+            (branch,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def approve_profile(user_id: int, approved_by: int) -> dict | None:
     """FAQAT profil hali ``'submitted'`` holatida bo'lsa tasdiqlaydi
     (atomic ``UPDATE ... WHERE user_id = ? AND status = 'submitted'``,

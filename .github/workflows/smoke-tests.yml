@@ -63,6 +63,13 @@ jobs:
           tests/test_bot_flows.py::test_employees_button_still_lists_users_not_branches
           tests/test_menu_and_fsm_escape.py::test_start_shows_founder_category_for_founder
           tests/test_bot_flows.py::test_founder_start_shows_new_greeting_and_five_menu_buttons
+          tests/test_store_management.py::test_store_card_shows_no_data_placeholder_when_branch_is_empty
+          tests/test_store_management.py::test_store_card_shows_active_employee_count
+          tests/test_store_management.py::test_store_card_shows_todays_open_shift_status
+          tests/test_store_management.py::test_store_card_employees_subview_shows_name_not_user_id
+          tests/test_store_management.py::test_store_card_back_returns_to_branch_list
+          tests/test_store_management.py::test_global_employees_button_unaffected_when_not_viewing_a_branch
+          tests/test_store_management.py::test_viewing_store_card_does_not_change_employee_or_shift_data
           tests/test_ai_flow.py::test_ai_tahlil_button_removed_from_founder_menu
           tests/test_ai_flow.py::test_ai_tahlil_text_no_longer_triggers_open_ended_chat
           tests/test_calibration_bot_flows.py::test_calibration_question_filter_ignores_users_without_active_question

@@ -155,6 +155,144 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+_ROLE_TEST_ENTRY_TEXT = "🧪 Rol testi"
+_PREVIEW_EXIT_TEXT = "⬅️ Testdan chiqish"
+_PREVIEW_BANNER = "⚠️ TEST SANDBOX REJIMI\nBazaga hech narsa yozilmaydi.\n\n"
+_PREVIEW_BLOCKED_TEXT = "🧪 Test rejimi — bu amal bazaga yozilmadi."
+
+
+class _SandboxPreviewMiddleware(BaseMiddleware):
+    """Founder uchun '🧪 Rol testi' — boshqa rol menyusini xavfsiz
+    ko'rib chiqish, HAQIQIY rol/DB holatiga tegmasdan.
+
+    ENG YUQORI ``dp.update`` darajasida, ``_ClearStaleStateMiddleware``dan
+    ham OLDIN ro'yxatdan o'tadi (shu fayldagi middleware'lar birinchi
+    ro'yxatdan o'tgani birinchi ishlaydi — ``MiddlewareManager.wrap_middlewares``
+    ro'yxatni teskari aylanib har birini oldingisiga o'raydi, shuning
+    uchun birinchi ro'yxatdan o'tgan ENG TASHQI qatlam bo'ladi). Preview
+    rejimi aktiv bo'lganda bu middleware ``handler(event, data)``ni
+    UMUMAN CHAQIRMAYDI — demak hech qanday haqiqiy handler, demak hech
+    qanday DB yozuvi ishga tushmaydi. Faqat ``ROLES``/``_MENU_ENTRIES``/
+    ``permissions.ROLE_PERMISSIONS`` kabi MAVJUD, statik konfiguratsiyani
+    o'qiydi — yangi parallel rol/menyu tizimi yaratilmagan.
+    """
+
+    async def __call__(self, handler, event, data: dict):
+        message: Message | None = event.message
+        callback = event.callback_query
+
+        user = message.from_user if message is not None else (
+            callback.from_user if callback is not None else None
+        )
+        if user is None:
+            return await handler(event, data)
+
+        state: FSMContext | None = data.get("state")
+        if state is None:
+            return await handler(event, data)
+
+        state_data = await state.get_data()
+        preview_role = state_data.get("preview_role")
+        preview_picking = state_data.get("preview_picking", False)
+        text = message.text if message is not None else None
+
+        if (
+            preview_role is None
+            and not preview_picking
+            and text == _ROLE_TEST_ENTRY_TEXT
+            and user.id == FOUNDER_ID
+            and ENVIRONMENT == "test"
+        ):
+            await state.update_data(preview_picking=True)
+            await message.answer(
+                f"{_PREVIEW_BANNER}Qaysi rolni sinab ko'rmoqchisiz?",
+                reply_markup=_preview_role_picker_keyboard(),
+            )
+            return
+
+        if preview_picking and preview_role is None:
+            if callback is not None:
+                await callback.answer(_PREVIEW_BLOCKED_TEXT, show_alert=True)
+                return
+            if text == _PREVIEW_EXIT_TEXT:
+                await state.update_data(preview_picking=False)
+                await message.answer("Asosiy menyu:", reply_markup=build_menu(user.id))
+                return
+            role_key = _PREVIEW_ROLE_NAME_TO_KEY.get(text or "")
+            if role_key is None:
+                await message.answer(
+                    "Iltimos, ro'yxatdagi rollardan birini tanlang.",
+                    reply_markup=_preview_role_picker_keyboard(),
+                )
+                return
+            await state.update_data(preview_picking=False, preview_role=role_key, preview_category=None)
+            await message.answer(
+                f"{_PREVIEW_BANNER}Preview: {ROLES[role_key]} menyusi.",
+                reply_markup=_preview_top_menu_keyboard(role_key),
+            )
+            return
+
+        if preview_role is None:
+            return await handler(event, data)
+
+        # Shu nuqtadan boshlab preview_role AKTIV — bu middleware butun
+        # UI'ni o'zi boshqaradi, pastdagi haqiqiy handlerlarga umuman
+        # o'tkazmaydi.
+        if callback is not None:
+            await callback.answer(_PREVIEW_BLOCKED_TEXT, show_alert=True)
+            return
+
+        if text == _PREVIEW_EXIT_TEXT:
+            await state.clear()
+            await message.answer("✅ Test rejimidan chiqdingiz.", reply_markup=build_menu(user.id))
+            return
+
+        preview_category = state_data.get("preview_category")
+
+        if preview_category is None:
+            if text in (BACK_TEXT, CANCEL_TEXT):
+                await message.answer(
+                    f"{_PREVIEW_BANNER}Preview: {ROLES[preview_role]} menyusi.",
+                    reply_markup=_preview_top_menu_keyboard(preview_role),
+                )
+                return
+            if text == _SHARED_CATEGORY_TEXT:
+                await state.update_data(preview_category="__shared__")
+                await message.answer(
+                    f"{_PREVIEW_BANNER}{text}\n\nKerakli buyruqni tanlang:",
+                    reply_markup=_preview_category_keyboard(preview_role, "__shared__"),
+                )
+                return
+            category_key = _CATEGORY_LABEL_TO_KEY.get(text or "")
+            if category_key is not None and category_key in _visible_categories_for_role(preview_role):
+                await state.update_data(preview_category=category_key)
+                await message.answer(
+                    f"{_PREVIEW_BANNER}{text}\n\nKerakli buyruqni tanlang:",
+                    reply_markup=_preview_category_keyboard(preview_role, category_key),
+                )
+                return
+            await message.answer(
+                _PREVIEW_BANNER + _PREVIEW_BLOCKED_TEXT,
+                reply_markup=_preview_top_menu_keyboard(preview_role),
+            )
+            return
+
+        if text == BACK_TEXT:
+            await state.update_data(preview_category=None)
+            await message.answer(
+                f"{_PREVIEW_BANNER}Preview: {ROLES[preview_role]} menyusi.",
+                reply_markup=_preview_top_menu_keyboard(preview_role),
+            )
+            return
+
+        await message.answer(
+            _PREVIEW_BANNER + _PREVIEW_BLOCKED_TEXT,
+            reply_markup=_preview_category_keyboard(preview_role, preview_category),
+        )
+        return
+
+
+dp.update.outer_middleware(_SandboxPreviewMiddleware())
 dp.update.outer_middleware(_ClearStaleStateMiddleware())
 
 
@@ -284,6 +422,29 @@ def _visible_commands(user_id: int, category_key: str) -> list[str]:
     ]
 
 
+def _visible_categories_for_role(role_key: str) -> list[str]:
+    """``_visible_categories``ning rol-kalitiga asoslangan varianti —
+    haqiqiy foydalanuvchi/DB o'rniga to'g'ridan-to'g'ri statik
+    ``permissions.ROLE_PERMISSIONS``dan hisoblaydi (🧪 Rol testi preview
+    uchun — hech qanday DB so'rovi yubormaydi)."""
+    role_actions = permissions.ROLE_PERMISSIONS.get(role_key, set())
+    return [
+        category_key
+        for category_key in _CATEGORY_LABELS
+        if category_key != "founder"
+        and any(action in role_actions for cat, _label, action in _MENU_ENTRIES if cat == category_key)
+    ]
+
+
+def _visible_commands_for_role(role_key: str, category_key: str) -> list[str]:
+    role_actions = permissions.ROLE_PERMISSIONS.get(role_key, set())
+    return [
+        label
+        for cat, label, action in _MENU_ENTRIES
+        if cat == category_key and action in role_actions
+    ]
+
+
 _FOUNDER_MENU_LABELS = [
     "👤 Xodim qo'shish",
     "👥 Xodimlar",
@@ -320,6 +481,8 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     """
     if get_role(user_id) == "founder":
         rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
+        if ENVIRONMENT == "test":
+            rows.append([KeyboardButton(text=_ROLE_TEST_ENTRY_TEXT)])
         return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
     rows = []
@@ -384,6 +547,51 @@ def build_category_menu(
     else:
         rows = [[KeyboardButton(text=text)] for text in button_texts]
     rows.append([KeyboardButton(text=BACK_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+# 🧪 Rol testi (sandbox preview) — rol nomlaridan tanlov klaviaturasi.
+# ``ROLES``dan to'g'ridan-to'g'ri olinadi, yangi parallel ro'yxat yo'q.
+_PREVIEW_ROLE_NAME_TO_KEY: dict[str, str] = {
+    name: key for key, name in ROLES.items() if key != "founder"
+}
+
+
+def _preview_role_picker_keyboard() -> ReplyKeyboardMarkup:
+    rows = _paired_keyboard_rows(list(_PREVIEW_ROLE_NAME_TO_KEY))
+    rows.append([KeyboardButton(text=_PREVIEW_EXIT_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def _preview_top_menu_keyboard(role_key: str) -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=_CATEGORY_LABELS[cat])] for cat in _visible_categories_for_role(role_key)]
+    rows.append([KeyboardButton(text=_SHARED_CATEGORY_TEXT)])
+    rows.append([KeyboardButton(text=_PREVIEW_EXIT_TEXT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
+
+def _preview_category_keyboard(role_key: str, category_key: str) -> ReplyKeyboardMarkup:
+    """``build_category_menu``ni qayta ishlatib (kassir/nazoratchi sodda
+    yorliqlari va juftlash mantig'i bilan birga) o'sha bo'lim tugmalarini
+    ko'rsatadi, ustiga preview'ga xos "Testdan chiqish" qatorini
+    qo'shadi."""
+    if category_key == "__shared__":
+        commands = _SHARED_COMMANDS
+        button_labels, pair_buttons = None, False
+    else:
+        commands = _visible_commands_for_role(role_key, category_key)
+        is_kassir = category_key == "kassir"
+        is_nazoratchi = category_key == "nazoratchi"
+        if is_kassir:
+            button_labels = _KASSIR_BUTTON_LABELS
+        elif is_nazoratchi:
+            button_labels = _NAZORATCHI_BUTTON_LABELS
+        else:
+            button_labels = None
+        pair_buttons = is_kassir or is_nazoratchi
+
+    category_kb = build_category_menu(commands, button_labels=button_labels, pair_buttons=pair_buttons)
+    rows = list(category_kb.keyboard) + [[KeyboardButton(text=_PREVIEW_EXIT_TEXT)]]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 

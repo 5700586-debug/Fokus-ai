@@ -70,3 +70,5 @@ jobs:
           tests/test_cash_shift_bot_flows.py::test_closeshift_clean_close_deletes_tracked_dialog_messages
           tests/test_recruiting_retention_scheduler.py::test_retention_purge_tick_deletes_only_expired_applications
           tests/test_recruiting_retention_scheduler.py::test_start_scheduler_registers_job_and_can_shutdown
+          tests/test_menu_and_fsm_escape.py::test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row
+          tests/test_menu_and_fsm_escape.py::test_nazoratchi_friendly_button_still_triggers_real_command

@@ -122,6 +122,33 @@ async def test_kassir_menu_buttons_are_paired_two_per_row(bot_dp):
     assert [btn.text for btn in rows[2]] == ["🔙 Orqaga"]
 
 
+async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_dp):
+    """Regressiya: nazoratchi bo'limi tugmalari raqami "/baholash",
+    "/kunniyop", "/score" kabi xom buyruq matnini ko'rsatardi (kassir
+    bilan bir xil eski kamchilik) — endi sodda matnli va 2 tadan
+    yonma-yon.
+    """
+    main, bot = bot_dp
+    _set_role(111, "nazoratchi")
+
+    sent = await send(main.dp, bot, 111, text="🧑‍💼 Nazoratchi")
+    rows = sent[0].reply_markup.keyboard
+
+    assert [btn.text for btn in rows[0]] == ["📋 Xodimni baholash", "✅ Kunni yopish"]
+    assert [btn.text for btn in rows[1]] == ["⭐ Oylik ball qo'yish"]
+    assert [btn.text for btn in rows[2]] == ["🔙 Orqaga"]
+
+
+async def test_nazoratchi_friendly_button_still_triggers_real_command(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "nazoratchi")
+
+    sent = await send(main.dp, bot, 111, text="📋 Xodimni baholash")
+
+    assert sent != []
+    assert "tugmalardan birini tanlang" not in sent[0].text
+
+
 async def test_kassir_friendly_button_still_triggers_real_command(bot_dp):
     """Yangi sodda tugma matni ("🟢 Smenani boshlash") bosilganda ham
     asl ``/openshift`` handleri ishga tushishi kerak — eski komanda

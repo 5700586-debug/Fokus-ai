@@ -359,6 +359,15 @@ _KASSIR_BUTTON_LABELS: dict[str, str] = {
     "/expense": "💸 Xarajat kiritish",
 }
 
+# Nazoratchi uchun sodda tugma matnlari — kassirning yuqoridagi
+# patterniga o'xshash: haqiqiy buyruq o'zgarmaydi, faqat tugmada
+# ko'rinadigan matn almashadi.
+_NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
+    "/baholash": "📋 Xodimni baholash",
+    "/kunniyop": "✅ Kunni yopish",
+    "/score": "⭐ Oylik ball qo'yish",
+}
+
 
 def build_category_menu(
     commands: list[str],
@@ -397,6 +406,7 @@ _STALE_LABEL_TO_COMMAND.update({label: _bare_command(label) for label in _SHARED
 # ham shu xarita orqali asl buyruqqa ("/openshift") normallashtiriladi —
 # stale (eski keshlangan) yorliqlar bilan bir xil mexanizm.
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _KASSIR_BUTTON_LABELS.items()})
+_STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _NAZORATCHI_BUTTON_LABELS.items()})
 
 
 class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
@@ -665,14 +675,21 @@ async def category_menu_handler(message: Message) -> None:
         return
 
     is_kassir = category_key == "kassir"
+    is_nazoratchi = category_key == "nazoratchi"
     command_list = "\n".join(commands)
+    if is_kassir:
+        button_labels = _KASSIR_BUTTON_LABELS
+    elif is_nazoratchi:
+        button_labels = _NAZORATCHI_BUTTON_LABELS
+    else:
+        button_labels = None
     await message.answer(
         f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
         "qo'shimcha ma'lumot so'raydi):",
         reply_markup=build_category_menu(
             commands,
-            button_labels=_KASSIR_BUTTON_LABELS if is_kassir else None,
-            pair_buttons=is_kassir,
+            button_labels=button_labels,
+            pair_buttons=is_kassir or is_nazoratchi,
         ),
     )
 

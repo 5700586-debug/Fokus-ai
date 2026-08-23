@@ -1161,9 +1161,21 @@ async def _run_assessment_and_notify_founder(
     if critical_alert:
         await message.bot.send_message(FOUNDER_ID, critical_alert)
     if application.get("candidate_photo_file_id"):
-        await message.bot.send_photo(
-            FOUNDER_ID, application["candidate_photo_file_id"], caption=f"📷 {application.get('full_name') or '-'}"
-        )
+        # Foto yuborish o'zining alohida try/except'ida — agar bu
+        # muvaffaqiyatsiz bo'lsa (masalan eskirgan/yaroqsiz file_id yoki
+        # vaqtinchalik Telegram xatosi), butun bildirishnoma (pastdagi
+        # matnli karta) shu tufayli yo'qolib qolmasligi kerak (qarang
+        # ``_finish_application``dagi tashqi try/except — u BUTUN
+        # funksiyani qamrab oladi, shuning uchun foto ichida ushlanmagan
+        # xato karta yuborilishidan OLDIN butun oqimni to'xtatib qo'yardi).
+        try:
+            await message.bot.send_photo(
+                FOUNDER_ID, application["candidate_photo_file_id"], caption=f"📷 {application.get('full_name') or '-'}"
+            )
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "Nomzod fotosini Founderga yuborib bo'lmadi (application_id=%s): %r", application_id, error
+            )
     await message.bot.send_message(
         FOUNDER_ID, card_text, reply_markup=recruiting_card.candidate_review_keyboard(application_id)
     )

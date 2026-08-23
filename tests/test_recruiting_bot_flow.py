@@ -153,6 +153,59 @@ async def test_full_kassir_application_flow_sends_founder_card(bot_dp):
     assert "ballga ta'sir qilmaydi" in founder_card_text
 
 
+async def test_founder_receives_photo_when_candidate_uploads_one(bot_dp):
+    """Regressiya: nomzod majburiy foto bosqichida haqiqiy rasm
+    yuborsa, Founder shu fotoni (mavjud ``send_photo`` mexanizmi
+    orqali, ``candidate_photo_file_id``) olishi kerak — karta matni/
+    tugmalari o'zgarishsiz qoladi.
+    """
+    main, bot = bot_dp
+
+    await _complete_intake(main, bot, CANDIDATE_ID)
+    await _answer_role_questions_safely(main, bot, CANDIDATE_ID)
+    await _answer_math_correctly(main, bot, CANDIDATE_ID)
+    await send(main.dp, bot, CANDIDATE_ID, text="Mijozlarga xizmat qilishni yaxshi ko'raman")
+    sent = await send(main.dp, bot, CANDIDATE_ID, photo_file_id="candidate_photo_abc")
+
+    founder_photos = [
+        m for m in sent if isinstance(m, SendPhoto) and getattr(m, "chat_id", None) == FOUNDER_ID
+    ]
+    assert len(founder_photos) == 1
+    assert founder_photos[0].photo == "candidate_photo_abc"
+
+    founder_cards = [
+        m for m in sent
+        if isinstance(m, SendMessage) and getattr(m, "chat_id", None) == FOUNDER_ID and "Nomzod kartasi" in (m.text or "")
+    ]
+    assert len(founder_cards) == 1
+
+
+async def test_founder_card_still_sent_when_photo_send_fails(bot_dp, monkeypatch):
+    """Regressiya: agar Founderga foto yuborish muvaffaqiyatsiz bo'lsa
+    (masalan vaqtinchalik Telegram xatosi), bu butun bildirishnomani —
+    matnli nomzod kartasini — yo'qotib qo'ymasligi kerak (talab: "Foto
+    bo'lmasa oqim yiqilmasin, matnli karta ishlayversin").
+    """
+    main, bot = bot_dp
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("Simulyatsiya: foto yuborib bo'lmadi")
+
+    monkeypatch.setattr(bot, "send_photo", _raise)
+
+    await _complete_intake(main, bot, CANDIDATE_ID)
+    await _answer_role_questions_safely(main, bot, CANDIDATE_ID)
+    await _answer_math_correctly(main, bot, CANDIDATE_ID)
+    await send(main.dp, bot, CANDIDATE_ID, text="Mijozlarga xizmat qilishni yaxshi ko'raman")
+    sent = await send(main.dp, bot, CANDIDATE_ID, photo_file_id="candidate_photo_abc")
+
+    founder_cards = [
+        m for m in sent
+        if isinstance(m, SendMessage) and getattr(m, "chat_id", None) == FOUNDER_ID and "Nomzod kartasi" in (m.text or "")
+    ]
+    assert len(founder_cards) == 1
+
+
 async def test_candidate_does_not_see_internal_menus_during_application(bot_dp):
     main, bot = bot_dp
 

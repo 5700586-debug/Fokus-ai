@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `e7d9876` — "Wire the existing recruiting retention purge into a daily scheduler (Phase 3)" — UX+DATA HYGIENE HARDENING'ning 3-bosqichi (AI Tahlil olib tashlash / kassa chat tozalash / recruiting retention scheduler), barchasi GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `733db6b`da live, uchala bosqich hali deploy qilinmagan
+- **Oxirgi commit:** `9013d5e` — "Give nazoratchi submenu buttons friendly labels, paired 2-per-row" — NAZORATCHI MODULE HARDENING (menyu/routing/filial-xavfsizlik tekshiruvi, bitta real UX xato tuzatildi), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `7d28cba`da live (UX+DATA HYGIENE HARDENING bilan), bu commit hali deploy qilinmagan
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `733db6b` — Do'konlar routing tuzatishi deploy qilindi. Branch HEAD (`e7d9876`) uchta UX+DATA HYGIENE HARDENING commiti oldinda, hali deploy qilinmagan.
+- **Live commit:** `7d28cba` — UX+DATA HYGIENE HARDENING (AI Tahlil olib tashlash / kassa chat tozalash / recruiting retention scheduler) deploy qilindi. Branch HEAD (`9013d5e`, NAZORATCHI MODULE HARDENING) hali deploy qilinmagan.
 
 ## Render — production
 

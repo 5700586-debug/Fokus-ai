@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `e7d9876` — "Wire the existing recruiting retention purge into a daily scheduler (Phase 3)"
+- **Commit:** `9013d5e` — "Give nazoratchi submenu buttons friendly labels, paired 2-per-row"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `e7d9876` uchun — **PASSED** (run 32635871880, 33 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `9013d5e` uchun — **PASSED** (run 32637345832, 35 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,6 +16,7 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
+- **NAZORATCHI MODULE HARDENING** (commit `9013d5e`, hali `fokus-ai-test`ga deploy qilinmagan): 3 ta parallel research agent orqali nazoratchi menyusi/UX, routing/FSM/double-click xavfsizligi, filial/xodim nishonlash xavfsizligi tekshirildi. Faqat BITTA real xato topildi va tuzatildi: nazoratchi bo'lim tugmalari xom "/baholash"/"/kunniyop"/"/score" matnini ko'rsatardi va 2 tadan yonma-yon joylashmagandi (kassir uchun avvalroq tuzatilgan xuddi shu naqsh) — yangi `_NAZORATCHI_BUTTON_LABELS` (mavjud `_KASSIR_BUTTON_LABELS` naqshi asosida) qo'shildi, `_STALE_LABEL_TO_COMMAND`ga ham ulandi. Boshqa hamma narsa 🟢 SAFE deb topildi: `find_user_by_role("nazoratchi")` xavfsiz (nazoratchi `SINGLE_SLOT_ROLES`da, faqat bitta mavjud, DB unique indeks bilan ta'minlangan), routing/FSM stale-state qochish to'liq qamrab olingan, kassa nazoratchi qarori atomik guard bilan himoyalangan, calibration_bot bilan handler-collision yo'q. Bitta arxitektura zaif nuqtasi topildi (apellyatsiya qaror qabul qilish — pastda P2 sifatida hujjatlashtirilgan), lekin HOZIRDA ekspluatatsiya qilib bo'lmaydigan (hech qanday `await` yo'q ikki bosqich orasida) — vazifaning "faqat real xatoni tuzat" qoidasiga ko'ra QILINMADI.
 - **UX + DATA HYGIENE HARDENING (3 bosqich, hali `fokus-ai-test`ga deploy qilinmagan):**
   - **1-bosqich — AI UX** (commit `692ac5d`): erkin/umumiy "🤖 AI Tahlil" chat (tugma + `ai_users` holati + catch-all `F.text` handler) barcha rollar menyusidan butunlay olib tashlandi — bot endi umumiy chatbot emas. Ichki, aniq belgilangan AI avtomatizatsiyalari (recruiting scoring/summarization, intizom nizom-tasdiqlash yordamchisi) o'zgarishsiz qoldi.
   - **2-bosqich — Chat tozalash** (commit `5aef0b1`): yangi `bot_workflow_messages` jadvali (`security_audit_log` naqshi asosida) + `services/chat_cleanup.py` — faqat `/closeshift` dialogidagi oraliq bot xabarlari kuzatiladi va smena yakunlanganda (toza yopilganda yoki Nazoratchi/Founder tasdiqlagan/rad etganda) o'chiriladi. Yakuniy hisobot/tasdiq xabari ataylab o'chirilmaydi (kassir "cheki" sifatida qoladi). DB'dagi biznes jadvallarga (smena, tafovut, xarajat va h.k.) umuman tegilmaydi.
@@ -38,8 +39,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
 - 🟡 **P2 (yangi, UX+DATA HYGIENE tekshiruvidan):** `providers/file_storage.py`dagi kategoriya B (kassa/ombor/moshina/market fotolari) retention muddati faqat e'lon qilingan, haqiqiy avtomatik o'chirish yo'q — real amalga oshirish uchun Founder/Nazoratchi review chatidagi tegishli xabarlarni o'chirish kerak bo'ladi (Telegram'da faylni "abadiy o'chirish" API'si yo'q, faqat xabarni o'chirish mumkin).
 - 🟡 **P2:** `employees.photo_file_id` (doimiy xodim profil fotosi) Founder tasdiqlagandan keyin hech qachon qayta o'qilmaydi (na onboarding, na recruiting-hire yo'lida) — hozircha zararsiz, lekin kelajakda yoki tozalanishi, yoki haqiqiy foydalanish joyi (masalan `/profile`ga foto qo'shish) topilishi kerak.
-- `fokus-ai-test` Render servisi hozir `733db6b`da live (Do'konlar routing tuzatishi bilan) — UX+DATA HYGIENE HARDENING'ning 3 bosqichi (`692ac5d`/`5aef0b1`/`e7d9876`) hali deploy QILINMAGAN.
+- 🟡 **P2 (yangi, NAZORATCHI MODULE HARDENING'dan):** `repositories/discipline.py:decide_penalty_appeal` (apellyatsiya tasdiqlash/rad etish) shartsiz `UPDATE` — `try_close_day`/`try_record_supervisor_audit`dagi kabi atomik `WHERE status = expected` guard yo'q. Hozircha xavfsiz, chunki `services/discipline.py:decide_appeal` tekshiruv+yozish orasida hech qanday `await` yo'q (butunlay sinxron SQLite) — lekin bu tasodifiy xavfsizlik, ataylab qo'yilgan guard emas. Agar shu yo'lga kelajakda AI-yordamchi qadam (masalan jarima-qo'llash oqimidagi kabi) qo'shilsa, atomik guard zarur bo'ladi.
+- `fokus-ai-test` Render servisi hozir `7d28cba`da live (UX+DATA HYGIENE HARDENING'ning 3 bosqichi — `692ac5d`/`5aef0b1`/`e7d9876` — bilan birga deploy qilingan). NAZORATCHI MODULE HARDENING (`9013d5e`) hali deploy QILINMAGAN.
 
 ## Keyingi bitta qadam
 
-UX+DATA HYGIENE HARDENING branch HEAD'ini (`e7d9876` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda uchta bosqichni sinab ko'rish: (a) AI Tahlil tugmasi hech qayerda ko'rinmasligi, (b) kassir /closeshift dialogidagi eski xabarlar smena yopilgach chatdan yo'qolishi, (c) muddati o'tgan nomzod arizalari kuniga bir marta avtomatik tozalanishi (buni real vaqtda kuzatish qiyin — kod darajasida test bilan tasdiqlangan).
+NAZORATCHI MODULE HARDENING branch HEAD'ini (`9013d5e` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda nazoratchi bo'lim tugmalari endi sodda matnli va 2 tadan yonma-yon ekanini sinab ko'rish.

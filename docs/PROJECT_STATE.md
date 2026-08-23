@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `6414327` — "Check roles.set_role return value in approval/hire flows (P1 HR consistency)" — overnight P0/P1 hardening pastning oxirgi commiti (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `56e8680`da live, `6414327` hali deploy qilinmagan)
+- **Oxirgi commit:** `955edac` — "Replace behavioral photo tests with a reliable source-structure check" — nomzod fotosi Founder kartasiga yuborilishi izolyatsiya qilindi (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `3139976`da live, `955edac` hali deploy qilinmagan)
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `be84557` — branchdan bir necha commit orqada (`862cc72`, `08bfa2d`, `d8136fd`, `8fa3fa5`, `d0ae153` hali deploy qilinmagan)
+- **Live commit:** `3139976` — branchdan bir necha commit orqada (overnight hardening + foto-izolyatsiya tuzatishi, `955edac` hali deploy qilinmagan)
 
 ## Render — production
 

@@ -859,7 +859,6 @@ async def founder_branch_employees_handler(message: Message, viewing_branch: str
     )
 
 
-@dp.message(F.text == "👥 Xodimlar")
 def _employee_list_keyboard() -> InlineKeyboardMarkup | None:
     """"👥 Xodimlar" tugmasi uchun — har bir xodim F.I.Sh. bilan alohida
     tugma (``user_id`` foydalanuvchiga ko'rsatilmaydi, faqat

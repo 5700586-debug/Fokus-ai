@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `104a400` — "Route Do'konlar button to branch list instead of employees handler" — "🏪 Do'konlar" endi "👥 Xodimlar" bilan bir xil handlerga tushmaydi, mavjud `RECRUITING_BRANCH_NAMES`dan do'konlar ro'yxatini ko'rsatadi (GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `955edac`da live, `104a400` hali deploy qilinmagan)
+- **Oxirgi commit:** `e7d9876` — "Wire the existing recruiting retention purge into a daily scheduler (Phase 3)" — UX+DATA HYGIENE HARDENING'ning 3-bosqichi (AI Tahlil olib tashlash / kassa chat tozalash / recruiting retention scheduler), barchasi GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir eski `733db6b`da live, uchala bosqich hali deploy qilinmagan
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `955edac` — nomzod fotosi Founder kartasiga izolyatsiya qilingan tuzatish deploy qilindi. Branch HEAD (`df14d6a`) bittagina state-doc commit oldinda.
+- **Live commit:** `733db6b` — Do'konlar routing tuzatishi deploy qilindi. Branch HEAD (`e7d9876`) uchta UX+DATA HYGIENE HARDENING commiti oldinda, hali deploy qilinmagan.
 
 ## Render — production
 

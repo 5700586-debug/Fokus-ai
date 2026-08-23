@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `104a400` — "Route Do'konlar button to branch list instead of employees handler"
+- **Commit:** `e7d9876` — "Wire the existing recruiting retention purge into a daily scheduler (Phase 3)"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `104a400` uchun — **PASSED** (run 32629794045, 26 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `e7d9876` uchun — **PASSED** (run 32635871880, 33 ta test — barchasi muvaffaqiyatli).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,6 +16,11 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
+- **UX + DATA HYGIENE HARDENING (3 bosqich, hali `fokus-ai-test`ga deploy qilinmagan):**
+  - **1-bosqich — AI UX** (commit `692ac5d`): erkin/umumiy "🤖 AI Tahlil" chat (tugma + `ai_users` holati + catch-all `F.text` handler) barcha rollar menyusidan butunlay olib tashlandi — bot endi umumiy chatbot emas. Ichki, aniq belgilangan AI avtomatizatsiyalari (recruiting scoring/summarization, intizom nizom-tasdiqlash yordamchisi) o'zgarishsiz qoldi.
+  - **2-bosqich — Chat tozalash** (commit `5aef0b1`): yangi `bot_workflow_messages` jadvali (`security_audit_log` naqshi asosida) + `services/chat_cleanup.py` — faqat `/closeshift` dialogidagi oraliq bot xabarlari kuzatiladi va smena yakunlanganda (toza yopilganda yoki Nazoratchi/Founder tasdiqlagan/rad etganda) o'chiriladi. Yakuniy hisobot/tasdiq xabari ataylab o'chirilmaydi (kassir "cheki" sifatida qoladi). DB'dagi biznes jadvallarga (smena, tafovut, xarajat va h.k.) umuman tegilmaydi.
+  - **3-bosqich — Rasm retention** (commit `e7d9876`): allaqachon mavjud `services/recruiting_privacy.purge_expired_applications()` (muddati o'tgan nomzod arizasi + javob + tahlil + foto) hech qachon avtomatik chaqirilmagan edi — endi `recruiting_bot.start_scheduler()` orqali kuniga bir marta ishlaydi. Kategoriya A (tekshir-keyin-tashla foto oqimi) kodda umuman yo'q (vision extraction hali stub) — hech narsa "tuzatilmadi", chunki tuzatiladigan narsa topilmadi. Kategoriya B (kassa/ombor/moshina/market fotolari) uchun `providers/file_storage.py`da retention muddati e'lon qilingan, lekin haqiqiy o'chirish hali yoqilmagan — bu ataylab shu bosqichda QILINMADI (haqiqiy amalga oshirish Founder/Nazoratchi review chatidagi xabarlarni o'chirishni talab qiladi — bu 2-bosqichdan farqli, xavfliroq qaror, "keraksiz storage migration" qilmaslik talabiga zid bo'lardi).
+  - Har uch bosqich alohida commit qilindi, har biri GitHub Actions Linux'da PASSED, Senior Architect sifatida o'z-o'zini tekshirdi (regressiya/workaround/parallel-flow yo'q). `fokus-ai-test`ga HALI deploy qilinmagan — real Telegram E2E tekshiruvi HALI BAJARILMAGAN.
 - "🏪 Do'konlar" tugmasi "👥 Xodimlar" bilan bir xil handlerga (`founder_employees_handler` -> `list_users_handler`) yo'naltirilgan edi, chunki ikkalasi bitta `@dp.message(F.text.in_({...}))` filtrida birlashtirilgan edi. Ikkita alohida handlerga bo'lindi: "👥 Xodimlar" o'zgarishsiz qoladi, yangi `founder_branches_handler` mavjud `RECRUITING_BRANCH_NAMES` manbasidan (yangi parallel tizim yaratilmadi) do'konlar ro'yxatini ko'rsatadi. Commit `104a400`, GitHub Actions Linux'da PASSED (run 32629794045, 26 ta test).
 - Nomzod fotosi Founder kartasiga yuborilmayotgan muammo tekshirildi va tuzatildi: `recruiting_bot.py::_run_assessment_and_notify_founder`dagi mavjud `send_photo` mexanizmining o'zida XATO TOPILMADI (ikki mustaqil tekshiruv — men va alohida research agent — buni tasdiqladi). Haqiqiy kamchilik: foto yuborish alohida `try/except`da emas edi — agar u muvaffaqiyatsiz bo'lsa (masalan eskirgan file_id), butun bildirishnoma (matnli karta ham) yo'qolib qolishi mumkin edi. Endi izolyatsiya qilingan (commit `6796fa7`) — foto muammosi matnli kartani endi yiqitmaydi.
 - Shu regressiya uchun test qo'shish 4 ta urinish talab qildi: birinchi uchtasi (to'liq suhbat simulyatsiyasi + haqiqiy AI so'rov, keyin mock qilingan AI, keyin to'g'ridan-to'g'ri DB orqali funksiyani chaqirish) GitHub Actions'da tushuntirib bo'lmaydigan sababdan FAILED bo'ldi — job-log'larga kirish shu repo uchun autentifikatsiyasiz butunlay bloklangan (bir nechta usul sinaldi). Yakuniy yechim: `test_photo_send_is_isolated_from_founder_card_notification` — `inspect.getsource()` orqali manba kodini tekshiradigan, DB/tarmoq/async ishlatmaydigan strukturaviy test (`test_recruiting_permissions.py`dagi mavjud `test_founder_card_never_targets_a_group_chat` bilan bir xil uslub). GitHub Actions Linux'da **PASSED** (run 32625968195, commit `955edac`, 24 ta test).
@@ -31,8 +36,10 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - Production'dagi `8f492e2` deploy failure sababini alohida tekshirish hali qilinmagan (eski, mustaqil masala).
 - `RECRUITING_BRANCH_NAMES` hamon placeholder qiymatlarda (`Filial-1,Filial-2`) — production'ga chiqishdan oldin haqiqiy filial nomlari kerak.
 - `content/daily_greetings/morning_XX.jpg`/`night_XX.jpg` rasmlari hali Founder tomonidan qo'yilmagan.
-- `fokus-ai-test` Render servisi endi `955edac`da live (foto-izolyatsiya tuzatishi bilan) — deploy tasdiqlangan.
+- 🟡 **P2 (yangi, UX+DATA HYGIENE tekshiruvidan):** `providers/file_storage.py`dagi kategoriya B (kassa/ombor/moshina/market fotolari) retention muddati faqat e'lon qilingan, haqiqiy avtomatik o'chirish yo'q — real amalga oshirish uchun Founder/Nazoratchi review chatidagi tegishli xabarlarni o'chirish kerak bo'ladi (Telegram'da faylni "abadiy o'chirish" API'si yo'q, faqat xabarni o'chirish mumkin).
+- 🟡 **P2:** `employees.photo_file_id` (doimiy xodim profil fotosi) Founder tasdiqlagandan keyin hech qachon qayta o'qilmaydi (na onboarding, na recruiting-hire yo'lida) — hozircha zararsiz, lekin kelajakda yoki tozalanishi, yoki haqiqiy foydalanish joyi (masalan `/profile`ga foto qo'shish) topilishi kerak.
+- `fokus-ai-test` Render servisi hozir `733db6b`da live (Do'konlar routing tuzatishi bilan) — UX+DATA HYGIENE HARDENING'ning 3 bosqichi (`692ac5d`/`5aef0b1`/`e7d9876`) hali deploy QILINMAGAN.
 
 ## Keyingi bitta qadam
 
-Real Telegramda `fokus-ai-test` orqali nomzod fotosi Founder kartasiga to'g'ri kelishini qo'lda tekshirish.
+UX+DATA HYGIENE HARDENING branch HEAD'ini (`e7d9876` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda uchta bosqichni sinab ko'rish: (a) AI Tahlil tugmasi hech qayerda ko'rinmasligi, (b) kassir /closeshift dialogidagi eski xabarlar smena yopilgach chatdan yo'qolishi, (c) muddati o'tgan nomzod arizalari kuniga bir marta avtomatik tozalanishi (buni real vaqtda kuzatish qiyin — kod darajasida test bilan tasdiqlangan).

@@ -152,6 +152,15 @@ jobs:
           tests/test_time_bonus_repository.py::test_different_employees_or_dates_do_not_conflict
           tests/test_time_bonus_repository.py::test_service_confirm_manual_uses_todays_date
           tests/test_time_bonus_repository.py::test_get_today_status_none_when_not_yet_granted
+          tests/test_nazoratchi_supervision.py::test_card_shows_grade_buttons_and_no_grade_placeholder
+          tests/test_nazoratchi_supervision.py::test_picking_a_grade_updates_the_card
+          tests/test_nazoratchi_supervision.py::test_regrading_same_day_does_not_double_count_bonus
+          tests/test_nazoratchi_supervision.py::test_grading_zero_is_allowed_and_shown_as_bajarilmagan
+          tests/test_nazoratchi_supervision.py::test_existing_baholash_flow_still_only_offers_three_grades
+          tests/test_discipline_service.py::test_bajarilmagan_grade_is_worth_zero_points
+          tests/test_discipline_service.py::test_regrade_from_alo_to_bajarilmagan_removes_the_points
+          tests/test_discipline_service.py::test_get_daily_grade_returns_none_when_not_yet_graded
+          tests/test_discipline_service.py::test_get_daily_grade_returns_recorded_grade
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

@@ -99,6 +99,35 @@ def test_record_daily_grade_invalid_grade_raises():
         discipline.record_daily_grade(111, 999, "2026-03-01", "a'lo-emas")
 
 
+# --------------------- VAZIFA+NAZORATCHI+BONUS V1, 4-bosqich: ISH BAHOSI --
+
+
+def test_bajarilmagan_grade_is_worth_zero_points():
+    result = discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_BAJARILMAGAN)
+
+    assert result.grade_points == 0
+    assert result.bonus_bank_balance == 0
+
+
+def test_regrade_from_alo_to_bajarilmagan_removes_the_points():
+    discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_ALO)
+    result = discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_BAJARILMAGAN)
+
+    assert result.bonus_bank_balance == 0
+
+
+def test_get_daily_grade_returns_none_when_not_yet_graded():
+    assert discipline.get_daily_grade(111, "2026-03-01") is None
+
+
+def test_get_daily_grade_returns_recorded_grade():
+    discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_NORMA)
+
+    grade = discipline.get_daily_grade(111, "2026-03-01")
+    assert grade["grade_key"] == "norma"
+    assert grade["grade_points"] == 2
+
+
 def test_grade_points_are_tunable_via_rules(monkeypatch):
     """Founder /setrule orqali (kod o'zgarishisiz) baho ballarini
     o'zgartira olishi kerak — GRADE_POINTS avvalgidek kodga hardcode

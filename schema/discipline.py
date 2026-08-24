@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS supervisor_audit (
 INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUES
     ('bos.day_close_deadline', '20:00', NULL, NULL),
     ('bos.supervisor_late_penalty', '40', NULL, NULL),
+    ('bos.grade_points.bajarilmagan', '0', NULL, NULL),
     ('bos.grade_points.chala', '1', NULL, NULL),
     ('bos.grade_points.norma', '2', NULL, NULL),
     ('bos.grade_points.alo', '3', NULL, NULL),

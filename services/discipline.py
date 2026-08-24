@@ -14,11 +14,17 @@ from dataclasses import dataclass
 from repositories import discipline as discipline_repo
 from services import rules as rules_service
 
+GRADE_BAJARILMAGAN = "bajarilmagan"
 GRADE_CHALA = "chala"
 GRADE_NORMA = "norma"
 GRADE_ALO = "alo"
 
-GRADE_LABELS = {GRADE_CHALA: "Chala", GRADE_NORMA: "Norma", GRADE_ALO: "A'lo"}
+GRADE_LABELS = {
+    GRADE_BAJARILMAGAN: "Bajarilmagan",
+    GRADE_CHALA: "Chala",
+    GRADE_NORMA: "Norma",
+    GRADE_ALO: "A'lo",
+}
 
 
 def get_grade_points() -> dict[str, int]:
@@ -117,6 +123,10 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
         balance = get_salary(employee_id)["bonus_bank"]
 
     return EvaluationResult(grade_key=grade_key, grade_points=grade_points, bonus_bank_balance=balance)
+
+
+def get_daily_grade(employee_id: int, eval_date: str) -> dict | None:
+    return discipline_repo.get_daily_evaluation(employee_id, eval_date)
 
 
 def get_daily_leaderboard(eval_date: str) -> list[dict]:

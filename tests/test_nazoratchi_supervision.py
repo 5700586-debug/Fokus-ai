@@ -220,5 +220,68 @@ async def test_double_click_on_time_bonus_button_does_not_duplicate(bot_dp):
     assert status["confirmed_by"] == first_confirmed_by
     assert second  # ikkinchi bosish ham javob beradi (masalan "allaqachon" toast)
 
-    card = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700009", target_chat_id=_NAZORATCHI_ID)
-    assert "Ma'lumot yo'q" in card[0].text
+
+# --------------------------------------------------- 4-bosqich: ish bahosi --
+
+
+async def test_card_shows_grade_buttons_and_no_grade_placeholder(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700013)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700013", target_chat_id=_NAZORATCHI_ID)
+
+    assert "hali qo'yilmagan" in sent[0].text
+    buttons = {btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
+    for grade_key in ("bajarilmagan", "chala", "norma", "alo"):
+        assert f"nzr_grade:700013:{grade_key}" in buttons
+
+
+async def test_picking_a_grade_updates_the_card(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700014)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700014:alo", target_chat_id=_NAZORATCHI_ID)
+
+    assert "3 (A'lo)" in sent[0].text
+
+
+async def test_regrading_same_day_does_not_double_count_bonus(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700015)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700015:chala", target_chat_id=_NAZORATCHI_ID)
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700015:alo", target_chat_id=_NAZORATCHI_ID)
+
+    assert discipline_service.get_salary(700015)["bonus_bank"] == 3
+
+
+async def test_grading_zero_is_allowed_and_shown_as_bajarilmagan(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700016)
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700016:bajarilmagan", target_chat_id=_NAZORATCHI_ID
+    )
+
+    assert "0 (Bajarilmagan)" in sent[0].text
+
+
+async def test_existing_baholash_flow_still_only_offers_three_grades(bot_dp):
+    """Regressiya: yangi 4-darajali (0/1/2/3) tugma to'plami mavjud
+    ``/baholash`` oqimidagi Chala/Norma/A'lo uchtaligini o'zgartirmasligi
+    kerak (u hardcoded, ``discipline.GRADE_LABELS``dan dinamik olinmaydi)."""
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700017)
+
+    await send(main.dp, bot, _NAZORATCHI_ID, text="/baholash")
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="bos:emp:700017", target_chat_id=_NAZORATCHI_ID)
+
+    buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert buttons.count("Chala - 1") + buttons.count("Norma - 2") + buttons.count("A'lo - 3") == 3
+    assert not any("Bajarilmagan" in b for b in buttons)

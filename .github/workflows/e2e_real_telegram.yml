@@ -21,6 +21,17 @@ on:
       - feature/hr-conversational-interview
   workflow_dispatch: {}
 
+# Bir vaqtning o'zida shu branch uchun faqat BITTA E2E run faol
+# bo'lishi kerak -- ikkita parallel run bir xil Telethon test
+# akkaunt/bot juftligi ustida bir xil chatda ishlasa, ular bir-
+# birining xabarlarini "conversation" javobi deb noto'g'ri o'qib
+# qo'yishi mumkin (Telethon client.conversation() global chat
+# oqimini kuzatadi, run-specific emas). Yangi push kelsa eskisi
+# bekor qilinadi -- eski kodni sinash keragi yo'q.
+concurrency:
+  group: e2e-real-telegram-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   e2e:
     runs-on: ubuntu-latest

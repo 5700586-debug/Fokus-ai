@@ -383,6 +383,30 @@ def register(dp: Dispatcher, openai_client) -> None:
         else:
             await message.answer(f"❌ {rule_number}-nizom raqami allaqachon band.")
 
+    @dp.message(Command("setnizombahosi"))
+    async def set_rule_amount_handler(message: Message) -> None:
+        """Nazoratchi kartasidagi "➖ Ball ayirish" tugma ro'yxatida faqat
+        shu buyruq orqali miqdor belgilangan nizom bandlari ko'rinadi —
+        yangi nizom standart holatda bu ro'yxatda YO'Q (qarang
+        ``repositories/discipline.py::list_rules_with_penalty_amount``)."""
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+
+        parts = (message.text or "").split()
+        if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+            await message.answer(
+                "Foydalanish: /setnizombahosi <nizom raqami> <ball miqdori>\n"
+                "Masalan: /setnizombahosi 3 30"
+            )
+            return
+
+        rule_number = int(parts[1])
+        amount = int(parts[2])
+        if discipline.set_rule_penalty_amount(rule_number, amount, message.from_user.id):
+            await message.answer(f"✅ {rule_number}-nizom uchun standart ball: -{amount}.")
+        else:
+            await message.answer(f"❌ {rule_number}-nizom topilmadi.")
+
     @dp.message(Command("listnizom"))
     async def list_rules_handler(message: Message) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):

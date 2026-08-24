@@ -138,6 +138,58 @@ def list_active_rules() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_rules_with_penalty_amount() -> list[dict]:
+    """Faqat Founder ``default_penalty_amount`` belgilab qo'ygan
+    ("tasdiqlangan") nizom bandlari — Nazoratchi tugma orqali ball
+    ayirish uchun. Yangi nizom bandi standart holatda bu ro'yxatda
+    KO'RINMAYDI, chunki miqdor ustuni ``NULL`` bo'lib boshlanadi
+    (qarang ``db.py``dagi ``_ADDITIVE_COLUMNS``)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM company_rules WHERE is_active = 1 AND default_penalty_amount IS NOT NULL "
+            "ORDER BY rule_number"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def set_rule_penalty_amount(rule_number: int, amount: int) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE company_rules SET default_penalty_amount = ? WHERE rule_number = ? AND is_active = 1",
+            (amount, rule_number),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def create_unmatched_report(
+    employee_id: int, reported_by: int, report_text: str, ai_note: str | None = None
+) -> int:
+    """Nazoratchi "📝 Boshqa holat" orqali yozgan, hech qanday tasdiqlangan
+    nizom bandiga mos kelmagan (yoki AI hali ulanmagan/xato bergan)
+    holat — ball ayirilmaydi, faqat Founder ko'rib chiqishi uchun
+    audit sifatida saqlanadi (qarang ``services/discipline.py``)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO discipline_unmatched_reports "
+            "(employee_id, reported_by, report_text, ai_note, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'sent_to_founder', ?)",
+            (employee_id, reported_by, report_text, ai_note, _now()),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------- daily grading --
 
 

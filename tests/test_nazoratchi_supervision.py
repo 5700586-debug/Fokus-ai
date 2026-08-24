@@ -1,6 +1,8 @@
 """VAZIFA + NAZORATCHI + BONUS V1 — 1-bosqich: filial -> aktiv
 xodimlar -> xodim kartasi (``nazoratchi_bot.py``)."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -10,6 +12,13 @@ pytestmark = pytest.mark.anyio
 
 _BRANCH = RECRUITING_BRANCH_NAMES[0]
 _NAZORATCHI_ID = 555001
+
+
+def _mock_openai_text(monkeypatch, main, text: str) -> None:
+    async def fake_create(**kwargs):
+        return SimpleNamespace(output_text=text)
+
+    monkeypatch.setattr(main.openai_client.responses, "create", fake_create)
 
 
 @pytest.fixture
@@ -285,3 +294,143 @@ async def test_existing_baholash_flow_still_only_offers_three_grades(bot_dp):
     buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
     assert buttons.count("Chala - 1") + buttons.count("Norma - 2") + buttons.count("A'lo - 3") == 3
     assert not any("Bajarilmagan" in b for b in buttons)
+
+
+# --------------------------------------------------- 5-bosqich: ball ayirish --
+
+
+def _add_rule_with_amount(rule_number: int, amount: int, title: str = "Telefon ishlatdi") -> None:
+    from services import discipline as discipline_service
+
+    discipline_service.add_rule(rule_number, title, "Ish vaqtida telefon ishlatish taqiqlanadi", created_by=FOUNDER_ID)
+    discipline_service.set_rule_penalty_amount(rule_number, amount, updated_by=FOUNDER_ID)
+
+
+async def test_penalty_menu_shows_placeholder_when_no_rule_has_amount(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700018)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty:700018", target_chat_id=_NAZORATCHI_ID)
+
+    assert "tasdiqlangan ball miqdori bilan nizom bandi yo'q" in sent[0].text
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert "nzr_penalty_other:700018" in buttons
+
+
+async def test_penalty_menu_shows_rule_buttons_with_preset_amount(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700019)
+    _add_rule_with_amount(3, 30)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty:700019", target_chat_id=_NAZORATCHI_ID)
+
+    buttons = {btn.text: btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
+    assert buttons.get("Telefon ishlatdi — -30 ball") == "nzr_penalty_apply:700019:3"
+
+
+async def test_penalty_apply_deducts_bonus_and_notifies_employee_with_buttons(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700020)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700020:3", target_chat_id=_NAZORATCHI_ID
+    )
+
+    assert discipline_service.get_salary(700020)["bonus_bank"] == -30
+
+    employee_texts = [m for m in sent if getattr(m, "chat_id", None) == 700020]
+    assert employee_texts
+    assert "-30 ball" in employee_texts[0].text
+    assert "Telefon ishlatdi" in employee_texts[0].text
+    buttons = [btn.callback_data for row in employee_texts[0].reply_markup.inline_keyboard for btn in row]
+    assert any(b.startswith("nzr_ack:") for b in buttons)
+    assert any(b.startswith("nzr_appeal:") for b in buttons)
+
+
+async def test_penalty_apply_does_not_touch_fixed_salary(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700021)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    discipline_service.set_fixed_salary(700021, 3000000, updated_by=FOUNDER_ID)
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700021:3", target_chat_id=_NAZORATCHI_ID)
+
+    assert discipline_service.get_salary(700021)["fixed_salary"] == 3000000
+
+
+async def test_penalty_other_reports_to_founder_without_deducting_bonus(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700022)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700022", target_chat_id=_NAZORATCHI_ID)
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Nazoratchini haqorat qildi")
+
+    assert discipline_service.get_salary(700022)["bonus_bank"] == 0
+    founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
+    assert founder_texts
+    assert "haqorat qildi" in founder_texts[0].text
+
+
+async def test_employee_ack_removes_notice_buttons(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700023)
+    _add_rule_with_amount(3, 30)
+
+    penalty_sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700023:3", target_chat_id=_NAZORATCHI_ID
+    )
+    employee_msg = next(m for m in penalty_sent if getattr(m, "chat_id", None) == 700023)
+    penalty_id = next(
+        int(btn.callback_data.split(":", 1)[1])
+        for row in employee_msg.reply_markup.inline_keyboard
+        for btn in row
+        if btn.callback_data.startswith("nzr_ack:")
+    )
+
+    sent = await send_callback(main.dp, bot, 700023, data=f"nzr_ack:{penalty_id}", target_chat_id=700023)
+
+    from aiogram.methods import EditMessageReplyMarkup
+
+    edits = [m for m in sent if isinstance(m, EditMessageReplyMarkup)]
+    assert edits
+    assert edits[0].reply_markup is None
+
+
+async def test_employee_appeal_button_starts_existing_appeal_flow(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700024)
+    _add_rule_with_amount(3, 30)
+    from repositories import discipline as discipline_repo
+
+    penalty_sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700024:3", target_chat_id=_NAZORATCHI_ID
+    )
+    employee_msg = next(m for m in penalty_sent if getattr(m, "chat_id", None) == 700024)
+    penalty_id = next(
+        int(btn.callback_data.split(":", 1)[1])
+        for row in employee_msg.reply_markup.inline_keyboard
+        for btn in row
+        if btn.callback_data.startswith("nzr_appeal:")
+    )
+
+    await send_callback(main.dp, bot, 700024, data=f"nzr_appeal:{penalty_id}", target_chat_id=700024)
+    _mock_openai_text(monkeypatch, main, "Tavsiya: ko'rib chiqilsin.")
+    sent = await send(main.dp, bot, 700024, text="Bu adolatsiz, men ishlatmadim")
+
+    penalty = discipline_repo.get_penalty(penalty_id)
+    assert penalty["appeal_status"] == "pending"
+    assert penalty["appeal_reason"] == "Bu adolatsiz, men ishlatmadim"
+
+    founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
+    assert founder_texts

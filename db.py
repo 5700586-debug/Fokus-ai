@@ -119,6 +119,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("cash_shifts", "received_cash_balance", "INTEGER"),
     ("cash_shifts", "discrepancy_reason_text", "TEXT"),
+    ("company_rules", "default_penalty_amount", "INTEGER"),
 ]
 
 

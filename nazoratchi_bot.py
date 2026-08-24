@@ -27,20 +27,33 @@ ishlata oladi — filial-mustaqil ko'rish huquqi
 ``permissions._CROSS_BRANCH_ROLES``da nazoratchi allaqachon bor."""
 
 from aiogram import Dispatcher, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import company_time
+import discipline_bot
 import employees
-from config import RECRUITING_BRANCH_NAMES
+from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import role_name
 from services import discipline, permissions, tasks as tasks_service, time_bonus as time_bonus_service
+
+
+class PenaltyOtherStates(StatesGroup):
+    waiting_reason = State()
+
 
 _CB_BRANCHES = "nzr_branches"
 _CB_BRANCH_PREFIX = "nzr_branch:"
 _CB_EMPLOYEE_PREFIX = "nzr_emp:"
 _CB_TIME_BONUS_PREFIX = "nzr_timebonus:"
 _CB_GRADE_PREFIX = "nzr_grade:"
+_CB_PENALTY_PREFIX = "nzr_penalty:"
+_CB_PENALTY_APPLY_PREFIX = "nzr_penalty_apply:"
+_CB_PENALTY_OTHER_PREFIX = "nzr_penalty_other:"
+_CB_ACK_PREFIX = "nzr_ack:"
+_CB_APPEAL_PREFIX = "nzr_appeal:"
 
 _SOURCE_LABELS = {
     time_bonus_service.SOURCE_AUTO: "AVTO",
@@ -157,8 +170,39 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
             for label, grade_key in _GRADE_BUTTONS
         ]
     )
+    rows.append([InlineKeyboardButton(text="➖ Ball ayirish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _penalty_rule_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Faqat Founder tomonidan ball miqdori belgilangan ("tasdiqlangan")
+    nizom bandlari — AI ham, Nazoratchi ham yangi miqdorni o'zi
+    o'ylab topmaydi (qarang ``discipline.list_rules_with_penalty_amount``)."""
+    rules = discipline.list_rules_with_penalty_amount()
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"{rule['title']} — -{rule['default_penalty_amount']} ball",
+                callback_data=f"{_CB_PENALTY_APPLY_PREFIX}{user_id}:{rule['rule_number']}",
+            )
+        ]
+        for rule in rules
+    ]
+    rows.append([InlineKeyboardButton(text="📝 Boshqa holat", callback_data=f"{_CB_PENALTY_OTHER_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _employee_notice_keyboard(penalty_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tushundim", callback_data=f"{_CB_ACK_PREFIX}{penalty_id}"),
+                InlineKeyboardButton(text="✋ E'tirozim bor", callback_data=f"{_CB_APPEAL_PREFIX}{penalty_id}"),
+            ]
+        ]
+    )
 
 
 def register(dp: Dispatcher) -> None:
@@ -273,6 +317,137 @@ def register(dp: Dispatcher) -> None:
                     profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
                 ),
             )
+
+    # --------------------------------------------------------- ball ayirish --
+
+    @dp.callback_query(F.data.startswith(_CB_PENALTY_PREFIX))
+    async def penalty_menu(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = employees.get_profile(user_id)
+        if profile is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        keyboard = _penalty_rule_keyboard(user_id)
+        text = f"👤 {full_name}\n\n➖ Qaysi nizom bandi bo'yicha ball ayiriladi?"
+        if len(keyboard.inline_keyboard) <= 2:
+            text += "\n\nℹ️ Hozircha tasdiqlangan ball miqdori bilan nizom bandi yo'q — Founder /setnizombahosi orqali belgilashi kerak."
+
+        if callback.message:
+            await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith(_CB_PENALTY_APPLY_PREFIX))
+    async def penalty_apply(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        rule_number = int(parts[2])
+        profile = employees.get_profile(user_id)
+        rule = discipline.get_rule(rule_number)
+        if profile is None or rule is None or rule.get("default_penalty_amount") is None:
+            await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
+            return
+
+        amount = rule["default_penalty_amount"]
+        today = company_time.today().isoformat()
+        result = discipline.apply_penalty(
+            user_id, callback.from_user.id, today, amount, rule_number, comment=None, ai_note=None
+        )
+        await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
+
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        if callback.message:
+            await callback.message.edit_text(
+                f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
+                f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
+                "ℹ️ Fiks oylikka ta'sir qilmaydi.",
+                reply_markup=_employee_card_keyboard(
+                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
+                ),
+            )
+
+        try:
+            await callback.bot.send_message(
+                user_id,
+                f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
+                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+
+    @dp.callback_query(F.data.startswith(_CB_PENALTY_OTHER_PREFIX))
+    async def penalty_other_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        user_id = int(callback.data.split(":", 1)[1])
+        if employees.get_profile(user_id) is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        await state.update_data(penalty_other_employee_id=user_id)
+        await state.set_state(PenaltyOtherStates.waiting_reason)
+        await callback.answer()
+        if callback.message:
+            await callback.message.answer("✍️ Holatni qisqacha yozing (masalan: \"Nazoratchini haqorat qildi\"):")
+
+    @dp.message(StateFilter(PenaltyOtherStates.waiting_reason))
+    async def penalty_other_reason(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("penalty_other_employee_id")
+        await state.clear()
+
+        text = (message.text or "").strip()
+        if not text or user_id is None:
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        discipline.report_unmatched_incident(user_id, message.from_user.id, text)
+        await message.answer(
+            "✅ Qabul qilindi — bu holat tasdiqlangan nizom bandiga mos kelmagani uchun "
+            "ball ayirilmadi, Founder ko'rib chiqishi uchun yuborildi."
+        )
+
+        profile = employees.get_profile(user_id)
+        full_name = (
+            " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) if profile else None
+        ) or f"user_id {user_id}"
+        try:
+            await message.bot.send_message(
+                FOUNDER_ID,
+                f"📝 Nazoratchi tomonidan yozilgan, tasdiqlangan nizomga mos kelmagan holat:\n\n"
+                f"👤 Xodim: {full_name}\n"
+                f"✍️ Nazoratchi yozuvi: {text}",
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Founderga 'boshqa holat' xabarini yuborib bo'lmadi: {error!r}")
+
+    @dp.callback_query(F.data.startswith(_CB_ACK_PREFIX))
+    async def employee_ack(callback: CallbackQuery) -> None:
+        await callback.answer("✅ Qabul qilindi.")
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+
+    @dp.callback_query(F.data.startswith(_CB_APPEAL_PREFIX))
+    async def employee_appeal_start(callback: CallbackQuery, state: FSMContext) -> None:
+        penalty_id = int(callback.data.split(":", 1)[1])
+        await state.update_data(appeal_penalty_id=penalty_id)
+        await state.set_state(discipline_bot.AppealStates.waiting_reason)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer("✍️ Sababingizni matn yoki ovozli xabar sifatida yuboring.")
 
     # ----------------------------------------------------- vazifa biriktirish --
 

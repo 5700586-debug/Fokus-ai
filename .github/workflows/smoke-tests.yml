@@ -161,6 +161,20 @@ jobs:
           tests/test_discipline_service.py::test_regrade_from_alo_to_bajarilmagan_removes_the_points
           tests/test_discipline_service.py::test_get_daily_grade_returns_none_when_not_yet_graded
           tests/test_discipline_service.py::test_get_daily_grade_returns_recorded_grade
+          tests/test_discipline_service.py::test_new_rule_has_no_penalty_amount_by_default
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_makes_it_selectable
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_unknown_rule_returns_false
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_rejects_non_positive
+          tests/test_discipline_service.py::test_apply_penalty_accepts_rule_specific_amount_outside_default_set
+          tests/test_discipline_service.py::test_apply_penalty_still_rejects_amount_matching_neither_source
+          tests/test_discipline_service.py::test_report_unmatched_incident_does_not_touch_bonus_bank
+          tests/test_nazoratchi_supervision.py::test_penalty_menu_shows_placeholder_when_no_rule_has_amount
+          tests/test_nazoratchi_supervision.py::test_penalty_menu_shows_rule_buttons_with_preset_amount
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_deducts_bonus_and_notifies_employee_with_buttons
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_does_not_touch_fixed_salary
+          tests/test_nazoratchi_supervision.py::test_penalty_other_reports_to_founder_without_deducting_bonus
+          tests/test_nazoratchi_supervision.py::test_employee_ack_removes_notice_buttons
+          tests/test_nazoratchi_supervision.py::test_employee_appeal_button_starts_existing_appeal_flow
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

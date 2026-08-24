@@ -377,6 +377,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("founder", "/listusers — Ro'yxatdagi foydalanuvchilar", permissions.ACTION_LIST_USERS),
     ("founder", "/profile — Xodim anketasi (user_id bilan)", permissions.ACTION_VIEW_PROFILE),
     ("founder", "/addnizom — Yangi korxona nizomi qo'shish", permissions.ACTION_MANAGE_DISCIPLINE_RULES),
+    ("founder", "/setnizombahosi — Nizom bandiga standart ball belgilash", permissions.ACTION_MANAGE_DISCIPLINE_RULES),
     ("founder", "/setsalary — Fiks oylik belgilash", permissions.ACTION_SET_SALARY),
     ("founder", "/maosh — Xodim maoshi/bonusini ko'rish", permissions.ACTION_LOOKUP_ANY_SALARY),
     ("founder", "/setrule — Qoida qiymatini o'zgartirish", permissions.ACTION_SET_RULE),

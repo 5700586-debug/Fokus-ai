@@ -87,6 +87,31 @@ def list_rules() -> list[dict]:
     return discipline_repo.list_active_rules()
 
 
+def list_rules_with_penalty_amount() -> list[dict]:
+    return discipline_repo.list_rules_with_penalty_amount()
+
+
+def set_rule_penalty_amount(rule_number: int, amount: int, updated_by: int) -> bool:
+    """Nizom bandiga standart ball miqdorini belgilaydi — Nazoratchi
+    kartasidagi tugma orqali ball ayirish shu miqdordan foydalanadi.
+    Faqat Founder chaqiradi (``ACTION_MANAGE_DISCIPLINE_RULES``).
+    ``updated_by`` hozircha audit uchun saqlanmaydi (``company_rules``da
+    alohida ustun yo'q) — kerak bo'lsa keyin qo'shiladi."""
+    if amount <= 0:
+        raise ValueError(f"ball miqdori musbat bo'lishi kerak: {amount}")
+
+    return discipline_repo.set_rule_penalty_amount(rule_number, amount)
+
+
+def report_unmatched_incident(
+    employee_id: int, reported_by: int, report_text: str, ai_note: str | None = None
+) -> int:
+    """Hech qanday tasdiqlangan nizom bandiga mos kelmagan holat —
+    minus ball QO'LLANMAYDI, faqat Founder ko'rib chiqishi uchun
+    audit yozuvi yaratiladi (qarang ``discipline_unmatched_reports``)."""
+    return discipline_repo.create_unmatched_report(employee_id, reported_by, report_text, ai_note)
+
+
 def extract_rule_number(text: str) -> int | None:
     """"3-nizom", "3 nizom", "nizom 3", "3" kabi matndan nizom raqamini
     ajratib oladi — birinchi topilgan butun sonni qaytaradi.
@@ -164,12 +189,18 @@ def apply_penalty(
     comment: str | None,
     ai_note: str | None,
 ) -> dict:
-    if amount not in get_penalty_amounts():
-        raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
-
     rule = discipline_repo.get_rule_by_number(rule_number)
     if rule is None:
         raise ValueError(f"{rule_number}-nizom topilmadi")
+
+    # ``bos.penalty_amounts`` — /baholash oqimidagi umumiy tugma
+    # to'plami (-10/-20/-30). Nazoratchi kartasidagi nizom-bandi
+    # tugmalari esa har bir bandning O'Z ``default_penalty_amount``
+    # qiymatidan foydalanadi (Founder /setnizombahosi bilan
+    # belgilagan) — bu ikkalasi mustaqil, shuning uchun ikkalasidan
+    # BIRIGA mos kelsa yetarli.
+    if amount not in get_penalty_amounts() and amount != rule.get("default_penalty_amount"):
+        raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
     penalty_id = discipline_repo.create_penalty(
         employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note

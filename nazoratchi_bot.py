@@ -388,45 +388,61 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        parts = callback.data.split(":", 2)
-        if len(parts) != 3:
+        nazoratchi_id = callback.from_user.id
+        # Bir tugmani ikki marta bosish/parallel callback ikki marta ball
+        # ayirmasin — mavjud discipline_bot.py naqshi bilan bir xil
+        # jarayon-ichi guard (qarang o'sha faylning
+        # ``_PENDING_PENALTY_APPLICATIONS`` izohi), ikkala modul BITTA
+        # to'plamni ulashadi (bitta nazoratchi bir vaqtda faqat bitta
+        # ball-ayirish yozuvini qayta ishlaydi, qaysi oqim orqali
+        # boshlangani muhim emas).
+        if nazoratchi_id in discipline_bot._PENDING_PENALTY_APPLICATIONS:
             await callback.answer()
             return
-
-        user_id = int(parts[1])
-        rule_number = int(parts[2])
-        profile = employees.get_profile(user_id)
-        rule = discipline.get_rule(rule_number)
-        if profile is None or rule is None or rule.get("default_penalty_amount") is None:
-            await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
-            return
-
-        amount = rule["default_penalty_amount"]
-        today = company_time.today().isoformat()
-        result = discipline.apply_penalty(
-            user_id, callback.from_user.id, today, amount, rule_number, comment=None, ai_note=None
-        )
-        await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
-
-        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
-        if callback.message:
-            await callback.message.edit_text(
-                f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
-                f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
-                "ℹ️ Fiks oylikka ta'sir qilmaydi.",
-                reply_markup=_employee_card_keyboard(
-                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                ),
-            )
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.add(nazoratchi_id)
 
         try:
-            await callback.bot.send_message(
-                user_id,
-                f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
-                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+            parts = callback.data.split(":", 2)
+            if len(parts) != 3:
+                await callback.answer()
+                return
+
+            user_id = int(parts[1])
+            rule_number = int(parts[2])
+            profile = employees.get_profile(user_id)
+            rule = discipline.get_rule(rule_number)
+            if profile is None or rule is None or rule.get("default_penalty_amount") is None:
+                await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
+                return
+
+            amount = rule["default_penalty_amount"]
+            today = company_time.today().isoformat()
+            result = discipline.apply_penalty(
+                user_id, nazoratchi_id, today, amount, rule_number, comment=None, ai_note=None
             )
-        except Exception as error:  # noqa: BLE001
-            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+            await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
+
+            full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+            if callback.message:
+                await callback.message.edit_text(
+                    f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
+                    f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
+                    "ℹ️ Fiks oylikka ta'sir qilmaydi.",
+                    reply_markup=_employee_card_keyboard(
+                        profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
+                    ),
+                )
+
+            try:
+                await callback.bot.send_message(
+                    user_id,
+                    f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
+                    reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+        finally:
+            discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
     @dp.callback_query(F.data.startswith(_CB_PENALTY_OTHER_PREFIX))
     async def penalty_other_start(callback: CallbackQuery, state: FSMContext) -> None:
@@ -486,44 +502,56 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        parts = callback.data.split(":", 2)
-        if len(parts) != 3:
+        nazoratchi_id = callback.from_user.id
+        if nazoratchi_id in discipline_bot._PENDING_PENALTY_APPLICATIONS:
             await callback.answer()
             return
-
-        user_id = int(parts[1])
-        rule_number = int(parts[2])
-        await state.clear()
-
-        profile = employees.get_profile(user_id)
-        rule = discipline.get_rule(rule_number)
-        if profile is None or rule is None or rule.get("default_penalty_amount") is None:
-            await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
-            return
-
-        amount = rule["default_penalty_amount"]
-        today = company_time.today().isoformat()
-        result = discipline.apply_penalty(
-            user_id, callback.from_user.id, today, amount, rule_number,
-            comment=None, ai_note="AI 'Boshqa holat' matnini shu nizom bandiga mos topdi.",
-        )
-        await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
-
-        if callback.message:
-            await callback.message.edit_text(
-                f"✅ {rule['title']} bo'yicha -{amount} ball qayd etildi.\n"
-                f"💰 Bonus banki: {result['bonus_bank_balance']} ball",
-                reply_markup=None,
-            )
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.add(nazoratchi_id)
 
         try:
-            await callback.bot.send_message(
-                user_id,
-                f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
-                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+            parts = callback.data.split(":", 2)
+            if len(parts) != 3:
+                await callback.answer()
+                return
+
+            user_id = int(parts[1])
+            rule_number = int(parts[2])
+            # Asl erkin matn ("sabab") audit trail'da saqlanib qolishi
+            # uchun state tozalanishidan OLDIN o'qiladi.
+            original_text = (await state.get_data()).get("penalty_other_text")
+            await state.clear()
+
+            profile = employees.get_profile(user_id)
+            rule = discipline.get_rule(rule_number)
+            if profile is None or rule is None or rule.get("default_penalty_amount") is None:
+                await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
+                return
+
+            amount = rule["default_penalty_amount"]
+            today = company_time.today().isoformat()
+            result = discipline.apply_penalty(
+                user_id, nazoratchi_id, today, amount, rule_number,
+                comment=original_text, ai_note="AI 'Boshqa holat' matnini shu nizom bandiga mos topdi.",
             )
-        except Exception as error:  # noqa: BLE001
-            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+            await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
+
+            if callback.message:
+                await callback.message.edit_text(
+                    f"✅ {rule['title']} bo'yicha -{amount} ball qayd etildi.\n"
+                    f"💰 Bonus banki: {result['bonus_bank_balance']} ball",
+                    reply_markup=None,
+                )
+
+            try:
+                await callback.bot.send_message(
+                    user_id,
+                    f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
+                    reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+        finally:
+            discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
     @dp.callback_query(F.data.startswith(_CB_MATCH_REJECT_PREFIX))
     async def match_reject(callback: CallbackQuery, state: FSMContext) -> None:

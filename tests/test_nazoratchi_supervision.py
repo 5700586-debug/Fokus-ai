@@ -515,3 +515,66 @@ async def test_employee_appeal_button_starts_existing_appeal_flow(bot_dp, monkey
 
     founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
     assert founder_texts
+
+
+# --------------------------------------------- 8-bosqich: audit/race-safety --
+
+
+async def test_penalty_apply_blocked_while_same_nazoratchi_has_a_pending_application(bot_dp):
+    """Bir tugmani ikki marta bosish/parallel callback simulyatsiyasi —
+    mavjud ``discipline_bot._PENDING_PENALTY_APPLICATIONS`` naqshi bilan
+    bir xil uslub (qarang test_discipline_bot_flows.py'dagi o'xshash
+    test)."""
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700029)
+    _add_rule_with_amount(3, 30)
+    import discipline_bot
+    from services import discipline as discipline_service
+
+    discipline_bot._PENDING_PENALTY_APPLICATIONS.add(_NAZORATCHI_ID)
+    try:
+        await send_callback(
+            main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700029:3", target_chat_id=_NAZORATCHI_ID
+        )
+    finally:
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(_NAZORATCHI_ID)
+
+    assert discipline_service.get_salary(700029)["bonus_bank"] == 0
+
+
+async def test_penalty_apply_guard_is_released_after_completion(bot_dp):
+    """Guard doimiy qulflanib qolmasligi kerak — muvaffaqiyatli
+    qo'llashdan keyin bo'shatiladi, keyingi (haqiqiy, boshqa) urinish
+    ishlashi kerak."""
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700030)
+    _add_rule_with_amount(3, 30)
+    import discipline_bot
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700030:3", target_chat_id=_NAZORATCHI_ID)
+
+    assert _NAZORATCHI_ID not in discipline_bot._PENDING_PENALTY_APPLICATIONS
+    assert discipline_service.get_salary(700030)["bonus_bank"] == -30
+
+
+async def test_penalty_other_ai_match_confirmed_preserves_original_text_as_comment(bot_dp, monkeypatch):
+    """Audit trail: AI mos topib, Nazoratchi tasdiqlagan holatda ham
+    ASL yozilgan matn ("sabab") jarima yozuvida saqlanib qolishi
+    kerak — tasdiqlash bosqichida yo'qolib qolmasligi kerak."""
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700031)
+    _add_rule_with_amount(3, 30)
+    from repositories import discipline as discipline_repo
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700031", target_chat_id=_NAZORATCHI_ID)
+    _mock_openai_text(monkeypatch, main, "3")
+    await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_yes:700031:3", target_chat_id=_NAZORATCHI_ID)
+
+    penalties = discipline_repo.list_penalties_by_status(700031, "none", limit=10)
+    assert len(penalties) == 1
+    assert penalties[0]["comment"] == "Ish vaqtida telefonda o'ynardi"

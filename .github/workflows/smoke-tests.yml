@@ -185,6 +185,9 @@ jobs:
           tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_applies_penalty
           tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_rejected_goes_to_founder_with_original_text
           tests/test_nazoratchi_supervision.py::test_penalty_other_no_ai_match_falls_back_to_founder_directly
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_blocked_while_same_nazoratchi_has_a_pending_application
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_guard_is_released_after_completion
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_preserves_original_text_as_comment
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

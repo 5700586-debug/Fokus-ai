@@ -31,6 +31,7 @@ xizmatining o'z environment o'zgaruvchisi). Qarang ``e2e/README.md``
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 
 from e2e.scenario import SCENARIO, response_matches
 
@@ -54,6 +55,36 @@ def _load_config() -> dict[str, str]:
         sys.exit(2)
 
     return {name: os.environ[name] for name in _REQUIRED_ENV_VARS}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+
+
+async def _log_recent_messages(client, bot_entity, test_start: datetime, count: int = 6) -> None:
+    """Diagnostika uchun — oxirgi bir nechta xabarni (kim yuborgani,
+    vaqti, ssenariy boshlanishidan OLDIN yoki KEYIN ekani, matn boshi)
+    xavfsiz chop etadi. Session/token/secret bu yerda HECH QACHON
+    ko'rsatilmaydi — faqat chatdagi (allaqachon bot o'zi yuborgan)
+    oddiy matn."""
+    try:
+        messages = await client.get_messages(bot_entity, limit=count)
+    except Exception as error:  # noqa: BLE001
+        print(f"    (oxirgi xabarlarni olishda xato: {type(error).__name__}: {error})")
+        return
+
+    if not messages:
+        print("    (chatda hech qanday xabar topilmadi)")
+        return
+
+    print(f"    Oxirgi {len(messages)} ta xabar (diagnostika, eskisidan yangisiga):")
+    for msg in reversed(list(messages)):
+        sender = "BIZ" if msg.out else "BOT"
+        when = "test boshlanishidan OLDIN" if msg.date < test_start else "test davomida"
+        text_preview = (msg.text or "<matnsiz>")[:100].replace("\n", " \\n ")
+        buttons = _extract_button_texts(msg)
+        button_note = f" | tugmalar: {buttons}" if buttons else ""
+        print(f"      [{msg.date.isoformat()}] {sender} ({when}): {text_preview!r}{button_note}")
 
 
 def _extract_button_texts(message) -> list[str]:
@@ -94,12 +125,19 @@ async def _run(config: dict[str, str]) -> bool:
         await client.disconnect()
         return False
 
-    print(f"➡️  Ulanish o'rnatildi. Bot: @{bot_username}. Ssenariy: {len(SCENARIO)} qadam.\n")
+    bot_entity = await client.get_entity(bot_username)
+    test_start = datetime.now(timezone.utc)
+
+    print(
+        f"➡️  Ulanish o'rnatildi. Bot: @{bot_username}. Ssenariy: {len(SCENARIO)} qadam. "
+        f"Test boshlanish vaqti (UTC): {test_start.isoformat()}\n"
+    )
 
     all_passed = True
     try:
         async with client.conversation(bot_username, timeout=30) as conv:
             for step in SCENARIO:
+                print(f"[{_now()}] → {step.name}: yuborilmoqda {step.send_text!r}")
                 await conv.send_message(step.send_text)
 
                 response_text: str | None = None
@@ -108,14 +146,20 @@ async def _run(config: dict[str, str]) -> bool:
                     response = await conv.get_response(timeout=step.timeout_seconds)
                     response_text = response.text
                     button_texts = _extract_button_texts(response)
+                    print(
+                        f"[{_now()}] ← {step.name}: qabul qilindi "
+                        f"(sender_id={response.sender_id}, chat_id={response.chat_id})"
+                    )
                 except Exception as error:  # noqa: BLE001 — istalgan kutish xatosi ham FAILED
-                    print(f"  (kutish xatosi: {type(error).__name__}: {error})")
+                    print(f"[{_now()}]   (kutish xatosi: {type(error).__name__}: {error})")
 
                 ok, reason = response_matches(step, response_text, button_texts)
                 status = "✅ PASSED" if ok else "❌ FAILED"
                 print(f"{status} — {step.name}: {reason}")
 
                 if not ok:
+                    print(f"  [{step.name}] diagnostika uchun so'nggi xabarlar:")
+                    await _log_recent_messages(client, bot_entity, test_start)
                     all_passed = False
                     break
     finally:

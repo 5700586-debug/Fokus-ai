@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `1a91fc0` — "Serialize real Telegram E2E runs per branch (STAGE 3)". Real Telegram E2E hamon FAILED — ikkita gipoteza (diagnostika yetarli emasligi, parallel run) sinaldi va rad etildi, root cause hali noma'lum, GitHub Actions xom job log'iga autentifikatsiyasiz kirish imkonsiz (batafsil: `FOKUS_AI_STATE.md`). Bu YAGONA ochiq BLOKER — Founder log matnini qo'lda joylashtirmaguncha Stage 2 (fix) boshlanmaydi. Launch-core status (SMENA/KASSA/NAZORATCHI: TAYYOR, BONUS: qisman, VAZIFA: yo'q) va "jarima" so'zini UI'dan olib tashlash (commit `2d286cb`) `FOKUS_AI_STATE.md`da batafsil.
+- **Oxirgi commit:** `ec5e45f` — "Post E2E diagnostics as a commit comment on failure". **✅ Real Telegram E2E endi PASSED** (shu commit uchun) — E2E workflow'ga doimiy diagnostika-comment infratuzilma qo'shildi (FAILED bo'lsa avtomatik commit comment orqali to'liq sabab ko'rinadi, Founder aralashuvisiz), va aynan shu push'dagi run PASSED chiqdi. Launch-core status (SMENA/KASSA/NAZORATCHI: TAYYOR, BONUS: qisman, VAZIFA: yo'q) va "jarima" so'zini UI'dan olib tashlash (commit `2d286cb`) `FOKUS_AI_STATE.md`da batafsil.
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `fd4cfc8` — branch HEAD bilan bir xil, sinxron.
+- **Live commit:** `316c577` — branch HEAD'dan 2 ta hujjat/workflow-only commit orqada (bot xatti-harakatiga ta'sir qilmaydi, qayta deploy shart emas).
 
 ## Render — production
 

@@ -347,7 +347,7 @@ async def ensure_authorized(message: Message) -> bool:
 _SHARED_COMMANDS = [
     "/mystars — Mening yulduzlarim",
     "/mymaosh — Mening oylik/bonus holatim",
-    "/apellyatsiya — Jarimaga e'tiroz bildirish",
+    "/apellyatsiya — Ball ayirishga e'tiroz bildirish",
     "/bugungiporga — Bugungi reyting",
     "/oylikturnir — Oylik reyting",
     "/listnizom — Korxona nizomlari",
@@ -382,7 +382,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("founder", "/listrules — Barcha qoidalarni ko'rish", permissions.ACTION_LIST_RULES),
     ("founder", "/processmonth — Oylik KPI/yulduz hisoblash", permissions.ACTION_PROCESS_MONTH),
     ("founder", "/addvehicle — Yangi mashina qo'shish", permissions.ACTION_MANAGE_VEHICLES),
-    ("nazoratchi", "/baholash — Xodimni kunlik baholash/jarima", permissions.ACTION_EVALUATE_EMPLOYEE),
+    ("nazoratchi", "/baholash — Xodimni kunlik baholash/ball ayirish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),
     ("nazoratchi", "/score — Xodimga oylik ball qo'yish", permissions.ACTION_SCORE_EMPLOYEE),
     ("kassir", "/openshift — Kassa smenasini ochish", permissions.ACTION_OPEN_CASH_SHIFT),

@@ -130,7 +130,7 @@ def _employee_action_keyboard(employee_id: int) -> InlineKeyboardMarkup:
                     text="A'lo - 3", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_ALO}"
                 ),
             ],
-            [InlineKeyboardButton(text="🚫 Jarima (-10/-20/-30)", callback_data=f"bos:penalty_menu:{employee_id}")],
+            [InlineKeyboardButton(text="🚫 Ball ayirish (-10/-20/-30)", callback_data=f"bos:penalty_menu:{employee_id}")],
         ]
     )
 
@@ -151,7 +151,7 @@ def _decision_keyboard(penalty_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Rozi (jarima bekor)", callback_data=f"bos:decide:{penalty_id}:{discipline.DECISION_APPROVED}"
+                    text="✅ Rozi (ball qaytariladi)", callback_data=f"bos:decide:{penalty_id}:{discipline.DECISION_APPROVED}"
                 ),
                 InlineKeyboardButton(
                     text="❌ Rad etish", callback_data=f"bos:decide:{penalty_id}:{discipline.DECISION_REJECTED}"
@@ -197,7 +197,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         employee_id = int(callback.data.split(":")[2])
         name = _employee_name(employee_id)
         await callback.message.edit_text(
-            f"👤 {name}\nBaho tanlang yoki jarima kiriting:",
+            f"👤 {name}\nBaho tanlang yoki ball ayirish kiriting:",
             reply_markup=_employee_action_keyboard(employee_id),
         )
         await callback.answer()
@@ -229,7 +229,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         employee_id = int(callback.data.split(":")[2])
         name = _employee_name(employee_id)
         await callback.message.edit_text(
-            f"🚫 {name} uchun jarima miqdorini tanlang:",
+            f"🚫 {name} uchun ball ayirish miqdorini tanlang:",
             reply_markup=_penalty_amount_keyboard(employee_id),
         )
         await callback.answer()
@@ -298,7 +298,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             name = _employee_name(employee_id)
             await waiting.edit_text(
                 f"{ai_note}\n\n"
-                f"🚫 {name} uchun -{amount} ball jarima qo'llanildi ({rule_number}-nizom).\n"
+                f"🚫 {name} uchun -{amount} ball ayirildi ({rule_number}-nizom).\n"
                 f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
                 "ℹ️ Fiks oylikka ta'sir qilmaydi."
             )
@@ -306,7 +306,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             try:
                 await message.bot.send_message(
                     employee_id,
-                    f"⚠️ Sizga -{amount} ball jarima qo'llanildi ({rule_number}-nizom: {rule['title']}).\n"
+                    f"⚠️ Sizga -{amount} ball ayirildi ({rule_number}-nizom: {rule['title']}).\n"
                     "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring.",
                 )
             except Exception as error:
@@ -449,7 +449,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         penalties = discipline.list_appealable_penalties(message.from_user.id)
         if not penalties:
-            await message.answer("ℹ️ E'tiroz bildirish mumkin bo'lgan jarima topilmadi.")
+            await message.answer("ℹ️ E'tiroz bildirish mumkin bo'lgan ball ayirish topilmadi.")
             return
 
         rows = [
@@ -462,7 +462,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             for penalty in penalties
         ]
         await message.answer(
-            "Qaysi jarimaga e'tiroz bildirasiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+            "Qaysi ball ayirishga e'tiroz bildirasiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
         )
 
     @dp.callback_query(F.data.startswith("bos:appeal:"))
@@ -487,7 +487,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         penalty = discipline.submit_appeal(penalty_id, reason_text, voice_file_id)
         if penalty is None:
-            await message.answer("❌ Bu jarima uchun apellyatsiya topilmadi yoki allaqachon yuborilgan.")
+            await message.answer("❌ Bu ball ayirish uchun apellyatsiya topilmadi yoki allaqachon yuborilgan.")
             return
 
         waiting = await message.answer("⏳ AI qaror taklifini tayyorlayapti...")
@@ -501,7 +501,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         brief_text = (
             f"🧾 Apellyatsiya: {name}\n"
-            f"Jarima: -{penalty['amount']} ball ({penalty['rule_number']}-nizom)\n\n"
+            f"Ball ayirish: -{penalty['amount']} ball ({penalty['rule_number']}-nizom)\n\n"
             f"🤖 AI taklifi:\n{brief}\n\n"
             f"Xodim sababi: {reason_text}"
         )
@@ -540,7 +540,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         verdict_text = (
-            "✅ E'tiroz qondirildi — jarima bekor qilindi."
+            "✅ E'tiroz qondirildi — ball qaytarildi."
             if decision == discipline.DECISION_APPROVED
             else "❌ E'tiroz rad etildi."
         )

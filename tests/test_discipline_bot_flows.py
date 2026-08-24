@@ -101,11 +101,11 @@ async def test_penalty_flow_happy_path_notifies_employee(bot_dp, monkeypatch):
     sent = await send(main.dp, bot, 1, text="3-nizom")
 
     texts = [m.text for m in sent]
-    assert any("jarima qo'llanildi" in (t or "") for t in texts)
+    assert any("ball ayirildi" in (t or "") for t in texts)
     assert discipline.get_salary(111)["bonus_bank"] == -20
 
     employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111]
-    assert any("jarima qo'llanildi" in (t or "") for t in employee_texts)
+    assert any("ball ayirildi" in (t or "") for t in employee_texts)
 
 
 async def test_penalty_flow_unknown_rule_shows_error_and_stays_in_state(bot_dp, monkeypatch):

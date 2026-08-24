@@ -114,3 +114,10 @@ jobs:
           tests/test_e2e_scenario.py::test_response_matches_rejects_timeout_none_response
           tests/test_e2e_scenario.py::test_mutating_action_step_targets_sandbox_blocked_message_not_a_real_shift_action
           tests/test_e2e_scenario.py::test_dokonlar_step_does_not_hardcode_a_specific_branch_name
+          tests/test_nazoratchi_supervision.py::test_filiallar_command_shows_a_button_per_configured_branch
+          tests/test_nazoratchi_supervision.py::test_ordinary_employee_cannot_use_filiallar
+          tests/test_nazoratchi_supervision.py::test_empty_branch_shows_no_data_placeholder
+          tests/test_nazoratchi_supervision.py::test_branch_with_employee_shows_paired_employee_buttons
+          tests/test_nazoratchi_supervision.py::test_tapping_employee_shows_simple_card
+          tests/test_nazoratchi_supervision.py::test_card_back_button_returns_to_the_employees_own_branch
+          tests/test_nazoratchi_supervision.py::test_unknown_employee_id_shows_alert_not_crash

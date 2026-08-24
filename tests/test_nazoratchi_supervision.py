@@ -1,0 +1,117 @@
+"""VAZIFA + NAZORATCHI + BONUS V1 — 1-bosqich: filial -> aktiv
+xodimlar -> xodim kartasi (``nazoratchi_bot.py``)."""
+
+import pytest
+
+from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from tests.bot_harness import send, send_callback
+
+pytestmark = pytest.mark.anyio
+
+_BRANCH = RECRUITING_BRANCH_NAMES[0]
+_NAZORATCHI_ID = 555001
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def _make_nazoratchi(user_id: int = _NAZORATCHI_ID) -> None:
+    from roles import set_role
+
+    set_role(user_id, "nazoratchi", set_by=FOUNDER_ID)
+
+
+def _make_kassir(user_id: int, branch: str = _BRANCH) -> None:
+    from roles import set_role
+    import employees
+
+    set_role(user_id, "kassir", set_by=FOUNDER_ID)
+    employees.submit_profile(
+        user_id,
+        {
+            "familiya": "Valiyev", "ism": "Ali", "otasining_ismi": "Vali",
+            "branch": branch, "role_key": "kassir", "contacts": [],
+        },
+    )
+    employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+
+
+async def test_filiallar_command_shows_a_button_per_configured_branch(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="/filiallar")
+
+    buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    for name in RECRUITING_BRANCH_NAMES:
+        assert f"📍 {name}" in buttons
+
+
+async def test_ordinary_employee_cannot_use_filiallar(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(700001)
+
+    sent = await send(main.dp, bot, 700001, text="/filiallar")
+
+    assert not any("Filiallar" in (getattr(m, "text", "") or "") for m in sent)
+
+
+async def test_empty_branch_shows_no_data_placeholder(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID)
+
+    assert _BRANCH in sent[0].text
+    assert "Ma'lumot yo'q" in sent[0].text
+
+
+async def test_branch_with_employee_shows_paired_employee_buttons(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700002)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID)
+
+    rows = sent[0].reply_markup.inline_keyboard
+    employee_row = rows[0]
+    assert any("Valiyev" in btn.text for btn in employee_row)
+    assert any(btn.callback_data == "nzr_emp:700002" for btn in employee_row)
+    assert any(btn.callback_data == "nzr_branches" for row in rows for btn in row)
+
+
+async def test_tapping_employee_shows_simple_card(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700003)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700003", target_chat_id=_NAZORATCHI_ID)
+
+    assert "Valiyev" in sent[0].text
+    assert _BRANCH in sent[0].text
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert "nzr_branch:0" in buttons
+
+
+async def test_card_back_button_returns_to_the_employees_own_branch(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    second_branch = RECRUITING_BRANCH_NAMES[1] if len(RECRUITING_BRANCH_NAMES) > 1 else RECRUITING_BRANCH_NAMES[0]
+    _make_kassir(700004, branch=second_branch)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700004", target_chat_id=_NAZORATCHI_ID)
+
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    expected_index = RECRUITING_BRANCH_NAMES.index(second_branch)
+    assert f"nzr_branch:{expected_index}" in buttons
+
+
+async def test_unknown_employee_id_shows_alert_not_crash(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:999999", target_chat_id=_NAZORATCHI_ID)
+
+    assert sent

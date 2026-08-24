@@ -49,6 +49,7 @@ import employees  # noqa: E402
 import health_server  # noqa: E402
 import inventory_bot  # noqa: E402
 import invites  # noqa: E402
+import nazoratchi_bot  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
 import recruiting_bot  # noqa: E402
@@ -382,6 +383,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("founder", "/listrules — Barcha qoidalarni ko'rish", permissions.ACTION_LIST_RULES),
     ("founder", "/processmonth — Oylik KPI/yulduz hisoblash", permissions.ACTION_PROCESS_MONTH),
     ("founder", "/addvehicle — Yangi mashina qo'shish", permissions.ACTION_MANAGE_VEHICLES),
+    ("nazoratchi", "/filiallar — Filial bo'yicha xodimlarni ko'rish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/baholash — Xodimni kunlik baholash/ball ayirish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),
     ("nazoratchi", "/score — Xodimga oylik ball qo'yish", permissions.ACTION_SCORE_EMPLOYEE),
@@ -568,6 +570,7 @@ _KASSIR_BUTTON_LABELS: dict[str, str] = {
 # patterniga o'xshash: haqiqiy buyruq o'zgarmaydi, faqat tugmada
 # ko'rinadigan matn almashadi.
 _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
+    "/filiallar": "🏬 Filiallar",
     "/baholash": "📋 Xodimni baholash",
     "/kunniyop": "✅ Kunni yopish",
     "/score": "⭐ Oylik ball qo'yish",
@@ -705,6 +708,7 @@ discipline_bot.register(dp, openai_client)
 supplier_chat_bot.register(dp, openai_client)
 saturn_group_bot.register(dp, openai_client)
 recruiting_bot.register(dp, openai_client)
+nazoratchi_bot.register(dp)
 
 
 def greeting_for_user(user_id: int) -> str:

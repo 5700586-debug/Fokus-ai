@@ -175,6 +175,16 @@ jobs:
           tests/test_nazoratchi_supervision.py::test_penalty_other_reports_to_founder_without_deducting_bonus
           tests/test_nazoratchi_supervision.py::test_employee_ack_removes_notice_buttons
           tests/test_nazoratchi_supervision.py::test_employee_appeal_button_starts_existing_appeal_flow
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_ai_chosen_number
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_when_ai_says_no_match
+          tests/test_discipline_ai.py::test_match_incident_to_rule_ignores_hallucinated_rule_number
+          tests/test_discipline_ai.py::test_match_incident_to_rule_ignores_non_numeric_response
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_on_openai_error
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_when_no_eligible_rules
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_asks_for_confirmation_first
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_applies_penalty
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_rejected_goes_to_founder_with_original_text
+          tests/test_nazoratchi_supervision.py::test_penalty_other_no_ai_match_falls_back_to_founder_directly
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

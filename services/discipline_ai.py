@@ -11,9 +11,12 @@ oddiy fallback matn bilan davom etiladi — botni yiqitmaydigan try/except
 uslubida.
 """
 
+import re
+
 from openai import AsyncOpenAI
 
 _MODEL = "gpt-5-mini"
+_BARE_NUMBER_RE = re.compile(r"^\s*(\d+)\s*$")
 
 
 async def confirm_rule_match(client: AsyncOpenAI, cited_text: str, rule: dict) -> str:
@@ -34,6 +37,54 @@ async def confirm_rule_match(client: AsyncOpenAI, cited_text: str, rule: dict) -
     except Exception as error:
         print(f"OpenAI xatosi (confirm_rule_match): {error!r}")
         return f"✅ {rule['rule_number']}-nizom bazada topildi: {rule['title']}"
+
+
+async def match_incident_to_rule(client: AsyncOpenAI, incident_text: str, rules: list[dict]) -> int | None:
+    """Nazoratchi "📝 Boshqa holat" orqali yozgan erkin matnni
+    TASDIQLANGAN (ball miqdori belgilangan) nizom bandlari bilan
+    MAZMUNAN solishtiradi — so'zma-so'z bir xil bo'lishi shart emas.
+
+    Haqiqiy "gate" shu yerda ham deterministik: AI faqat MAVJUD
+    ro'yxatdagi bitta band raqamini (yoki hech biri mos kelmasa
+    ``None``) tanlaydi — yangi jazo yoki miqdorni O'ZI o'ylab
+    TOPMAYDI, chaqiruvchi kod (``nazoratchi_bot.py``) yakuniy
+    qo'llashdan oldin Nazoratchiga albatta tasdiqlatadi. AI
+    javobi ro'yxatdagi HAQIQIY raqamlardan biriga aynan mos
+    kelmasa (parsing xatosi, ishlab chiqarilgan/mavjud bo'lmagan
+    raqam va h.k.) yoki OpenAI chaqiruvi xato bersa — ``None``
+    (mos kelmadi) qaytariladi, hech qachon taxmin qilinmaydi."""
+    if not rules:
+        return None
+
+    catalog = "\n".join(f"{rule['rule_number']}: {rule['title']} — {rule['content']}" for rule in rules)
+    try:
+        response = await client.responses.create(
+            model=_MODEL,
+            instructions=(
+                "Sen Fokus AI intizom yordamchisisan. Nazoratchi yozgan holat "
+                "matnini quyidagi TASDIQLANGAN nizom bandlari ro'yxati bilan "
+                "MAZMUNAN solishtir (so'zma-so'z bir xil bo'lishi shart emas). "
+                "Agar holat aniq bir bandga mos kelsa, FAQAT o'sha bandning "
+                "raqamini son sifatida javob ber (masalan: 3). Agar hech qanday "
+                "band aniq mos kelmasa yoki ikkilanarli bo'lsa, FAQAT 'YOQ' deb "
+                "javob ber. Boshqa hech qanday matn yozma — yangi band yoki "
+                "miqdor o'ylab topma."
+            ),
+            input=f"Nizom bandlari:\n{catalog}\n\nNazoratchi yozgan holat: {incident_text!r}",
+        )
+        raw = response.output_text or ""
+    except Exception as error:
+        print(f"OpenAI xatosi (match_incident_to_rule): {error!r}")
+        return None
+
+    match = _BARE_NUMBER_RE.match(raw)
+    if not match:
+        return None
+
+    rule_number = int(match.group(1))
+    if any(rule["rule_number"] == rule_number for rule in rules):
+        return rule_number
+    return None
 
 
 async def prepare_appeal_brief(

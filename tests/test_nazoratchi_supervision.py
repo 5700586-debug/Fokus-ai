@@ -406,6 +406,87 @@ async def test_employee_ack_removes_notice_buttons(bot_dp):
     assert edits[0].reply_markup is None
 
 
+# ------------------------------------------------- 6-bosqich: AI nizom match --
+
+
+async def test_penalty_other_ai_match_asks_for_confirmation_first(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700025)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700025", target_chat_id=_NAZORATCHI_ID)
+    _mock_openai_text(monkeypatch, main, "3")
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
+
+    # AI mos topsa ham, tasdiqlanmaguncha ball ayirilmasligi kerak.
+    assert discipline_service.get_salary(700025)["bonus_bank"] == 0
+    assert "mos kelishi mumkin" in sent[0].text
+    buttons = {btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
+    assert "nzr_match_yes:700025:3" in buttons
+    assert "nzr_match_no:700025" in buttons
+
+
+async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700026)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700026", target_chat_id=_NAZORATCHI_ID)
+    _mock_openai_text(monkeypatch, main, "3")
+    await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_yes:700026:3", target_chat_id=_NAZORATCHI_ID)
+
+    assert discipline_service.get_salary(700026)["bonus_bank"] == -30
+    employee_texts = [m for m in sent if getattr(m, "chat_id", None) == 700026]
+    assert employee_texts
+    assert "-30 ball" in employee_texts[0].text
+
+
+async def test_penalty_other_ai_match_rejected_goes_to_founder_with_original_text(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700027)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700027", target_chat_id=_NAZORATCHI_ID)
+    _mock_openai_text(monkeypatch, main, "3")
+    await send(main.dp, bot, _NAZORATCHI_ID, text="Aslida bu boshqa narsa edi")
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_no:700027", target_chat_id=_NAZORATCHI_ID)
+
+    assert discipline_service.get_salary(700027)["bonus_bank"] == 0
+    founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
+    assert founder_texts
+    assert "Aslida bu boshqa narsa edi" in founder_texts[0].text
+
+
+async def test_penalty_other_no_ai_match_falls_back_to_founder_directly(bot_dp, monkeypatch):
+    """AI hech qanday bandga mos kelmasligini aytsa (yoki mavjud bandlar
+    bilan bog'liq bo'lmasa), avvalgi (5-bosqich) xulq-atvor davom
+    etadi — Founderga to'g'ridan-to'g'ri yuboriladi, tasdiqlash
+    so'ralmaydi."""
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700028)
+    _add_rule_with_amount(3, 30)
+    from services import discipline as discipline_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700028", target_chat_id=_NAZORATCHI_ID)
+    _mock_openai_text(monkeypatch, main, "YOQ")
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Mutlaqo aloqasi yo'q holat")
+
+    assert discipline_service.get_salary(700028)["bonus_bank"] == 0
+    assert "tasdiqlangan nizom bandiga mos kelmagani" in sent[0].text
+    founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
+    assert founder_texts
+
+
 async def test_employee_appeal_button_starts_existing_appeal_flow(bot_dp, monkeypatch):
     main, bot = bot_dp
     _make_nazoratchi()

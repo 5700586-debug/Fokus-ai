@@ -711,7 +711,7 @@ discipline_bot.register(dp, openai_client)
 supplier_chat_bot.register(dp, openai_client)
 saturn_group_bot.register(dp, openai_client)
 recruiting_bot.register(dp, openai_client)
-nazoratchi_bot.register(dp)
+nazoratchi_bot.register(dp, openai_client)
 
 
 def greeting_for_user(user_id: int) -> str:

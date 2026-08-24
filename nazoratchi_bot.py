@@ -12,7 +12,17 @@ o'tolmaydi) va 4-bosqich (ISH BAHOSI 0/1/2/3 — mavjud
 ``daily_evaluations``/``record_daily_grade`` qayta ishlatiladi,
 faqat yangi "bajarilmagan"=0 daraja qo'shilgan; mavjud
 ``/baholash``dagi Chala/Norma/A'lo uchtaligi hardcoded bo'lgani
-uchun o'zgarishsiz qoladi).
+uchun o'zgarishsiz qoladi), 5-bosqich (BALL AYIRISH — faqat Founder
+``/setnizombahosi`` bilan miqdor belgilagan nizom bandlari tugma
+sifatida chiqadi, xodimga Tushundim/E'tirozim bor tugmali xabar
+boradi, E'tiroz mavjud ``discipline_bot.AppealStates``ni qayta
+ishlatadi) va 6-bosqich (📝 Boshqa holat — AI
+(``services/discipline_ai.match_incident_to_rule``) erkin matnni
+FAQAT mavjud, tasdiqlangan nizom bandlari bilan mazmunan
+solishtiradi, hech qachon yangi band/miqdor o'ylab topmaydi;
+mos topilsa Nazoratchiga albatta tasdiqlatiladi, topilmasa yoki AI
+xato bersa 5-bosqichdagi "Founderga to'g'ridan-to'g'ri yuborish"
+xatti-harakati o'zgarishsiz davom etadi).
 
 Mavjud naqshlardan qayta foydalanadi: filial nomlari
 ``RECRUITING_BRANCH_NAMES``dan (config, hardcode emas), aktiv
@@ -37,11 +47,12 @@ import discipline_bot
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import role_name
-from services import discipline, permissions, tasks as tasks_service, time_bonus as time_bonus_service
+from services import discipline, discipline_ai, permissions, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
     waiting_reason = State()
+    confirming_match = State()
 
 
 _CB_BRANCHES = "nzr_branches"
@@ -54,6 +65,8 @@ _CB_PENALTY_APPLY_PREFIX = "nzr_penalty_apply:"
 _CB_PENALTY_OTHER_PREFIX = "nzr_penalty_other:"
 _CB_ACK_PREFIX = "nzr_ack:"
 _CB_APPEAL_PREFIX = "nzr_appeal:"
+_CB_MATCH_CONFIRM_PREFIX = "nzr_match_yes:"
+_CB_MATCH_REJECT_PREFIX = "nzr_match_no:"
 
 _SOURCE_LABELS = {
     time_bonus_service.SOURCE_AUTO: "AVTO",
@@ -205,7 +218,36 @@ def _employee_notice_keyboard(penalty_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def register(dp: Dispatcher) -> None:
+def _match_confirm_keyboard(user_id: int, rule_number: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Ha, qo'llash", callback_data=f"{_CB_MATCH_CONFIRM_PREFIX}{user_id}:{rule_number}"
+                ),
+                InlineKeyboardButton(text="❌ Yo'q, Founderga yubor", callback_data=f"{_CB_MATCH_REJECT_PREFIX}{user_id}"),
+            ]
+        ]
+    )
+
+
+def register(dp: Dispatcher, openai_client) -> None:
+    async def _notify_founder_unmatched(bot, employee_id: int, reported_by: int, text: str) -> None:
+        discipline.report_unmatched_incident(employee_id, reported_by, text)
+        profile = employees.get_profile(employee_id)
+        full_name = (
+            " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) if profile else None
+        ) or f"user_id {employee_id}"
+        try:
+            await bot.send_message(
+                FOUNDER_ID,
+                f"📝 Nazoratchi tomonidan yozilgan, tasdiqlangan nizomga mos kelmagan holat:\n\n"
+                f"👤 Xodim: {full_name}\n"
+                f"✍️ Nazoratchi yozuvi: {text}",
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Founderga 'boshqa holat' xabarini yuborib bo'lmadi: {error!r}")
+
     @dp.message(Command("filiallar"))
     async def filiallar_start(message: Message) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_EVALUATE_EMPLOYEE):
@@ -406,32 +448,104 @@ def register(dp: Dispatcher) -> None:
     async def penalty_other_reason(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         user_id = data.get("penalty_other_employee_id")
-        await state.clear()
 
         text = (message.text or "").strip()
         if not text or user_id is None:
+            await state.clear()
             await message.answer("❌ Bekor qilindi.")
             return
 
-        discipline.report_unmatched_incident(user_id, message.from_user.id, text)
+        # AI faqat MAVJUD, ball miqdori belgilangan ("tasdiqlangan")
+        # nizom bandlaridan birini taklif qiladi (yoki hech birini) —
+        # yakuniy qo'llashdan oldin Nazoratchiga ALBATTA tasdiqlatiladi
+        # (qarang services/discipline_ai.match_incident_to_rule).
+        eligible_rules = discipline.list_rules_with_penalty_amount()
+        matched_rule_number = await discipline_ai.match_incident_to_rule(openai_client, text, eligible_rules)
+
+        if matched_rule_number is not None:
+            rule = discipline.get_rule(matched_rule_number)
+            await state.update_data(penalty_other_text=text)
+            await state.set_state(PenaltyOtherStates.confirming_match)
+            await message.answer(
+                f"🤖 Bu holat quyidagi nizom bandiga mos kelishi mumkin:\n"
+                f"{matched_rule_number}-nizom: {rule['title']} — -{rule['default_penalty_amount']} ball\n\n"
+                "Tasdiqlaysizmi?",
+                reply_markup=_match_confirm_keyboard(user_id, matched_rule_number),
+            )
+            return
+
+        await state.clear()
+        await _notify_founder_unmatched(message.bot, user_id, message.from_user.id, text)
         await message.answer(
             "✅ Qabul qilindi — bu holat tasdiqlangan nizom bandiga mos kelmagani uchun "
             "ball ayirilmadi, Founder ko'rib chiqishi uchun yuborildi."
         )
 
+    @dp.callback_query(F.data.startswith(_CB_MATCH_CONFIRM_PREFIX))
+    async def match_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        rule_number = int(parts[2])
+        await state.clear()
+
         profile = employees.get_profile(user_id)
-        full_name = (
-            " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) if profile else None
-        ) or f"user_id {user_id}"
+        rule = discipline.get_rule(rule_number)
+        if profile is None or rule is None or rule.get("default_penalty_amount") is None:
+            await callback.answer("Xodim yoki nizom bandi topilmadi.", show_alert=True)
+            return
+
+        amount = rule["default_penalty_amount"]
+        today = company_time.today().isoformat()
+        result = discipline.apply_penalty(
+            user_id, callback.from_user.id, today, amount, rule_number,
+            comment=None, ai_note="AI 'Boshqa holat' matnini shu nizom bandiga mos topdi.",
+        )
+        await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
+
+        if callback.message:
+            await callback.message.edit_text(
+                f"✅ {rule['title']} bo'yicha -{amount} ball qayd etildi.\n"
+                f"💰 Bonus banki: {result['bonus_bank_balance']} ball",
+                reply_markup=None,
+            )
+
         try:
-            await message.bot.send_message(
-                FOUNDER_ID,
-                f"📝 Nazoratchi tomonidan yozilgan, tasdiqlangan nizomga mos kelmagan holat:\n\n"
-                f"👤 Xodim: {full_name}\n"
-                f"✍️ Nazoratchi yozuvi: {text}",
+            await callback.bot.send_message(
+                user_id,
+                f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
+                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
             )
         except Exception as error:  # noqa: BLE001
-            print(f"Founderga 'boshqa holat' xabarini yuborib bo'lmadi: {error!r}")
+            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+
+    @dp.callback_query(F.data.startswith(_CB_MATCH_REJECT_PREFIX))
+    async def match_reject(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        data = await state.get_data()
+        user_id = data.get("penalty_other_employee_id")
+        text = data.get("penalty_other_text")
+        await state.clear()
+
+        if user_id is None or text is None:
+            await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+            return
+
+        await _notify_founder_unmatched(callback.bot, user_id, callback.from_user.id, text)
+        await callback.answer("✅ Founderga yuborildi.")
+        if callback.message:
+            await callback.message.edit_text(
+                "✅ Qabul qilindi — ball ayirilmadi, Founder ko'rib chiqishi uchun yuborildi.",
+                reply_markup=None,
+            )
 
     @dp.callback_query(F.data.startswith(_CB_ACK_PREFIX))
     async def employee_ack(callback: CallbackQuery) -> None:

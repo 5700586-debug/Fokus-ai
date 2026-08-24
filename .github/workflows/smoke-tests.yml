@@ -188,6 +188,12 @@ jobs:
           tests/test_nazoratchi_supervision.py::test_penalty_apply_blocked_while_same_nazoratchi_has_a_pending_application
           tests/test_nazoratchi_supervision.py::test_penalty_apply_guard_is_released_after_completion
           tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_preserves_original_text_as_comment
+          tests/test_nazoratchi_supervision.py::test_e2exodim_creates_approved_employee_for_founder_in_test_env
+          tests/test_nazoratchi_supervision.py::test_e2exodim_does_not_touch_roles_or_allowed_users
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_a_noop_outside_test_environment
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_a_noop_for_non_founder
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_idempotent
+          tests/test_nazoratchi_supervision.py::test_bootstrapped_founder_employee_shows_up_in_filiallar_flow
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

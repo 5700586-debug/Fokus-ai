@@ -1,21 +1,18 @@
 """Real Telegram orqali ``fokus-ai-test`` botining NAZORATCHI kunlik
 nazorat oqimini E2E tekshiruvchi skript: filial -> xodim -> karta ->
 vazifalar -> ISH BAHOSI (0/1/2/3) -> ball ayirish -> xodimga xabar ->
-e'tiroz.
+"✋ E'tirozim bor" -> sabab -> apellyatsiya ochilishi.
 
 Bu ``e2e/run_e2e.py``/``e2e/run_recruiting_e2e.py`` bilan bir xil
-credential/xavfsizlik qoidalariga bo'ysunadi. MUHIM farq: bu yerda
-ham nazoratchi (bu skript ishlatayotgan test akkaunt, FOUNDER_ID
-sifatida tanilgan — barcha amallarga ruxsatli) HAM potentsial "xodim"
-bitta xabar oqimida — lekin farqli o'laroq, real xodim odatda BOSHQA
-Telegram akkaunt bo'ladi. Shuning uchun bu skript ADAPTIV: ball
-ayirilgach, xodimga xabar SHU CHATga kelsa (ya'ni tanlangan xodim
-tasodifan aynan shu test akkaunt bo'lsa) — to'liq xabar/e'tiroz
-oqimini ham sinaydi. Kelmasa (odatiy holat — xodim boshqa akkaunt) —
-bu qadam "BLOCKED (real cheklov)" deb aniq belgilanadi va skript
-FAIL bermaydi, chunki bu kutilgan, arxitektura darajasidagi cheklov
-(bitta test akkaunt bilan ikkita mustaqil Telegram foydalanuvchisini
-simulyatsiya qilib bo'lmaydi — yangi akkaunt yaratilmaydi).
+credential/xavfsizlik qoidalariga bo'ysunadi. "Xodimga xabar ->
+e'tiroz" qadami REAL, ikkinchi Telegram akkaunt talab qiladigan
+qadam bo'lgani uchun, skript avval ``/e2exodim`` (faqat
+``ENVIRONMENT == "test"``da, Founder-only, qarang
+``nazoratchi_bot.py``) buyrug'i orqali shu test akkauntning O'ZINI
+tasdiqlangan xodim sifatida ro'yxatga qo'shadi — shundan keyin
+"tanlangan xodim" ANIQ shu test akkaunt bo'lishi KAFOLATLANADI,
+moslashuvchan/BLOCKED yo'l yo'q: agar xabar/e'tiroz qadami ishlamasa,
+bu HAQIQIY FAILURE.
 
 Nizom bandi: skript o'zining vaqtinchalik nizom bandini
 (``_E2E_RULE_NUMBER``) ``/addnizom``+``/setnizombahosi`` orqali
@@ -102,28 +99,6 @@ async def _click_contains(conv, response, needle: str, *, timeout: int = 25):
     return next_response
 
 
-async def _click_first(conv, response, *, timeout: int = 25):
-    buttons = _extract_inline_buttons(response)
-    if not buttons:
-        raise StepFailed(f"Kutilgan tugmalar topilmadi. Xabar: {response.text!r}")
-    text, data = buttons[0]
-    print(f"[{_now()}] → tugma bosilmoqda (birinchi variant): {text!r}")
-    await response.click(data=data)
-    next_response = await conv.get_response(timeout=timeout)
-    print(f"[{_now()}] ← qabul qilindi: {(next_response.text or '<matnsiz>')!r}")
-    return next_response
-
-
-async def _try_get_response(conv, *, timeout: int):
-    """``conv.get_response()`` bilan bir xil, lekin timeout bo'lsa
-    ``None`` qaytaradi (xato ko'tarmaydi) — bu skriptda TIMEOUT ko'p
-    hollarda haqiqiy xato emas, "xodim boshqa akkaunt edi" degani."""
-    try:
-        return await conv.get_response(timeout=timeout)
-    except asyncio.TimeoutError:
-        return None
-
-
 async def _ensure_e2e_rule(conv) -> None:
     """Vaqtinchalik, ajratilgan nizom bandini tayyorlaydi (idempotent —
     ``/addnizom`` allaqachon mavjud raqamda "band" deb javob bersa ham
@@ -137,34 +112,42 @@ async def _ensure_e2e_rule(conv) -> None:
         raise StepFailed(f"/setnizombahosi kutilmagan javob berdi: {response.text!r}")
 
 
-async def _find_branch_with_employee(conv):
-    """``/filiallar`` javobidagi filial tugmalarini ketma-ket bosib,
-    birinchi AKTIV XODIMI BOR filialni topadi. Qaytaradi:
-    (employee_list_response, branch_text) yoki ``None`` (hech qanday
-    filialda xodim topilmasa)."""
+_BOOTSTRAP_EMPLOYEE_LABEL_NEEDLE = "E2E Sinov"
+
+
+async def _open_bootstrapped_employee_card(conv):
+    """``/e2exodim`` orqali tayyorlangan xodimni (shu test akkauntning
+    o'zi) filial ro'yxatidagi BIRINCHI (index 0) filialdan aniq
+    topadi va uning kartasini ochadi — moslashuvchan/BLOCKED emas,
+    chunki ``/e2exodim`` shu aniq filialga aniq shu nomdagi xodimni
+    kafolatlab qo'yadi."""
     response = await _send_and_wait(conv, "/filiallar")
     branch_buttons = _extract_inline_buttons(response)
     if not branch_buttons:
         raise StepFailed(f"/filiallar hech qanday filial tugmasi bermadi: {response.text!r}")
 
-    for branch_text, branch_data in branch_buttons:
-        print(f"[{_now()}] → filial sinalmoqda: {branch_text!r}")
-        await response.click(data=branch_data)
-        list_response = await conv.get_response(timeout=25)
-        print(f"[{_now()}] ← {(list_response.text or '<matnsiz>')!r}")
+    branch_text, branch_data = branch_buttons[0]
+    print(f"[{_now()}] → filial ochilmoqda: {branch_text!r}")
+    await response.click(data=branch_data)
+    list_response = await conv.get_response(timeout=25)
+    print(f"[{_now()}] ← {(list_response.text or '<matnsiz>')!r}")
 
-        if "Ma'lumot yo'q" not in (list_response.text or ""):
-            employee_buttons = _extract_inline_buttons(list_response)
-            has_employee = any(data and data.startswith(b"nzr_emp:") for _, data in employee_buttons)
-            if has_employee:
-                return list_response, branch_text
+    employee_buttons = _extract_inline_buttons(list_response)
+    match = next(
+        (data for text, data in employee_buttons if _BOOTSTRAP_EMPLOYEE_LABEL_NEEDLE in text and data),
+        None,
+    )
+    if match is None:
+        raise StepFailed(
+            f"/e2exodim orqali tayyorlangan xodim ({_BOOTSTRAP_EMPLOYEE_LABEL_NEEDLE!r}) birinchi filial "
+            f"ro'yxatida topilmadi. Mavjud tugmalar: {[t for t, _ in employee_buttons]!r}"
+        )
 
-        # Bu filialda xodim yo'q -- filiallar ro'yxatiga qaytib,
-        # keyingisini sinaymiz.
-        response = await _send_and_wait(conv, "/filiallar")
-        branch_buttons = _extract_inline_buttons(response)
-
-    return None
+    print(f"[{_now()}] → xodim tugmasi bosilmoqda (bootstrap qilingan, shu test akkaunt).")
+    await list_response.click(data=match)
+    card = await conv.get_response(timeout=25)
+    print(f"[{_now()}] ← {(card.text or '<matnsiz>')!r}")
+    return card
 
 
 async def _run(config: dict[str, str]) -> bool:
@@ -190,16 +173,11 @@ async def _run(config: dict[str, str]) -> bool:
         async with client.conversation(bot_username, timeout=25) as conv:
             await _ensure_e2e_rule(conv)
 
-            found = await _find_branch_with_employee(conv)
-            if found is None:
-                raise StepFailed(
-                    "Hech qanday filialda aktiv xodim topilmadi — Nazoratchi oqimini xodim "
-                    "kartasigacha sinab bo'lmadi (fokus-ai-test'da hozircha tasdiqlangan xodim yo'q)."
-                )
-            list_response, branch_text = found
-            print(f"[{_now()}] ✅ Xodimi bor filial topildi: {branch_text!r}")
+            bootstrap = await _send_and_wait(conv, "/e2exodim")
+            _assert_contains(bootstrap, "tayyorlandi")
+            print(f"[{_now()}] ✅ E2E sinov xodimi (shu test akkaunt) tayyorlandi.")
 
-            card = await _click_first(conv, list_response)
+            card = await _open_bootstrapped_employee_card(conv)
             _assert_contains(card, "Lavozim:", "Filial:", "Doimiy vazifalar", "vaqt bonusi", "ish bahosi")
             print(f"[{_now()}] ✅ Xodim kartasi ko'rindi (vazifalar/vaqt bonusi/ish bahosi bo'limlari bilan).")
 
@@ -222,28 +200,27 @@ async def _run(config: dict[str, str]) -> bool:
             _assert_contains(card, f"-{_E2E_RULE_AMOUNT} ball ayirildi")
             print(f"[{_now()}] ✅ MINUS BALL — '{_E2E_RULE_TITLE}' bosilgach -{_E2E_RULE_AMOUNT} ball qo'llandi.")
 
-            notice = await _try_get_response(conv, timeout=15)
-            if notice is None:
-                print(
-                    f"[{_now()}] ℹ️  XODIM XABARI/E'TIROZ — BLOCKED (real cheklov): tanlangan xodim "
-                    "shu test akkauntdan BOSHQA Telegram foydalanuvchisi, shuning uchun ularning "
-                    "chatiga kelgan xabarni bu bitta akkaunt bilan ko'rib/bosib bo'lmaydi. "
-                    "Bu kutilgan arxitektura cheklovi — yangi akkaunt ATAYLAB yaratilmadi."
+            # /e2exodim tanlangan xodimni ANIQ shu test akkaunt sifatida
+            # kafolatlaydi — shuning uchun bu qadam endi moslashuvchan/
+            # BLOCKED emas, majburiy tekshiruv: xabar shu chatga
+            # kelmasa, bu haqiqiy FAILURE.
+            notice = await conv.get_response(timeout=20)
+            print(f"[{_now()}] ✅ XODIM XABARI — shu chatga keldi.")
+            _assert_contains(notice, f"-{_E2E_RULE_AMOUNT} ball ayirildi")
+            notice_buttons = _extract_inline_buttons(notice)
+            has_ack = any(data and data.startswith(b"nzr_ack:") for _, data in notice_buttons)
+            has_appeal = any(data and data.startswith(b"nzr_appeal:") for _, data in notice_buttons)
+            if not (has_ack and has_appeal):
+                raise StepFailed(
+                    f"Xodim xabarida Tushundim/E'tirozim tugmalari yo'q: {[t for t, _ in notice_buttons]!r}"
                 )
-            else:
-                print(f"[{_now()}] ✅ XODIM XABARI — shu chatga keldi (tanlangan xodim = shu test akkaunt).")
-                notice_buttons = _extract_inline_buttons(notice)
-                has_ack = any(data and data.startswith(b"nzr_ack:") for _, data in notice_buttons)
-                has_appeal = any(data and data.startswith(b"nzr_appeal:") for _, data in notice_buttons)
-                if not (has_ack and has_appeal):
-                    raise StepFailed(
-                        f"Xodim xabarida Tushundim/E'tirozim tugmalari yo'q: {[t for t, _ in notice_buttons]!r}"
-                    )
 
-                reason_prompt = await _click_contains(conv, notice, "E'tirozim")
-                _assert_contains(reason_prompt, "Sababingizni")
-                appeal_sent = await _send_and_wait(conv, "E2E test e'tirozi — bu avtomatik sinov.")
-                print(f"[{_now()}] ✅ E'TIROZ — sabab yuborildi, javob: {appeal_sent.text!r}")
+            reason_prompt = await _click_contains(conv, notice, "E'tirozim")
+            _assert_contains(reason_prompt, "Sababingizni")
+            print(f"[{_now()}] ✅ E'TIROZIM BOR — bosilgach sabab so'raldi.")
+
+            appeal_ack = await _send_and_wait(conv, "E2E test e'tirozi — bu avtomatik sinov.")
+            print(f"[{_now()}] ✅ APELLYATSIYA OCHILDI — sabab yuborilgach javob: {appeal_ack.text!r}")
 
     except StepFailed as error:
         print(f"\n❌ FAILED — {error}")

@@ -578,3 +578,89 @@ async def test_penalty_other_ai_match_confirmed_preserves_original_text_as_comme
     penalties = discipline_repo.list_penalties_by_status(700031, "none", limit=10)
     assert len(penalties) == 1
     assert penalties[0]["comment"] == "Ish vaqtida telefonda o'ynardi"
+
+
+# ------------------------------------------ E2E bootstrap: /e2exodim --
+
+
+async def test_e2exodim_creates_approved_employee_for_founder_in_test_env(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    import nazoratchi_bot
+    import employees
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+
+    assert "tayyorlandi" in sent[0].text
+    profile = employees.get_profile(FOUNDER_ID)
+    assert profile is not None
+    assert profile["status"] == "approved"
+    assert profile["branch"] == _BRANCH
+
+
+async def test_e2exodim_does_not_touch_roles_or_allowed_users(bot_dp, monkeypatch):
+    """Founderning haqiqiy ruxsatlariga umuman tegilmasligi kerak —
+    faqat ``employees`` jadvaliga yoziladi."""
+    main, bot = bot_dp
+    import nazoratchi_bot
+    from roles import get_role
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+
+    assert get_role(FOUNDER_ID) == "founder"
+
+
+async def test_e2exodim_is_a_noop_outside_test_environment(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    import nazoratchi_bot
+    import employees
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "production")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+
+    assert not sent
+    assert employees.get_profile(FOUNDER_ID) is None
+
+
+async def test_e2exodim_is_a_noop_for_non_founder(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    import nazoratchi_bot
+    import employees
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+
+    sent = await send(main.dp, bot, 700032, text="/e2exodim")
+
+    assert not sent
+    assert employees.get_profile(700032) is None
+
+
+async def test_e2exodim_is_idempotent(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    import nazoratchi_bot
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+    second = await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+
+    assert "tayyorlandi" in second[0].text
+
+
+async def test_bootstrapped_founder_employee_shows_up_in_filiallar_flow(bot_dp, monkeypatch):
+    """Butun maqsad — Nazoratchi oqimida ANIQ shu akkaunt (Founder)
+    xodim sifatida tanlanadigan bo'lishi kerak."""
+    main, bot = bot_dp
+    import nazoratchi_bot
+
+    monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+    await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, data="nzr_branch:0", target_chat_id=FOUNDER_ID)
+
+    buttons = {btn.text: btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
+    assert any(f"nzr_emp:{FOUNDER_ID}" == data for data in buttons.values())

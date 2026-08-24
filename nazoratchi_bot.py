@@ -45,7 +45,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import company_time
 import discipline_bot
 import employees
-from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import role_name
 from services import discipline, discipline_ai, permissions, tasks as tasks_service, time_bonus as time_bonus_service
 
@@ -247,6 +247,33 @@ def register(dp: Dispatcher, openai_client) -> None:
             )
         except Exception as error:  # noqa: BLE001
             print(f"Founderga 'boshqa holat' xabarini yuborib bo'lmadi: {error!r}")
+
+    @dp.message(Command("e2exodim"))
+    async def e2e_bootstrap_employee_handler(message: Message) -> None:
+        """FAQAT test muhitida (``ENVIRONMENT == "test"``) va FAQAT
+        Founder uchun — real Telegram E2E skriptlari shu buyruq bilan
+        chaqiruvchi akkauntning O'ZINI (odatda shu test akkaunt,
+        ``fokus-ai-test``da ``FOUNDER_ID`` sifatida tanilgan) filialga
+        biriktirilgan, tasdiqlangan "xodim" sifatida ro'yxatga qo'shadi
+        — FAQAT ``employees`` jadvaliga, ``roles``/``allowed_users``ga
+        UMUMAN tegilmaydi (``roles.get_role()`` FOUNDER_ID uchun har
+        doim "founder" qaytaradi, bu buyruq bilan o'zgarmaydi; "kassir"
+        ham single-slot rol emas — qarang ``roles.SINGLE_SLOT_ROLES``).
+        Shu orqali Nazoratchi xodim-karta oqimini (filial->xodim->
+        karta->baho->ball->xodimga xabar->e'tiroz) ikkinchi Telegram
+        akkauntsiz, ANIQ shu test akkaunt ustida real E2E orqali TO'LIQ
+        sinash mumkin bo'ladi. Idempotent — necha marta chaqirilsa ham
+        xavfsiz."""
+        if message.from_user is None or message.from_user.id != FOUNDER_ID or ENVIRONMENT != "test":
+            return
+
+        branch = RECRUITING_BRANCH_NAMES[0] if RECRUITING_BRANCH_NAMES else "Filial-1"
+        employees.submit_profile(
+            message.from_user.id,
+            {"familiya": "E2E", "ism": "Sinov", "branch": branch, "role_key": "kassir", "contacts": []},
+        )
+        employees.approve_profile(message.from_user.id, approved_by=FOUNDER_ID)
+        await message.answer(f"✅ E2E sinov xodimi tayyorlandi ({branch}).")
 
     @dp.message(Command("filiallar"))
     async def filiallar_start(message: Message) -> None:

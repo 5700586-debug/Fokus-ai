@@ -133,3 +133,12 @@ jobs:
           tests/test_tasks_repository.py::test_unassign_task_removes_it_from_employee_card
           tests/test_tasks_repository.py::test_unassign_unknown_task_returns_false
           tests/test_tasks_repository.py::test_inactive_task_no_longer_shown_after_unassign_but_task_row_kept
+          tests/test_nazoratchi_supervision.py::test_card_shows_time_bonus_button_when_not_yet_confirmed
+          tests/test_nazoratchi_supervision.py::test_confirming_time_bonus_updates_card_and_hides_button
+          tests/test_nazoratchi_supervision.py::test_double_click_on_time_bonus_button_does_not_duplicate
+          tests/test_time_bonus_repository.py::test_grant_records_source_and_confirmed_by
+          tests/test_time_bonus_repository.py::test_grant_is_duplicate_safe_for_same_employee_and_date
+          tests/test_time_bonus_repository.py::test_manual_grant_does_not_overwrite_existing_auto_grant
+          tests/test_time_bonus_repository.py::test_different_employees_or_dates_do_not_conflict
+          tests/test_time_bonus_repository.py::test_service_confirm_manual_uses_todays_date
+          tests/test_time_bonus_repository.py::test_get_today_status_none_when_not_yet_granted

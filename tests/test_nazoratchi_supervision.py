@@ -177,5 +177,48 @@ async def test_vazifabekor_removes_task_from_card(bot_dp):
     sent = await send(main.dp, bot, FOUNDER_ID, text="/vazifabekor 700009 Ombor")
     assert "olib tashlandi" in sent[0].text
 
+
+# --------------------------------------------------- 3-bosqich: vaqt bonusi --
+
+
+async def test_card_shows_time_bonus_button_when_not_yet_confirmed(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700010)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700010", target_chat_id=_NAZORATCHI_ID)
+
+    assert "hali tasdiqlanmagan" in sent[0].text
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert "nzr_timebonus:700010" in buttons
+
+
+async def test_confirming_time_bonus_updates_card_and_hides_button(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700011)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_timebonus:700011", target_chat_id=_NAZORATCHI_ID)
+
+    assert "✅ berildi" in sent[0].text
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert "nzr_timebonus:700011" not in buttons
+
+
+async def test_double_click_on_time_bonus_button_does_not_duplicate(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700012)
+    from services import time_bonus as time_bonus_service
+
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_timebonus:700012", target_chat_id=_NAZORATCHI_ID)
+    first_confirmed_by = time_bonus_service.get_today_status(700012)["confirmed_by"]
+
+    second = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_timebonus:700012", target_chat_id=_NAZORATCHI_ID)
+
+    status = time_bonus_service.get_today_status(700012)
+    assert status["confirmed_by"] == first_confirmed_by
+    assert second  # ikkinchi bosish ham javob beradi (masalan "allaqachon" toast)
+
     card = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700009", target_chat_id=_NAZORATCHI_ID)
     assert "Ma'lumot yo'q" in card[0].text

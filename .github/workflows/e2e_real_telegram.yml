@@ -1,7 +1,7 @@
 name: E2E (real Telegram, fokus-ai-test)
 
-# FAQAT QO'LDA ishga tushiriladi (Actions -> this workflow -> Run
-# workflow) — hech qachon push'da avtomatik ishlamaydi. Real Telethon
+# Qo'lda (Actions -> this workflow -> Run workflow) yoki
+# feature/hr-conversational-interview push'ida ishga tushiriladi. Real Telethon
 # akkaunt orqali deploy qilingan `fokus-ai-test` botiga real Telegram
 # xabarlari yuboradi va javoblarni tekshiradi. main/production/real
 # botga umuman tegmaydi — faqat E2E_TEST_BOT_USERNAME orqali
@@ -16,6 +16,9 @@ name: E2E (real Telegram, fokus-ai-test)
 # Bular yo'q bo'lsa ish FAILED bo'ladi — qarang e2e/README.md.
 
 on:
+  push:
+    branches:
+      - feature/hr-conversational-interview
   workflow_dispatch: {}
 
 jobs:

@@ -5,12 +5,12 @@ muhim commit/deploydan keyin yangilanadi (qarang root `CLAUDE.md`).
 Ziddiyat bo'lsa, real Git/Render holati (`git log`, `render deploys
 list`) ustuvor — bu faylning o'zi emas.
 
-**Oxirgi tekshirilgan sana:** 2026-08-23
+**Oxirgi tekshirilgan sana:** 2026-08-24
 
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `fd4cfc8` — "Run real E2E on feature branch pushes" — real Telegram E2E workflow endi har push'da avtomatik ishlaydi (avval faqat qo'lda). Sandbox Exit bug tuzatishi (`9777f73`) va Real Telegram E2E robot (`7b6bcb5`) `fokus-ai-test`ga deploy qilindi.
+- **Oxirgi commit:** `3eaa419` — "Add safe diagnostics to E2E runner for step-level failure visibility". Smoke PASSED, real Telegram E2E hamon FAILED — root cause hali noma'lum, chunki GitHub Actions xom job log'iga autentifikatsiyasiz kirish imkonsiz (batafsil: `FOKUS_AI_STATE.md`). Bu BLOKER — Founder log matnini qo'lda joylashtirmaguncha Stage 2 (fix) boshlanmaydi.
 
 ## Render — test muhiti
 

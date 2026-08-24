@@ -17,3 +17,9 @@
 - Har muhim commit/deploydan keyin `docs/PROJECT_STATE.md`ni yangila.
 - Kerak bo'lsa faqat tegishli `docs/modules/*.md` faylini o'qi — barchasini har safar majburan yuklama.
 - Yakunda juda qisqa hisobot ber.
+
+# Native Windows
+
+- Windows'da faqat: file read/search/edit, `git status`/`diff`/`commit`/`push`.
+- Windows'da hech qachon: `python`, `pytest`, `pip`, build, local E2E, project runtime ishlatma.
+- Barcha test/runtime: GitHub Actions `ubuntu-latest` yoki Render TEST'da.

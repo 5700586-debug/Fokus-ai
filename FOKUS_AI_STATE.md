@@ -8,7 +8,7 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - **Commit:** `316c577`
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
 - **Render TEST holati:** `fokus-ai-test` endi HEAD (`316c577`) bilan SINXRON — avval `fd4cfc8`da qolib ketgan edi (`autoDeploy: no`), Render REST API orqali (mavjud credential, yangi login yo'q) qo'lda deploy qilindi (`dep-da676um7bikc73b3fn0g`, live).
-- **Test natijasi:** GitHub Actions "smoke" — `3eaa419`/`700ca79`/`2d286cb`/`dca0cf0`/`1a91fc0` barchasi uchun PASSED (hech qanday regressiya yo'q). "e2e" (real Telegram) — barcha shu commitlar uchun FAILED, shu jumladan `1a91fc0` — bu ATAYLAB YOLG'IZ (boshqa push navbatda turmasdan) push qilingan, "overlapping run" gipotezasini toza tekshirish uchun (pastga qarang, bu gipoteza RAD ETILDI).
+- **Test natijasi:** GitHub Actions "smoke" — shu sessiyadagi barcha commitlar uchun PASSED (hech qanday regressiya yo'q). "e2e" (real Telegram) — barchasi uchun FAILED, shu jumladan `eee1738` — bu `fokus-ai-test` HEAD bilan TO'LIQ SINXRON bo'lgandan keyingi BIRINCHI run edi. Demak "stale Render deploy" gipotezasi ham RAD ETILDI (3-chi rad etilgan gipoteza, `1a91fc0`dagi "parallel run"dan keyin). Section 0/17 qoidasiga ko'ra to'rtinchi taxminiy fix urinilmadi — dalilsiz.
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.

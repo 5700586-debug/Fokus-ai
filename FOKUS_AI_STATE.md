@@ -5,9 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `9777f73` — "Fix sandbox exit not always clearing preview_role (real E2E bug)"
+- **Commit:** `fd4cfc8` — "Run real E2E on feature branch pushes"
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
-- **Test natijasi:** GitHub Actions "Smoke tests" workflow (`ubuntu-latest`), commit `9777f73` uchun — **PASSED** (run 32655766421, 56 ta test — barchasi muvaffaqiyatli).
+- **Test natijasi:** GitHub Actions "Smoke tests" workflow — commit `9777f73` uchun oxirgi tasdiqlangan PASSED (run 32655766421, 56 ta test). `.github/workflows/e2e_real_telegram.yml` endi `push` orqali ham (avval faqat qo'lda) ishga tushadi — real Telegram E2E credential'lari allaqachon sozlangan va bir marta muvaffaqiyatli ishlagan.
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).
   - `.github/workflows/tests.yml` — to'liq (900+) to'plam, endi FAQAT qo'lda ishga tushiriladi (Actions -> Tests -> Run workflow), har pushda emas.
@@ -16,6 +16,7 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 
 ## Oxirgi tugallangan ish
 
+- **Real Telegram E2E robot ishga tushirildi** (commit `7b6bcb5`/`fd4cfc8`): Telethon asosidagi E2E robot (`e2e/`) endi haqiqiy `fokus-ai-test` boti ustida ishlaydi — credential setup (alohida test akkaunt, Telethon string session, GitHub Secrets, `fokus-ai-test`ning o'z `FOUNDER_ID`si) Founder tomonidan bajarildi va real E2E kamida bir marta muvaffaqiyatli o'tdi. Workflow endi `feature/hr-conversational-interview`ga har push'da ham avtomatik ishlaydi (avval faqat qo'lda edi).
 - **🧪 ROL TESTI — Sandbox Exit E2E bug tuzatildi** (commit `9777f73`, hali `fokus-ai-test`ga deploy qilinmagan): Real Telegram E2E testida topilgan bug — "⬅️ Testdan chiqish" bosilganda `preview_role` ba'zan tozalanmay qolib, keyingi Founder tugmalari (masalan "🏬 Do'konlar") sandbox guard tomonidan bloklanishda davom etardi. Root cause: `_SandboxPreviewMiddleware` FAQAT aniq "⬅️ Testdan chiqish" matnini chiqish sifatida tanir edi — hech qanday boshqa zaxira yo'l yo'q edi (bu fayldagi boshqa barcha oqimlar xavfsiz `_ClearStaleStateMiddleware` orqali o'z-o'zini tuzatadi, lekin u sandbox aktiv paytda hech qachon ishga tushmaydi, chunki sandbox middleware'i undan OLDIN ro'yxatdan o'tib, tanilmagan matn uchun ham handlerga o'tkazmaydi). Yangi `_is_sandbox_escape_text()` — `/start` (deep-link tokeni bilan ham) va Founderning haqiqiy menyu tugmalari (`_SANDBOX_ESCAPE_TEXTS` = `_FOUNDER_MENU_LABELS` + "⚙️ Sozlamalar") endi sandboxni to'liq tozalab (`state.clear()`), so'ralgan HAQIQIY amalni bir zumda bajaradi — ataylab TOR qamrovli: boshqa "/" buyruqlar (masalan `/openshift`) va rol-kategoriya nomlari (masalan "💰 Kassa", preview ichida haqiqiy navigatsiya ma'nosiga ega) bu ro'yxatga KIRITILMAGAN — sandbox DB-yozuv himoyasi zaiflashtirilmagan. 4 ta yangi test (shu jumladan aniq repro: kategoriya ichidan chiqish → /start → Do'konlar). GitHub Actions Linux'da PASSED (run 32655766421, 56 ta test).
 - **FOUNDER UX & STORE MANAGEMENT AUTONOMOUS HARDENING** (5 bosqich, hali `fokus-ai-test`ga deploy qilinmagan):
   - **1-bosqich — 🏬 Do'konlar UX** (commit `969b9ca`): "🏪 Do'konlar" → "🏬 Do'konlar", bosilganda quruq matn ro'yxati o'rniga har bir filial (mavjud `RECRUITING_BRANCH_NAMES`dan) alohida tugma, "⬅️ Orqaga" bilan.
@@ -49,8 +50,8 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - 🟡 **P2 (yangi, UX+DATA HYGIENE tekshiruvidan):** `providers/file_storage.py`dagi kategoriya B (kassa/ombor/moshina/market fotolari) retention muddati faqat e'lon qilingan, haqiqiy avtomatik o'chirish yo'q — real amalga oshirish uchun Founder/Nazoratchi review chatidagi tegishli xabarlarni o'chirish kerak bo'ladi (Telegram'da faylni "abadiy o'chirish" API'si yo'q, faqat xabarni o'chirish mumkin).
 - 🟡 **P2:** `employees.photo_file_id` (doimiy xodim profil fotosi) Founder tasdiqlagandan keyin hech qachon qayta o'qilmaydi (na onboarding, na recruiting-hire yo'lida) — hozircha zararsiz, lekin kelajakda yoki tozalanishi, yoki haqiqiy foydalanish joyi (masalan `/profile`ga foto qo'shish) topilishi kerak.
 - 🟡 **P2 (yangi, NAZORATCHI MODULE HARDENING'dan):** `repositories/discipline.py:decide_penalty_appeal` (apellyatsiya tasdiqlash/rad etish) shartsiz `UPDATE` — `try_close_day`/`try_record_supervisor_audit`dagi kabi atomik `WHERE status = expected` guard yo'q. Hozircha xavfsiz, chunki `services/discipline.py:decide_appeal` tekshiruv+yozish orasida hech qanday `await` yo'q (butunlay sinxron SQLite) — lekin bu tasodifiy xavfsizlik, ataylab qo'yilgan guard emas. Agar shu yo'lga kelajakda AI-yordamchi qadam (masalan jarima-qo'llash oqimidagi kabi) qo'shilsa, atomik guard zarur bo'ladi.
-- `fokus-ai-test` Render servisi hozir `c30ce2e`da live (FOUNDER UX & STORE MANAGEMENT HARDENING, `5ebb8d1`, bilan birga deploy qilingan). Sandbox Exit bug tuzatishi (`9777f73`) hali deploy QILINMAGAN.
+- `fokus-ai-test` Render servisi hozir `fd4cfc8`da live (Sandbox Exit bug tuzatishi + Real Telegram E2E robot bilan birga deploy qilindi).
 
 ## Keyingi bitta qadam
 
-Sandbox Exit bug tuzatishining branch HEAD'ini (`9777f73` yoki undan keyingi state-doc commit) `fokus-ai-test`ga deploy qilib, real Telegramda "⬅️ Testdan chiqish" (va /start hamda boshqa Founder tugmalari sandbox aktiv paytda) endi ishonchli ishlashini qayta tekshirish.
+`fokus-ai-test` endi `fd4cfc8`da live — real Telegram E2E workflow (`.github/workflows/e2e_real_telegram.yml`) shu push orqali avtomatik ishga tushadi, natijani GitHub Actions'da tekshirish kerak.

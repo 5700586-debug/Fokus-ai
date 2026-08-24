@@ -10,12 +10,12 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `9777f73` — "Fix sandbox exit not always clearing preview_role (real E2E bug)" — real Telegram E2E testida topilgan 🧪 Rol testi sandbox chiqish bugini tuzatadi (`/start` va Founder menyu tugmalari endi ishonchli zaxira chiqish yo'li), GitHub Actions Linux'da PASSED, `fokus-ai-test` hozir `c30ce2e`da live (FOUNDER UX & STORE MANAGEMENT HARDENING bilan), bu tuzatish hali deploy qilinmagan
+- **Oxirgi commit:** `fd4cfc8` — "Run real E2E on feature branch pushes" — real Telegram E2E workflow endi har push'da avtomatik ishlaydi (avval faqat qo'lda). Sandbox Exit bug tuzatishi (`9777f73`) va Real Telegram E2E robot (`7b6bcb5`) `fokus-ai-test`ga deploy qilindi.
 
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)
-- **Live commit:** `c30ce2e` — FOUNDER UX & STORE MANAGEMENT HARDENING (5 bosqich) deploy qilindi. Branch HEAD (`9777f73`, Sandbox Exit bug tuzatishi) hali deploy qilinmagan.
+- **Live commit:** `fd4cfc8` — branch HEAD bilan bir xil, sinxron.
 
 ## Render — production
 

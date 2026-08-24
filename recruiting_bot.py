@@ -402,15 +402,6 @@ async def handle_consent(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
 
-    if callback.data == "rec_consent:no":
-        await state.clear()
-        await callback.answer()
-        if callback.message:
-            await callback.message.answer(
-                "Tushunarli. Xohlagan vaqtingizda /apply orqali qaytishingiz mumkin."
-            )
-        return
-
     vacancies = recruiting_repo.list_vacancies(active_only=True)
     if not vacancies:
         await state.clear()
@@ -1195,7 +1186,18 @@ async def _handle_founder_decision(callback: CallbackQuery, decision: str, confi
         return
 
     decided_by = callback.from_user.id if callback.from_user else FOUNDER_ID
-    recruiting_repo.set_founder_decision(application_id, decision, decided_by)
+
+    # Atomik: faqat ariza hali 'awaiting_review' bo'lsa yoziladi
+    # (``handle_hire``dagi bilan bir xil naqsh) — ikkinchi/parallel
+    # bosish (masalan tugma ikki marta bosilishi yoki ikkita qaror
+    # deyarli bir vaqtda kelishi) birinchi qarorni bosib ketmaydi.
+    claimed = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", decision, decided_by)
+    if not claimed:
+        await callback.answer(
+            "Bu nomzod allaqachon ko'rib chiqilgan (parallel urinish aniqlandi).", show_alert=True
+        )
+        return
+
     audit.log_event(
         audit.EVENT_RECRUITING_FOUNDER_DECISION, actor_id=decided_by, target_id=application_id, new_value=decision
     )
@@ -1466,7 +1468,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def cancel_handler(message: Message, state: FSMContext) -> None:
         await handle_cancel(message, state)
 
-    @dp.callback_query(F.data.in_(("rec_consent:yes", "rec_consent:no")), StateFilter(RecruitingStates.consent))
+    @dp.callback_query(F.data == "rec_consent:yes", StateFilter(RecruitingStates.consent))
     async def consent_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await handle_consent(callback, state)
 

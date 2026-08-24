@@ -5,8 +5,9 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 (`git log`, GitHub Actions) ustuvor.
 
 - **Branch:** `feature/hr-conversational-interview`
-- **Commit:** `1a91fc0` — "Serialize real Telegram E2E runs per branch (STAGE 3)"
+- **Commit:** `316c577`
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
+- **Render TEST holati:** `fokus-ai-test` endi HEAD (`316c577`) bilan SINXRON — avval `fd4cfc8`da qolib ketgan edi (`autoDeploy: no`), Render REST API orqali (mavjud credential, yangi login yo'q) qo'lda deploy qilindi (`dep-da676um7bikc73b3fn0g`, live).
 - **Test natijasi:** GitHub Actions "smoke" — `3eaa419`/`700ca79`/`2d286cb`/`dca0cf0`/`1a91fc0` barchasi uchun PASSED (hech qanday regressiya yo'q). "e2e" (real Telegram) — barcha shu commitlar uchun FAILED, shu jumladan `1a91fc0` — bu ATAYLAB YOLG'IZ (boshqa push navbatda turmasdan) push qilingan, "overlapping run" gipotezasini toza tekshirish uchun (pastga qarang, bu gipoteza RAD ETILDI).
 - **Test muhiti:** GitHub Actions, Linux (`ubuntu-latest`).
   - `.github/workflows/smoke-tests.yml` — har pushda avtomatik, tez, kichik (haqiqiy `psycopg2` import + 4 ta muhim test).

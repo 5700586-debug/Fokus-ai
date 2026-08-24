@@ -51,6 +51,10 @@ jobs:
           tests/test_recruiting_permissions.py::test_double_hire_click_does_not_crash_or_duplicate
           tests/test_recruiting_permissions.py::test_set_founder_decision_if_only_claims_when_status_matches
           tests/test_recruiting_permissions.py::test_hire_does_not_touch_employees_when_application_already_claimed
+          tests/test_recruiting_permissions.py::test_ordinary_employee_cannot_decide_on_application
+          tests/test_recruiting_permissions.py::test_founder_can_decide_on_application
+          tests/test_recruiting_permissions.py::test_double_click_on_decision_button_is_a_no_op_the_second_time
+          tests/test_recruiting_permissions.py::test_decision_on_unknown_application_does_not_crash
           tests/test_menu_and_fsm_escape.py::test_top_level_menu_button_escapes_stale_expense_state
           tests/test_discipline_bot_flows.py::test_penalty_entry_skipped_when_already_pending_for_same_nazoratchi
           tests/test_cash_shift_bot_flows.py::test_expense_finish_skipped_when_already_pending_for_same_kassir

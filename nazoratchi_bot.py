@@ -1,7 +1,9 @@
 """Nazoratchi kunlik nazorat oqimi: filial -> aktiv xodimlar -> xodim
 kartasi. Bosqichlab quriladi (qarang loyihaning "VAZIFA + NAZORATCHI +
-BONUS" vazifasi) — bu fayl har bosqichda kengaytiriladi, hozircha
-faqat 1-bosqich (filial/xodim ko'rish).
+BONUS" vazifasi) — bu fayl har bosqichda kengaytiriladi. Hozircha:
+1-bosqich (filial/xodim ko'rish) va 2-bosqich (kartada doimiy
+vazifalar, ``/vazifabiriktir``/``/vazifabekor`` orqali Founder
+boshqaradi, xodim hech narsa bosmaydi).
 
 Mavjud naqshlardan qayta foydalanadi: filial nomlari
 ``RECRUITING_BRANCH_NAMES``dan (config, hardcode emas), aktiv
@@ -22,7 +24,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import employees
 from config import RECRUITING_BRANCH_NAMES
 from roles import role_name
-from services import permissions
+from services import permissions, tasks as tasks_service
 
 _CB_BRANCHES = "nzr_branches"
 _CB_BRANCH_PREFIX = "nzr_branch:"
@@ -80,6 +82,15 @@ def _simple_employee_card_text(profile: dict) -> str:
         f"🏷 Lavozim: {role_name(profile.get('role_key'))}",
         f"🏬 Filial: {profile.get('branch') or '-'}",
     ]
+
+    assigned_tasks = tasks_service.list_tasks_for_employee(profile["user_id"])
+    lines.append("")
+    if assigned_tasks:
+        lines.append("📌 Doimiy vazifalar:")
+        lines.extend(f"  • {title}" for title in assigned_tasks)
+    else:
+        lines.append("📌 Doimiy vazifalar: Ma'lumot yo'q")
+
     return "\n".join(lines)
 
 
@@ -153,3 +164,47 @@ def register(dp: Dispatcher) -> None:
                 reply_markup=_employee_card_keyboard(profile.get("branch")),
             )
         await callback.answer()
+
+    # ----------------------------------------------------- vazifa biriktirish --
+
+    @dp.message(Command("vazifabiriktir"))
+    async def assign_task_handler(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_TASK_ASSIGNMENTS):
+            return
+
+        parts = (message.text or "").split(maxsplit=2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            await message.answer(
+                "Foydalanish: /vazifabiriktir <user_id> <vazifa nomi>\n"
+                "Masalan: /vazifabiriktir 123456789 Ombor"
+            )
+            return
+
+        employee_id = int(parts[1])
+        title = parts[2].strip()
+        if employees.get_profile(employee_id) is None:
+            await message.answer("❌ Bu user_id bilan xodim topilmadi.")
+            return
+
+        task = tasks_service.assign_task_to_employee(title, employee_id, message.from_user.id)
+        await message.answer(f"✅ \"{task['title']}\" vazifasi xodimga biriktirildi.")
+
+    @dp.message(Command("vazifabekor"))
+    async def unassign_task_handler(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_TASK_ASSIGNMENTS):
+            return
+
+        parts = (message.text or "").split(maxsplit=2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            await message.answer(
+                "Foydalanish: /vazifabekor <user_id> <vazifa nomi>\n"
+                "Masalan: /vazifabekor 123456789 Ombor"
+            )
+            return
+
+        employee_id = int(parts[1])
+        title = parts[2].strip()
+        if tasks_service.unassign_task_from_employee(title, employee_id):
+            await message.answer(f"✅ \"{title}\" vazifasi xodimdan olib tashlandi.")
+        else:
+            await message.answer("❌ Bu nomdagi vazifa topilmadi.")

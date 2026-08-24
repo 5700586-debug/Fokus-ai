@@ -115,3 +115,67 @@ async def test_unknown_employee_id_shows_alert_not_crash(bot_dp):
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:999999", target_chat_id=_NAZORATCHI_ID)
 
     assert sent
+
+
+# --------------------------------------------------- 2-bosqich: vazifalar --
+
+
+async def test_card_shows_no_data_placeholder_when_no_tasks_assigned(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700005)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700005", target_chat_id=_NAZORATCHI_ID)
+
+    assert "Doimiy vazifalar: Ma'lumot yo'q" in sent[0].text
+
+
+async def test_card_shows_assigned_tasks(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700006)
+    from services import tasks as tasks_service
+
+    tasks_service.assign_task_to_employee("Ombor", 700006, assigned_by=FOUNDER_ID)
+    tasks_service.assign_task_to_employee("Suv to'ldirish", 700006, assigned_by=FOUNDER_ID)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700006", target_chat_id=_NAZORATCHI_ID)
+
+    assert "Ombor" in sent[0].text
+    assert "Suv to'ldirish" in sent[0].text
+
+
+async def test_vazifabiriktir_founder_only(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(700007)
+
+    sent = await send(main.dp, bot, 700007, text="/vazifabiriktir 700007 Ombor")
+
+    assert not any("biriktirildi" in (getattr(m, "text", "") or "") for m in sent)
+
+
+async def test_vazifabiriktir_assigns_task_visible_on_card(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700008)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/vazifabiriktir 700008 Ombor")
+    assert "biriktirildi" in sent[0].text
+
+    card = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700008", target_chat_id=_NAZORATCHI_ID)
+    assert "Ombor" in card[0].text
+
+
+async def test_vazifabekor_removes_task_from_card(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700009)
+    from services import tasks as tasks_service
+
+    tasks_service.assign_task_to_employee("Ombor", 700009, assigned_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/vazifabekor 700009 Ombor")
+    assert "olib tashlandi" in sent[0].text
+
+    card = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700009", target_chat_id=_NAZORATCHI_ID)
+    assert "Ma'lumot yo'q" in card[0].text

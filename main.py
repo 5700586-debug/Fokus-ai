@@ -383,6 +383,8 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("founder", "/listrules — Barcha qoidalarni ko'rish", permissions.ACTION_LIST_RULES),
     ("founder", "/processmonth — Oylik KPI/yulduz hisoblash", permissions.ACTION_PROCESS_MONTH),
     ("founder", "/addvehicle — Yangi mashina qo'shish", permissions.ACTION_MANAGE_VEHICLES),
+    ("founder", "/vazifabiriktir — Xodimga doimiy vazifa biriktirish", permissions.ACTION_MANAGE_TASK_ASSIGNMENTS),
+    ("founder", "/vazifabekor — Xodimdan doimiy vazifani olib tashlash", permissions.ACTION_MANAGE_TASK_ASSIGNMENTS),
     ("nazoratchi", "/filiallar — Filial bo'yicha xodimlarni ko'rish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/baholash — Xodimni kunlik baholash/ball ayirish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),

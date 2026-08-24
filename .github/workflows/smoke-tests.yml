@@ -121,3 +121,15 @@ jobs:
           tests/test_nazoratchi_supervision.py::test_tapping_employee_shows_simple_card
           tests/test_nazoratchi_supervision.py::test_card_back_button_returns_to_the_employees_own_branch
           tests/test_nazoratchi_supervision.py::test_unknown_employee_id_shows_alert_not_crash
+          tests/test_nazoratchi_supervision.py::test_card_shows_no_data_placeholder_when_no_tasks_assigned
+          tests/test_nazoratchi_supervision.py::test_card_shows_assigned_tasks
+          tests/test_nazoratchi_supervision.py::test_vazifabiriktir_founder_only
+          tests/test_nazoratchi_supervision.py::test_vazifabiriktir_assigns_task_visible_on_card
+          tests/test_nazoratchi_supervision.py::test_vazifabekor_removes_task_from_card
+          tests/test_tasks_repository.py::test_assign_task_to_employee_creates_task_once_by_title
+          tests/test_tasks_repository.py::test_list_tasks_for_employee_returns_assigned_titles
+          tests/test_tasks_repository.py::test_one_task_can_be_assigned_to_multiple_employees
+          tests/test_tasks_repository.py::test_assigning_the_same_task_twice_is_a_safe_no_op
+          tests/test_tasks_repository.py::test_unassign_task_removes_it_from_employee_card
+          tests/test_tasks_repository.py::test_unassign_unknown_task_returns_false
+          tests/test_tasks_repository.py::test_inactive_task_no_longer_shown_after_unassign_but_task_row_kept

@@ -77,6 +77,11 @@ ACTION_SET_SALARY = "set_salary"
 ACTION_LOOKUP_ANY_SALARY = "lookup_any_salary"
 ACTION_DECIDE_APPEAL = "decide_appeal"
 
+# nazoratchi_bot.py — xodimga doimiy vazifa/hudud biriktirish (Founder-only;
+# ko'rish — xodim kartasida — ACTION_EVALUATE_EMPLOYEE orqali, nazoratchi
+# allaqachon shu amalga ega).
+ACTION_MANAGE_TASK_ASSIGNMENTS = "manage_task_assignments"
+
 # saturn_group_bot.py (Founder-only).
 ACTION_SATURN_TEST = "saturn_test"
 

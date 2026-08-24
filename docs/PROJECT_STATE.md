@@ -10,7 +10,7 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
-- **Oxirgi commit:** `3eaa419` — "Add safe diagnostics to E2E runner for step-level failure visibility". Smoke PASSED, real Telegram E2E hamon FAILED — root cause hali noma'lum, chunki GitHub Actions xom job log'iga autentifikatsiyasiz kirish imkonsiz (batafsil: `FOKUS_AI_STATE.md`). Bu BLOKER — Founder log matnini qo'lda joylashtirmaguncha Stage 2 (fix) boshlanmaydi.
+- **Oxirgi commit:** `2d286cb` — "Soften discipline/penalty UI wording away from jarima" (bonus/intizom UI matni yumshatildi, biznes mantiq o'zgarmadi). Real Telegram E2E hamon FAILED — root cause hali noma'lum, GitHub Actions xom job log'iga autentifikatsiyasiz kirish imkonsiz (batafsil: `FOKUS_AI_STATE.md`). Bu YAGONA ochiq BLOKER — Founder log matnini qo'lda joylashtirmaguncha Stage 2 (fix) boshlanmaydi. Launch-core status (SMENA/KASSA/NAZORATCHI: TAYYOR, BONUS: qisman, VAZIFA: yo'q) `FOKUS_AI_STATE.md`da batafsil.
 
 ## Render — test muhiti
 

@@ -12,6 +12,12 @@ list`) ustuvor — bu faylning o'zi emas.
 - **Faol branch:** `feature/hr-conversational-interview`
 - **Oxirgi commit:** `ec5e45f` — "Post E2E diagnostics as a commit comment on failure". **✅ Real Telegram E2E endi PASSED** (shu commit uchun) — E2E workflow'ga doimiy diagnostika-comment infratuzilma qo'shildi (FAILED bo'lsa avtomatik commit comment orqali to'liq sabab ko'rinadi, Founder aralashuvisiz), va aynan shu push'dagi run PASSED chiqdi. Launch-core status (SMENA/KASSA/NAZORATCHI: TAYYOR, BONUS: qisman, VAZIFA: yo'q) va "jarima" so'zini UI'dan olib tashlash (commit `2d286cb`) `FOKUS_AI_STATE.md`da batafsil.
 
+- **Gemini konsultant (read-only)** — rasmiy `google-github-actions/run-gemini-cli@v0`.
+  Gemini faqat kod o'qiydi/tahlil qiladi, yozmaydi va commit qilmaydi.
+  Workflow fayli hozircha `docs/gemini-consultant.workflow.yml`da —
+  aktivlashtirish uchun Founder uni `.github/workflows/`ga ko'chirishi kerak
+  (sabab va aniq buyruq: `docs/GEMINI_CONSULTANT.md`).
+
 ## Render — test muhiti
 
 - **Servis:** `fokus-ai-test` (`srv-d9ts9jad0e5s739ubbcg`, background worker, branch `feature/hr-conversational-interview`)

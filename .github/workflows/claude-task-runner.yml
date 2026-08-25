@@ -53,7 +53,7 @@ jobs:
           prompt_file: ${{ runner.temp }}/claude-task-prompt.md
           anthropic_federation_rule_id: fdrl_01B1gTWmb5bdJ58vciskqALa
           anthropic_organization_id: 8571f626-8cf3-4745-9be4-30355e8c39ed
-          anthropic_service_account_id: svac_01CHZrCAp8Mo79XxXmAiIdUDX
+          anthropic_service_account_id: svac_01CHZrCAp8Mo79XxXmAidUDX
           anthropic_workspace_id: wrkspc_011Lqfhn5PNPoHKgeGxHU1MP
           show_full_output: true
           claude_args: |

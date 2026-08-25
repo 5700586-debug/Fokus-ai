@@ -74,6 +74,8 @@ jobs:
       - name: Gemini consultation
         id: gemini
         continue-on-error: true
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
         uses: google-github-actions/run-gemini-cli@v0
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}

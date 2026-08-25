@@ -55,5 +55,6 @@ jobs:
           anthropic_organization_id: 8571f626-8cf3-4745-9be4-30355e8c39ed
           anthropic_service_account_id: svac_01CHZrCAp8Mo79XxXmAiIdUDX
           anthropic_workspace_id: wrkspc_011Lqfhn5PNPoHKgeGxHU1MP
+          show_full_output: true
           claude_args: |
             --allowedTools Read,Edit,Write,Bash

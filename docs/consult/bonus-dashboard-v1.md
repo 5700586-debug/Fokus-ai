@@ -28,3 +28,4 @@ ko‘rinadi.
 Shu tizimni maksimal sodda, adolatli va kundalik ishlatishga qulay qilish uchun tahlil qil.
 Ortiqcha murakkablik, mantiqiy ziddiyat yoki yaxshiroq minimal variant bo‘lsa ayt.
 Yakunida bitta aniq tavsiya ber.
+Qayta konsultatsiya: Gemini workspace trust sozlamasi tuzatildi.

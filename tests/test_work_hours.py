@@ -113,15 +113,24 @@ def test_month_to_date_hours_returns_no_data_fallback_when_schedule_missing():
     assert result["planned_hours"] is None
 
 
-def test_month_to_date_planned_hours_computed_for_deterministic_schedule():
+def test_month_to_date_planned_hours_ignores_legacy_free_text_and_uses_structured_schedule():
+    """``work_schedule`` erkin matni "09:00-18:00" (9 soat/kun) desa
+    ham, strukturali smena jadvali "10:00-16:00" (6 soat/kun) bilan
+    to'ldirilgan -- natija strukturali manbaga mos kelishi kerak, eski
+    matn ustuniga emas (qarang STRUCTURED WORK SCHEDULE CORE V1)."""
     user_id = _make_employee(hire_date="2020-01-01", work_schedule="09:00–18:00")
     today = company_time.today()
     month_start = date(today.year, today.month, 1)
     expected_day_count = (today - month_start).days + 1
 
+    current = month_start
+    while current <= today:
+        attendance_service.set_scheduled_work_shift(user_id, current.isoformat(), "10:00", "16:00", "test")
+        current += timedelta(days=1)
+
     result = attendance_service.get_month_to_date_hours(user_id)
 
-    assert result["planned_hours"] == 9.0 * expected_day_count
+    assert result["planned_hours"] == 6.0 * expected_day_count
     assert result["range_start"] == month_start.isoformat()
     assert result["range_end"] == today.isoformat()
 
@@ -150,6 +159,7 @@ def test_month_to_date_hours_respects_hire_date_floor():
     attendance_service.record_manual_departure(user_id, yesterday.isoformat(), "17:00")
     attendance_service.record_manual_arrival(user_id, today.isoformat(), "08:00")
     attendance_service.record_manual_departure(user_id, today.isoformat(), "11:00")
+    attendance_service.set_scheduled_work_shift(user_id, today.isoformat(), "09:00", "18:00", "test")
 
     result = attendance_service.get_month_to_date_hours(user_id)
 

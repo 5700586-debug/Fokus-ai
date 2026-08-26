@@ -25,4 +25,23 @@ CREATE TABLE IF NOT EXISTS attendance_reasons (
     created_at TEXT NOT NULL,
     UNIQUE(employee_id, event_date)
 );
+
+-- Strukturali kunlik smena jadvali -- ``employees.work_schedule``
+-- (erkin matn, majburiy format emas) o'rniga reja soatini ISHONCHLI
+-- hisoblash uchun. ``status='work'`` bo'lsa ``planned_start``/
+-- ``planned_end`` "HH:MM" formatida; ``status='off'`` bo'lsa ikkalasi
+-- ham NULL. Bitta xodim/sana uchun bitta qator -- UNIQUE cheklovi
+-- ostida, yozuv yo'q sana esa UNKNOWN (OFF DEB TAXMIN QILINMAYDI).
+CREATE TABLE IF NOT EXISTS employee_scheduled_shifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    shift_date TEXT NOT NULL,
+    planned_start TEXT,
+    planned_end TEXT,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    UNIQUE(employee_id, shift_date)
+);
 """

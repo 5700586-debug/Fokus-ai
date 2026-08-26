@@ -60,6 +60,71 @@ def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive:
     return [dict(row) for row in rows]
 
 
+# ------------------------------------------------- reja smena jadvali --
+
+_SHIFT_UPSERT_COLUMNS = (
+    "employee_id", "shift_date", "planned_start", "planned_end", "status", "source", "created_by", "created_at"
+)
+_SHIFT_UPDATE_CLAUSE = ", ".join(f"{col} = excluded.{col}" for col in _SHIFT_UPSERT_COLUMNS if col not in ("employee_id", "shift_date"))
+
+
+def set_work_shift(
+    employee_id: int, shift_date: str, planned_start: str, planned_end: str, source: str, created_by: int | None = None
+) -> None:
+    """Bitta xodim/sana uchun ATOMIK UPSERT (``ON CONFLICT`` -- SQLite
+    3.24+ va Postgres ikkalasida ham tarjimasiz ishlaydigan naqsh) --
+    parallel yoki takroriy chaqiruv dublikat qator yaratmaydi, oxirgi
+    chaqiruvning qiymati deterministik saqlanadi. Vaqt/interval
+    validatsiyasi (masalan ``start == end``) BU YERDA emas, chaqiruvchi
+    (``services/attendance.py``) tomonida."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO employee_scheduled_shifts "
+            "(employee_id, shift_date, planned_start, planned_end, status, source, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, 'work', ?, ?, ?) "
+            f"ON CONFLICT(employee_id, shift_date) DO UPDATE SET {_SHIFT_UPDATE_CLAUSE}",
+            (employee_id, shift_date, planned_start, planned_end, source, created_by, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_day_off(employee_id: int, shift_date: str, source: str, created_by: int | None = None) -> None:
+    """``set_work_shift``dagi bilan bir xil atomik UPSERT naqshi --
+    ``planned_start``/``planned_end`` doim NULL (dam olish kuni)."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO employee_scheduled_shifts "
+            "(employee_id, shift_date, planned_start, planned_end, status, source, created_by, created_at) "
+            "VALUES (?, ?, NULL, NULL, 'off', ?, ?, ?) "
+            f"ON CONFLICT(employee_id, shift_date) DO UPDATE SET {_SHIFT_UPDATE_CLAUSE}",
+            (employee_id, shift_date, source, created_by, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive: str) -> list[dict]:
+    """``[start_date, end_date_exclusive)`` oralig'idagi reja smenalari
+    -- shu oraliqda yozuvi yo'q sana ro'yxatda umuman ko'rinmaydi
+    (chaqiruvchi buni UNKNOWN deb talqin qilishi kerak, OFF emas)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
+            "ORDER BY shift_date",
+            (employee_id, start_date, end_date_exclusive),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def set_reason(employee_id: int, event_date: str, reason_status: str, note: str | None = None) -> None:
     conn = get_connection()
     try:

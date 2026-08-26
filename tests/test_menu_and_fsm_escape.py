@@ -134,9 +134,10 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
     sent = await send(main.dp, bot, 111, text="🧑‍💼 Nazoratchi")
     rows = sent[0].reply_markup.keyboard
 
-    assert [btn.text for btn in rows[0]] == ["📋 Xodimni baholash", "✅ Kunni yopish"]
-    assert [btn.text for btn in rows[1]] == ["⭐ Oylik ball qo'yish"]
-    assert [btn.text for btn in rows[2]] == ["🔙 Orqaga"]
+    assert [btn.text for btn in rows[0]] == ["🏬 Filiallar", "📋 Xodimni baholash"]
+    assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "⭐ Oylik ball qo'yish"]
+    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari"]
+    assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
 
 
 async def test_nazoratchi_friendly_button_still_triggers_real_command(bot_dp):
@@ -312,10 +313,8 @@ async def test_every_role_category_buttons_are_description_free(bot_dp, role_key
 
     assert len(buttons) > 1  # kamida bitta buyruq + "Orqaga"
     assert not any("—" in b for b in buttons)
-    assert all(
-        b == "🔙 Orqaga" or b.startswith("/") or b in main._KASSIR_BUTTON_LABELS.values()
-        for b in buttons
-    )
+    friendly_labels = set(main._KASSIR_BUTTON_LABELS.values()) | set(main._NAZORATCHI_BUTTON_LABELS.values())
+    assert all(b == "🔙 Orqaga" or b.startswith("/") or b in friendly_labels for b in buttons)
 
 
 # ------------------------- eski (Telegram'da keshlangan) izohli tugma --

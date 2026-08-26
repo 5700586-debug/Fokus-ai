@@ -99,6 +99,14 @@ _CB_SCHEDULE_DATE_PREFIX = "nzr_sched_date:"
 _CB_SCHEDULE_CONFIRM_PREFIX = "nzr_sched_confirm:"
 _CB_SCHEDULE_CANCEL_PREFIX = "nzr_sched_cancel:"
 
+# Grafik o'zgartirish so'rovlari (xodimning `/grafik` oqimi yaratadi).
+# Prefikslar ATAYLAB ":" bilan tugaydi -- shu sababli "nzr_schedreq:5"
+# yuqoridagi "nzr_sched:" filtriga (startswith) tushmaydi.
+_CB_SCHEDULE_REQUESTS = "nzr_schedreqs"
+_CB_SCHEDULE_REQ_PREFIX = "nzr_schedreq:"
+_CB_SCHEDULE_REQ_APPROVE_PREFIX = "nzr_schedreq_yes:"
+_CB_SCHEDULE_REQ_REJECT_PREFIX = "nzr_schedreq_no:"
+
 _SCHEDULE_SOURCE = "nazoratchi_ui"
 _SCHEDULE_MODE_LABELS = {
     attendance_service.SCHEDULE_MODE_FIXED_1: "1-smena",
@@ -395,6 +403,62 @@ def _format_date_display(iso_date: str) -> str:
         return date.fromisoformat(iso_date).strftime("%d.%m.%Y")
     except ValueError:
         return iso_date
+
+
+def _schedule_request_plan(request: dict) -> str:
+    if request["requested_status"] == attendance_service.SHIFT_STATUS_OFF:
+        return "🛌 Dam olish"
+    return f"🕒 Ish vaqti: {request['requested_start']}–{request['requested_end']}"
+
+
+def _schedule_requests_text(requests: list[dict]) -> str:
+    if not requests:
+        return "📅 Grafik o'zgartirish so'rovlari\n\nKutilayotgan so'rov yo'q."
+    return "📅 Grafik o'zgartirish so'rovlari\n\nKo'rib chiqish uchun so'rovni tanlang:"
+
+
+def _schedule_requests_keyboard(requests: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{_employee_label(employees.get_profile(request['employee_id']) or {})} — "
+                    f"{_format_date_display(request['shift_date'])}",
+                    callback_data=f"{_CB_SCHEDULE_REQ_PREFIX}{request['id']}",
+                )
+            ]
+            for request in requests
+        ]
+    )
+
+
+def _schedule_request_text(request: dict, profile: dict) -> str:
+    lines = [
+        "📅 Grafik o'zgartirish so'rovi",
+        "",
+        f"👤 Xodim: {' '.join(part for part in (profile.get('familiya'), profile.get('ism')) if part) or '-'}",
+        f"📅 Sana: {_format_date_display(request['shift_date'])}",
+        f"🔄 So'ralgan: {_schedule_request_plan(request)}",
+    ]
+    if request.get("reason"):
+        lines.append(f"✍️ Sabab: {request['reason']}")
+    return "\n".join(lines)
+
+
+def _schedule_request_decision_keyboard(request_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Tasdiqlash", callback_data=f"{_CB_SCHEDULE_REQ_APPROVE_PREFIX}{request_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Rad etish", callback_data=f"{_CB_SCHEDULE_REQ_REJECT_PREFIX}{request_id}"
+                ),
+            ],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=_CB_SCHEDULE_REQUESTS)],
+        ]
+    )
 
 
 def _mobility_screen_text(profile: dict, mobility_date: str) -> str:
@@ -1470,6 +1534,112 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(schedule_pending=None)
         await callback.answer("Bekor qilindi.")
         await _render_schedule_menu(callback, profile, schedule_date)
+
+    # ---------------------------------- grafik o'zgartirish so'rovlari --
+
+    def _visible_pending_requests(actor_id: int) -> list[dict]:
+        """Kutilayotgan so'rovlardan FAQAT shu aktyor haqiqatan hal qila
+        oladiganlari — mavjud ``can_access_branch`` filial chegarasi va
+        o'z so'rovini o'zi hal qilmaslik qoidasi (Founder istisno,
+        ``_ensure_schedule_access``dagi bilan bir xil)."""
+        visible = []
+        for request in attendance_service.list_schedule_change_requests(
+            status=attendance_service.SCHEDULE_REQUEST_PENDING
+        ):
+            employee_id = request["employee_id"]
+            if employee_id == actor_id and actor_id != FOUNDER_ID:
+                continue
+            profile = employees.get_profile(employee_id)
+            if profile is None or not permissions.can_access_branch(actor_id, profile.get("branch")):
+                continue
+            visible.append(request)
+        return visible
+
+    async def _render_schedule_requests(callback: CallbackQuery) -> None:
+        requests = _visible_pending_requests(callback.from_user.id)
+        if callback.message:
+            await callback.message.edit_text(
+                _schedule_requests_text(requests), reply_markup=_schedule_requests_keyboard(requests)
+            )
+
+    async def _load_request_for_actor(callback: CallbackQuery, request_id: int) -> tuple[dict, dict] | tuple[None, None]:
+        """So'rov HAR safar (ochishda ham, qaror paytida ham) DBdan
+        qaytadan o'qiladi va ruxsat qayta tekshiriladi — eskirgan tugma
+        eski holatga tayanib qaror qabul qildira olmaydi."""
+        request = attendance_service.get_schedule_change_request(request_id)
+        if request is None:
+            await callback.answer("So'rov topilmadi.", show_alert=True)
+            return None, None
+
+        profile = await _ensure_schedule_access(callback, request["employee_id"])
+        if profile is None:
+            return None, None
+
+        return request, profile
+
+    async def _decide_schedule_request(callback: CallbackQuery, request_id: int, approved: bool) -> None:
+        request, _profile = await _load_request_for_actor(callback, request_id)
+        if request is None:
+            return
+
+        # Haqiqiy himoya — ``decide_schedule_change_request``ning atomik
+        # ``pending -> approved/rejected`` o'tishi: ikkinchi/parallel
+        # bosish hech narsani qayta yozmaydi (schedule ham tegilmaydi).
+        decided = request["status"] == attendance_service.SCHEDULE_REQUEST_PENDING and (
+            attendance_service.decide_schedule_change_request(
+                request_id, approved=approved, decided_by=callback.from_user.id
+            )
+        )
+        if decided:
+            await callback.answer("✅ Tasdiqlandi." if approved else "❌ Rad etildi.")
+        else:
+            await callback.answer("Bu so'rov allaqachon hal qilingan.", show_alert=True)
+
+        await _render_schedule_requests(callback)
+
+    @dp.message(Command("grafiksorov"))
+    async def schedule_requests_start(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DAILY_SCHEDULE):
+            return
+
+        requests = _visible_pending_requests(message.from_user.id)
+        await message.answer(
+            _schedule_requests_text(requests), reply_markup=_schedule_requests_keyboard(requests)
+        )
+
+    @dp.callback_query(F.data == _CB_SCHEDULE_REQUESTS)
+    async def schedule_requests_back(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DAILY_SCHEDULE):
+            return
+
+        await callback.answer()
+        await _render_schedule_requests(callback)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_REQ_APPROVE_PREFIX))
+    async def schedule_request_approve(callback: CallbackQuery) -> None:
+        await _decide_schedule_request(callback, int(callback.data.split(":", 1)[1]), approved=True)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_REQ_REJECT_PREFIX))
+    async def schedule_request_reject(callback: CallbackQuery) -> None:
+        await _decide_schedule_request(callback, int(callback.data.split(":", 1)[1]), approved=False)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_REQ_PREFIX))
+    async def schedule_request_open(callback: CallbackQuery) -> None:
+        request_id = int(callback.data.split(":", 1)[1])
+        request, profile = await _load_request_for_actor(callback, request_id)
+        if request is None:
+            return
+
+        if request["status"] == attendance_service.SCHEDULE_REQUEST_PENDING:
+            keyboard = _schedule_request_decision_keyboard(request_id)
+        else:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data=_CB_SCHEDULE_REQUESTS)]]
+            )
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(_schedule_request_text(request, profile), reply_markup=keyboard)
 
     # ------------------------------------------------------ filial nazorati --
 

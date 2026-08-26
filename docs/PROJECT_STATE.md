@@ -10,6 +10,33 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
+- **Yangi (2026-08-26): Grafik o'zgartirish so'rovini TASDIQLASH UI V1
+  (nazoratchi/Founder tomoni).** Endi xodimning `/grafik` so'rovi
+  Telegramda hal qilinadi — avval faqat core mavjud edi. Yangi
+  nazoratchi menyusi tugmasi "📅 Grafik so'rovlari" (`/grafiksorov`,
+  `main._MENU_ENTRIES` + `_NAZORATCHI_BUTTON_LABELS`, ruxsat mavjud
+  `ACTION_MANAGE_DAILY_SCHEDULE` — yangi ACTION_* yo'q). Oqim
+  (`nazoratchi_bot.py`): kutilayotgan so'rovlar ro'yxati (xodim ismi +
+  sana tugmada) -> so'rov kartasi (xodim, sana, tur, ish uchun
+  vaqt, sabab) -> "✅ Tasdiqlash" / "❌ Rad etish" -> ro'yxatga qaytish.
+  Ro'yxat FAQAT aktyor haqiqatan hal qila oladigan so'rovlarni
+  ko'rsatadi (mavjud `can_access_branch` filial chegarasi + o'z
+  so'rovini o'zi hal qila olmaslik, Founder istisno) va har bir amal
+  paytida mavjud `_ensure_schedule_access` orqali QAYTA tekshiriladi.
+  Qaror FAQAT mavjud `services/attendance.decide_schedule_change_request`
+  orqali ketadi — schedule shu kanonik yo'ldan (`set_scheduled_work_shift`/
+  `set_scheduled_day_off`, `source=employee_schedule_request`)
+  yangilanadi, rad etishda schedule'ga UMUMAN tegilmaydi. So'rov har
+  safar DBdan qayta o'qiladi va haqiqiy himoya — servisdagi atomik
+  `pending -> approved/rejected` o'tishi: eskirgan/ikki marta bosilgan
+  tugma schedule'ni qayta yozmaydi va yangi revision yaratmaydi.
+  Xodimga avtomatik bildirishnoma ATAYLAB YO'Q (V1 doirasidan
+  tashqarida). Testlar: `tests/test_schedule_change_approval_ui.py`
+  (13 ta, Linux'da PASSED). Yo'l-yo'lakay
+  `tests/test_menu_and_fsm_escape.py`dagi 2 ta ESKIRGAN
+  nazoratchi-menyu assertion (shu o'zgarishdan OLDIN ham yiqilardi,
+  `/filiallar` qo'shilganidan beri) yangi menyu holatiga moslashtirildi
+  — faqat test kodi, `main.py` menyu mantig'i o'zgarmadi.
 - **Yangi (2026-08-26): Grafik o'zgartirish so'rovi UI V1 (xodim tomoni).**
   Xodim menyusidagi "⭐ Mening natijalarim" bo'limiga bitta yangi amal
   qo'shildi — `/grafik` ("📅 Grafikni o'zgartirish (so'rov)",
@@ -25,13 +52,9 @@ list`) ustuvor — bu faylning o'zi emas.
   profilsiz/tasdiqlanmagan/`offboarded` foydalanuvchi bitta tushunarli
   xabar bilan rad etiladi, FSM holati ochilmaydi. Holat muvaffaqiyat/
   bekor qilish/xatolikda tozalanadi (mavjud `_ClearStaleStateMiddleware`
-  + `state.clear()` naqshi). Nazoratchi/Founder uchun TASDIQLASH UI hali
-  ATAYLAB YO'Q (core'dagi `decide_schedule_change_request` mavjud, lekin
-  Telegram tugmasi yo'q). Testlar:
+  + `state.clear()` naqshi). Nazoratchi/Founder uchun TASDIQLASH UI endi
+  mavjud (yuqoriga qarang, `/grafiksorov`). Testlar:
   `tests/test_schedule_change_request_ui.py` (10 ta, Linux'da PASSED).
-  Eslatma: `tests/test_menu_and_fsm_escape.py`dagi 2 ta nazoratchi-menyu
-  assertion FAILED, lekin bu **shu o'zgarishdan oldin ham** yiqilardi
-  (HEAD'da tekshirilgan) — alohida, tegishli bo'lmagan masala.
 - **Yangi (2026-08-26): Grafik o'zgartirish so'rovi core V1.** Xodim
   bitta sanaga grafik o'zgartirish so'rovi yaratadi (`work` +
   start/end/mode yoki `off`, sabab optional) — yangi

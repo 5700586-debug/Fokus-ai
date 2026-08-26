@@ -70,6 +70,11 @@ class ScheduleStates(StatesGroup):
     waiting_custom_date = State()
 
 
+class MobilityStates(StatesGroup):
+    waiting_custom_minutes = State()
+    waiting_custom_date = State()
+
+
 _CB_BRANCHES = "nzr_branches"
 _CB_BRANCH_PREFIX = "nzr_branch:"
 _CB_EMPLOYEE_PREFIX = "nzr_emp:"
@@ -98,6 +103,29 @@ _SCHEDULE_MODE_LABELS = {
     attendance_service.SCHEDULE_MODE_FIXED_1: "1-smena",
     attendance_service.SCHEDULE_MODE_FIXED_2: "2-smena",
     attendance_service.SCHEDULE_MODE_FLEXIBLE: "Erkin grafik",
+}
+
+_CB_MOBILITY_PREFIX = "nzr_mob:"
+_CB_MOBILITY_REQS_PREFIX = "nzr_mob_reqs:"
+_CB_MOBILITY_ADD_PREFIX = "nzr_mob_add:"
+_CB_MOBILITY_BRANCH_PREFIX = "nzr_mob_branch:"
+_CB_MOBILITY_MIN_PREFIX = "nzr_mob_min:"
+_CB_MOBILITY_CUSTOM_PREFIX = "nzr_mob_custom:"
+_CB_MOBILITY_CONFIRM_PREFIX = "nzr_mob_confirm:"
+_CB_MOBILITY_CANCEL_PREFIX = "nzr_mob_cancel:"
+_CB_MOBILITY_EDIT_PREFIX = "nzr_mob_edit:"
+_CB_MOBILITY_REMOVE_PREFIX = "nzr_mob_remove:"
+_CB_MOBILITY_REMOVE_YES_PREFIX = "nzr_mob_remove_yes:"
+_CB_MOBILITY_REMOVE_NO_PREFIX = "nzr_mob_remove_no:"
+_CB_MOBILITY_MODE_PREFIX = "nzr_mob_mode:"
+_CB_MOBILITY_MODE_SET_PREFIX = "nzr_mob_mode_set:"
+_CB_MOBILITY_DATE_PREFIX = "nzr_mob_date:"
+
+_MOBILITY_SOURCE = "nazoratchi_ui"
+_MOBILITY_QUICK_MINUTES = (20, 30, 45, 60)
+_MOBILITY_MODE_LABELS = {
+    attendance_service.MOBILITY_BRANCH_VISIT_REQUIRED: "Ko'chma nazorat",
+    attendance_service.MOBILITY_NONE: "Oddiy rejim",
 }
 
 # Callback_data ichida qisqa bo'lishi uchun sabab kalitlari — to'liq
@@ -234,6 +262,7 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
     rows.append([InlineKeyboardButton(text="➖ Ball ayirish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⏰ Davomat", callback_data=f"{_CB_ATTENDANCE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="🗓 Ish grafigi", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="📍 Filial nazorati", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -352,6 +381,174 @@ def _schedule_result_text(full_name: str, schedule_date: str, pending: dict) -> 
         f"📅 {formatted_date}\n"
         f"🕒 {plan_line}\n"
         f"📌 {mode_label}"
+    )
+
+
+def _format_date_display(iso_date: str) -> str:
+    try:
+        return date.fromisoformat(iso_date).strftime("%d.%m.%Y")
+    except ValueError:
+        return iso_date
+
+
+def _mobility_screen_text(profile: dict, mobility_date: str) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    user_id = profile["user_id"]
+
+    mode = attendance_service.resolve_mobility_policy(user_id)
+    mode_label = _MOBILITY_MODE_LABELS.get(mode, "Noma'lum")
+
+    lines = [
+        f"👤 {full_name}",
+        f"📅 Sana: {_format_date_display(mobility_date)}",
+        f"🚶 Rejim: {mode_label}",
+        "",
+    ]
+
+    requirements = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+    if requirements:
+        lines.append("📍 Bugungi talablar:")
+        lines.extend(f"• {req['branch']} — {req['min_stay_minutes']} daqiqa" for req in requirements)
+    else:
+        lines.append("📍 Bu sana uchun filial talabi belgilanmagan")
+
+    return "\n".join(lines)
+
+
+def _mobility_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📍 Talablar", callback_data=f"{_CB_MOBILITY_REQS_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="➕ Filial qo'shish", callback_data=f"{_CB_MOBILITY_ADD_PREFIX}{user_id}"),
+            ],
+            [InlineKeyboardButton(text="🚶 Rejim", callback_data=f"{_CB_MOBILITY_MODE_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="📅 Boshqa sana", callback_data=f"{_CB_MOBILITY_DATE_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")],
+        ]
+    )
+
+
+def _mobility_compliance_text(profile: dict, mobility_date: str) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    user_id = profile["user_id"]
+    compliance = attendance_service.get_daily_branch_compliance(user_id, mobility_date)
+
+    lines = [f"👤 {full_name}", f"📅 {_format_date_display(mobility_date)}", ""]
+    if not compliance:
+        lines.append("📍 Bu sana uchun filial talabi belgilanmagan")
+        return "\n".join(lines)
+
+    for item in compliance:
+        lines.append(f"🏬 {item['branch']}")
+        lines.append(f"Talab: {item['required_minutes']} daqiqa")
+        if item["status"] == "incomplete":
+            lines.append("⏳ Ma'lumot to'liq emas")
+        else:
+            lines.append(f"Haqiqiy: {item['actual_minutes']:g} daqiqa")
+            lines.append("✅ Bajarildi" if item["met"] else "⚠️ Yetarli emas")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def _mobility_requirements_keyboard(user_id: int, requirements: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"{req['branch']} — {req['min_stay_minutes']} min",
+                callback_data=f"{_CB_MOBILITY_EDIT_PREFIX}{user_id}:{req['branch']}",
+            )
+        ]
+        for req in requirements
+    ]
+    rows.append([InlineKeyboardButton(text="➕ Filial qo'shish", callback_data=f"{_CB_MOBILITY_ADD_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _mobility_branch_picker_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"📍 {branch}", callback_data=f"{_CB_MOBILITY_BRANCH_PREFIX}{user_id}:{branch}")]
+        for branch in RECRUITING_BRANCH_NAMES
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _mobility_minutes_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    quick_buttons = [
+        InlineKeyboardButton(text=f"{minutes} daqiqa", callback_data=f"{_CB_MOBILITY_MIN_PREFIX}{user_id}:{minutes}")
+        for minutes in _MOBILITY_QUICK_MINUTES
+    ]
+    rows = [quick_buttons[:2], quick_buttons[2:]]
+    rows.append([InlineKeyboardButton(text="✍️ Boshqa", callback_data=f"{_CB_MOBILITY_CUSTOM_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _mobility_requirement_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"{_CB_MOBILITY_CONFIRM_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_MOBILITY_CANCEL_PREFIX}{user_id}"),
+            ]
+        ]
+    )
+
+
+def _mobility_requirement_confirm_text(full_name: str, mobility_date: str, branch: str, minutes: int) -> str:
+    return (
+        f"👤 Xodim: {full_name}\n"
+        f"📅 Sana: {_format_date_display(mobility_date)}\n"
+        f"🏬 Filial: {branch}\n"
+        f"⏱ Minimal vaqt: {minutes} daqiqa"
+    )
+
+
+def _mobility_branch_detail_text(branch: str, minutes: int) -> str:
+    return f"🏬 {branch}\n⏱ {minutes} daqiqa"
+
+
+def _mobility_branch_detail_keyboard(user_id: int, branch: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Vaqtni o'zgartirish", callback_data=f"{_CB_MOBILITY_BRANCH_PREFIX}{user_id}:{branch}")],
+            [InlineKeyboardButton(text="🗑 Talabni olib tashlash", callback_data=f"{_CB_MOBILITY_REMOVE_PREFIX}{user_id}:{branch}")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_MOBILITY_REQS_PREFIX}{user_id}")],
+        ]
+    )
+
+
+def _mobility_remove_confirm_keyboard(user_id: int, branch: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ha", callback_data=f"{_CB_MOBILITY_REMOVE_YES_PREFIX}{user_id}:{branch}"),
+                InlineKeyboardButton(text="❌ Yo'q", callback_data=f"{_CB_MOBILITY_REMOVE_NO_PREFIX}{user_id}:{branch}"),
+            ]
+        ]
+    )
+
+
+def _mobility_mode_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Ko'chma nazorat",
+                    callback_data=f"{_CB_MOBILITY_MODE_SET_PREFIX}{user_id}:{attendance_service.MOBILITY_BRANCH_VISIT_REQUIRED}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⛔ Oddiy rejim",
+                    callback_data=f"{_CB_MOBILITY_MODE_SET_PREFIX}{user_id}:{attendance_service.MOBILITY_NONE}",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")],
+        ]
     )
 
 
@@ -1225,6 +1422,427 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(schedule_pending=None)
         await callback.answer("Bekor qilindi.")
         await _render_schedule_menu(callback, profile, schedule_date)
+
+    # ------------------------------------------------------ filial nazorati --
+
+    async def _ensure_mobility_access(callback: CallbackQuery, employee_id: int, action: str) -> dict | None:
+        """``_ensure_schedule_access``dagi bilan bir xil naqsh -- ruxsat
+        + o'z-o'ziga tegmaslik (Founder istisno) + mavjud
+        ``can_access_branch`` qoidasi. ``action`` chaqiruvchiga qarab
+        ``ACTION_MANAGE_MOBILITY_POLICY`` yoki
+        ``ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS`` bo'lishi mumkin."""
+        if not await permissions.ensure_permission(callback, action):
+            return None
+
+        actor_id = callback.from_user.id
+        profile = employees.get_profile(employee_id)
+        if profile is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return None
+
+        if employee_id == actor_id and actor_id != FOUNDER_ID:
+            await callback.answer("O'zingizga tegishli sozlamani o'zgartira olmaysiz.", show_alert=True)
+            return None
+
+        if not permissions.can_access_branch(actor_id, profile.get("branch")):
+            await callback.answer("Bu xodim boshqa filialga tegishli.", show_alert=True)
+            return None
+
+        return profile
+
+    async def _render_mobility_menu(callback: CallbackQuery, profile: dict, mobility_date: str) -> None:
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_screen_text(profile, mobility_date),
+                reply_markup=_mobility_menu_keyboard(profile["user_id"]),
+            )
+
+    async def _notify_employee_mobility(callback: CallbackQuery, employee_id: int, text: str) -> None:
+        try:
+            await callback.bot.send_message(employee_id, text)
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga filial nazorati xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_PREFIX))
+    async def mobility_open(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        today = company_time.today().isoformat()
+        await state.update_data(mobility_employee_id=user_id, mobility_date=today, mobility_pending=None, mobility_pending_branch=None)
+        await _render_mobility_menu(callback, profile, today)
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_REQS_PREFIX))
+    async def mobility_requirements(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        requirements = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_compliance_text(profile, mobility_date),
+                reply_markup=_mobility_requirements_keyboard(user_id, requirements),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_ADD_PREFIX))
+    async def mobility_add_start(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("📍 Filialni tanlang:", reply_markup=_mobility_branch_picker_keyboard(user_id))
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_BRANCH_PREFIX))
+    async def mobility_branch_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        branch = parts[2]
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        await state.update_data(mobility_pending_branch=branch)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                f"🏬 {branch}\n⏱ Minimal turish vaqtini tanlang:", reply_markup=_mobility_minutes_keyboard(user_id)
+            )
+
+    async def _show_mobility_confirm(callback: CallbackQuery, state: FSMContext, profile: dict, mobility_date: str, branch: str, minutes: int) -> None:
+        await state.update_data(mobility_pending={"branch": branch, "minutes": minutes})
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_requirement_confirm_text(full_name, mobility_date, branch, minutes),
+                reply_markup=_mobility_requirement_confirm_keyboard(profile["user_id"]),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_MIN_PREFIX))
+    async def mobility_minutes_quick(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        try:
+            minutes = int(parts[2])
+        except ValueError:
+            await callback.answer()
+            return
+
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        branch = data.get("mobility_pending_branch")
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        if not branch:
+            await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+            return
+
+        await callback.answer()
+        await _show_mobility_confirm(callback, state, profile, mobility_date, branch, minutes)
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_CUSTOM_PREFIX))
+    async def mobility_minutes_custom_start(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        await state.set_state(MobilityStates.waiting_custom_minutes)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("✍️ Minimal turish vaqtini daqiqada kiriting (musbat butun son):", reply_markup=None)
+
+    @dp.message(StateFilter(MobilityStates.waiting_custom_minutes))
+    async def mobility_minutes_custom_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("❌ Musbat butun son kiriting (masalan 25, 35, 90):")
+            return
+
+        data = await state.get_data()
+        user_id = data.get("mobility_employee_id")
+        branch = data.get("mobility_pending_branch")
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None or not branch:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        minutes = int(text)
+        await state.update_data(mobility_pending={"branch": branch, "minutes": minutes})
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        await message.answer(
+            _mobility_requirement_confirm_text(full_name, mobility_date, branch, minutes),
+            reply_markup=_mobility_requirement_confirm_keyboard(user_id),
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_CONFIRM_PREFIX))
+    async def mobility_requirement_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        pending = data.get("mobility_pending")
+        if not pending:
+            await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+            return
+
+        # Pending'ni DARHOL iste'mol qilamiz (yozishdan OLDIN) -- ikkinchi
+        # (eskirgan) confirm bosilishi endi shunchaki "eskirgan holat"
+        # sifatida no-op bo'ladi, DB UNIQUE esa oxirgi himoya bo'lib qoladi.
+        await state.update_data(mobility_pending=None)
+
+        actor_id = callback.from_user.id
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        branch = pending["branch"]
+        minutes = pending["minutes"]
+
+        existing_before = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+        was_existing = any(r["branch"] == branch for r in existing_before)
+
+        accepted = attendance_service.set_branch_visit_requirement(user_id, mobility_date, branch, minutes, created_by=actor_id)
+        if not accepted:
+            await callback.answer("❌ Noto'g'ri qiymat.", show_alert=True)
+            return
+
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        await callback.answer("✅ Saqlandi.")
+        if callback.message:
+            await callback.message.edit_text(
+                "✅ Talab saqlandi\n\n" + _mobility_requirement_confirm_text(full_name, mobility_date, branch, minutes),
+                reply_markup=None,
+            )
+
+        if was_existing:
+            notice = (
+                "📍 Filial vazifangiz o'zgartirildi\n\n"
+                f"📅 {_format_date_display(mobility_date)}\n🏬 {branch}\n⏱ Yangi talab: {minutes} daqiqa"
+            )
+        else:
+            notice = (
+                "📍 Filial vazifangiz belgilandi\n\n"
+                f"📅 {_format_date_display(mobility_date)}\n🏬 {branch}\n⏱ Kamida {minutes} daqiqa"
+            )
+        await _notify_employee_mobility(callback, user_id, notice)
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_CANCEL_PREFIX))
+    async def mobility_requirement_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        await state.update_data(mobility_pending=None, mobility_pending_branch=None)
+        await callback.answer("Bekor qilindi.")
+        await _render_mobility_menu(callback, profile, mobility_date)
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_EDIT_PREFIX))
+    async def mobility_edit_branch(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        branch = parts[2]
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        requirements = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+        requirement = next((r for r in requirements if r["branch"] == branch), None)
+        if requirement is None:
+            await callback.answer("Bu talab topilmadi.", show_alert=True)
+            return
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_branch_detail_text(branch, requirement["min_stay_minutes"]),
+                reply_markup=_mobility_branch_detail_keyboard(user_id, branch),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_REMOVE_YES_PREFIX))
+    async def mobility_remove_yes(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        branch = parts[2]
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        actor_id = callback.from_user.id
+
+        removed = attendance_service.remove_branch_visit_requirement(user_id, mobility_date, branch, removed_by=actor_id)
+        if not removed:
+            await callback.answer("Bu talab allaqachon olib tashlangan.", show_alert=True)
+            if callback.message:
+                await _render_mobility_menu(callback, profile, mobility_date)
+            return
+
+        await callback.answer("✅ Olib tashlandi.")
+        if callback.message:
+            await callback.message.edit_text(f"✅ Talab olib tashlandi\n\n🏬 {branch}", reply_markup=None)
+
+        await _notify_employee_mobility(
+            callback, user_id,
+            "📍 Filial vazifangiz bekor qilindi\n\n"
+            f"📅 {_format_date_display(mobility_date)}\n🏬 {branch}",
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_REMOVE_NO_PREFIX))
+    async def mobility_remove_no(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        requirements = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+
+        await callback.answer("Bekor qilindi.")
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_compliance_text(profile, mobility_date),
+                reply_markup=_mobility_requirements_keyboard(user_id, requirements),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_REMOVE_PREFIX))
+    async def mobility_remove_start(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        branch = parts[2]
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        requirements = attendance_service.get_branch_visit_requirements(user_id, mobility_date)
+        requirement = next((r for r in requirements if r["branch"] == branch), None)
+        if requirement is None:
+            await callback.answer("Bu talab topilmadi.", show_alert=True)
+            return
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                _mobility_branch_detail_text(branch, requirement["min_stay_minutes"]) + "\n\nBu talabni olib tashlaysizmi?",
+                reply_markup=_mobility_remove_confirm_keyboard(user_id, branch),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_MODE_PREFIX))
+    async def mobility_mode_open(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_MOBILITY_POLICY)
+        if profile is None:
+            return
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("🚶 Rejimni tanlang:", reply_markup=_mobility_mode_keyboard(user_id))
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_MODE_SET_PREFIX))
+    async def mobility_mode_set(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        mode = parts[2]
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_MOBILITY_POLICY)
+        if profile is None:
+            return
+
+        attendance_service.set_employee_mobility_mode(user_id, mode, updated_by=callback.from_user.id)
+
+        data = await state.get_data()
+        mobility_date = data.get("mobility_date") or company_time.today().isoformat()
+        await callback.answer("✅ Rejim yangilandi.")
+        await _render_mobility_menu(callback, profile, mobility_date)
+
+    @dp.callback_query(F.data.startswith(_CB_MOBILITY_DATE_PREFIX))
+    async def mobility_pick_other_date(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_mobility_access(callback, user_id, permissions.ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS)
+        if profile is None:
+            return
+
+        await state.update_data(mobility_employee_id=user_id)
+        await state.set_state(MobilityStates.waiting_custom_date)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("📅 Sanani YYYY-MM-DD formatida kiriting:", reply_markup=None)
+
+    @dp.message(StateFilter(MobilityStates.waiting_custom_date))
+    async def mobility_custom_date_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        try:
+            parsed = date.fromisoformat(text)
+        except ValueError:
+            await message.answer("❌ Sanani aniq YYYY-MM-DD formatida kiriting (masalan 2026-08-28):")
+            return
+
+        data = await state.get_data()
+        user_id = data.get("mobility_employee_id")
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        await state.update_data(mobility_date=parsed.isoformat(), mobility_pending=None, mobility_pending_branch=None)
+        await message.answer(
+            _mobility_screen_text(profile, parsed.isoformat()),
+            reply_markup=_mobility_menu_keyboard(user_id),
+        )
 
     # ----------------------------------------------------- vazifa biriktirish --
 

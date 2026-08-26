@@ -593,6 +593,13 @@ def get_branch_visit_requirements(employee_id: int, req_date: str) -> list[dict]
     return attendance_repo.get_branch_visit_requirements_for_date(employee_id, req_date)
 
 
+def remove_branch_visit_requirement(employee_id: int, req_date: str, branch: str, removed_by: int | None = None) -> bool:
+    """FAQAT aynan shu employee_id+req_date+branch yozuviga ishlaydi.
+    ``True`` -- topilib o'chirildi (audit bilan birga). ``False`` --
+    bunday requirement umuman yo'q edi."""
+    return attendance_repo.remove_branch_visit_requirement(employee_id, req_date, branch, removed_by)
+
+
 def record_branch_visit_event(
     employee_id: int, branch: str, event_type: str, event_time: str, source: str, raw_reference: str | None = None
 ) -> int | None:

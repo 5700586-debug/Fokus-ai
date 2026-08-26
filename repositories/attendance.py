@@ -322,11 +322,39 @@ def get_role_mobility_policy(role_key: str) -> str | None:
 # ------------------------------------------------- filial talab/tashrif --
 
 
+def _record_requirement_revision(
+    conn, employee_id: int, req_date: str, branch: str,
+    old_min_stay_minutes: int | None, new_min_stay_minutes: int | None, action: str, changed_by: int | None,
+) -> None:
+    conn.execute(
+        "INSERT INTO branch_visit_requirement_revisions "
+        "(employee_id, req_date, branch, old_min_stay_minutes, new_min_stay_minutes, action, changed_by, changed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (employee_id, req_date, branch, old_min_stay_minutes, new_min_stay_minutes, action, changed_by, _now()),
+    )
+
+
 def set_branch_visit_requirement(
     employee_id: int, req_date: str, branch: str, min_stay_minutes: int, created_by: int | None = None
 ) -> None:
+    """Atomik UPSERT + audit -- eski qiymat (bo'lsa) o'zgartirilishidan
+    OLDIN ``branch_visit_requirement_revisions``ga yoziladi, bitta
+    connection/transaction ichida (qarang
+    ``employee_scheduled_shifts``dagi bir xil naqsh)."""
     conn = get_connection()
     try:
+        existing = conn.execute(
+            "SELECT min_stay_minutes FROM branch_visit_requirements "
+            "WHERE employee_id = ? AND req_date = ? AND branch = ?",
+            (employee_id, req_date, branch),
+        ).fetchone()
+        action = "update" if existing is not None else "create"
+
+        _record_requirement_revision(
+            conn, employee_id, req_date, branch,
+            existing["min_stay_minutes"] if existing else None, min_stay_minutes, action, created_by,
+        )
+
         conn.execute(
             "INSERT INTO branch_visit_requirements "
             "(employee_id, req_date, branch, min_stay_minutes, created_by, created_at) "
@@ -339,6 +367,57 @@ def set_branch_visit_requirement(
         conn.commit()
     finally:
         conn.close()
+
+
+def remove_branch_visit_requirement(
+    employee_id: int, req_date: str, branch: str, removed_by: int | None = None
+) -> bool:
+    """FAQAT aynan ``employee_id`` + ``req_date`` + ``branch``
+    yozuviga ishlaydi -- boshqa sana/filial requirementlariga tegmaydi.
+    ``True`` -- yozuv topilib o'chirildi (audit bilan birga, bitta
+    transaction). ``False`` -- bunday requirement umuman yo'q edi."""
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            "SELECT min_stay_minutes FROM branch_visit_requirements "
+            "WHERE employee_id = ? AND req_date = ? AND branch = ?",
+            (employee_id, req_date, branch),
+        ).fetchone()
+        if existing is None:
+            return False
+
+        _record_requirement_revision(
+            conn, employee_id, req_date, branch, existing["min_stay_minutes"], None, "remove", removed_by,
+        )
+
+        cursor = conn.execute(
+            "DELETE FROM branch_visit_requirements WHERE employee_id = ? AND req_date = ? AND branch = ?",
+            (employee_id, req_date, branch),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_branch_visit_requirement_revisions(employee_id: int, req_date: str, branch: str | None = None) -> list[dict]:
+    conn = get_connection()
+    try:
+        if branch is None:
+            rows = conn.execute(
+                "SELECT * FROM branch_visit_requirement_revisions WHERE employee_id = ? AND req_date = ? ORDER BY id",
+                (employee_id, req_date),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM branch_visit_requirement_revisions "
+                "WHERE employee_id = ? AND req_date = ? AND branch = ? ORDER BY id",
+                (employee_id, req_date, branch),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
 
 
 def get_branch_visit_requirements_for_date(employee_id: int, req_date: str) -> list[dict]:

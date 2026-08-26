@@ -119,6 +119,25 @@ CREATE TABLE IF NOT EXISTS branch_visit_requirements (
     UNIQUE(employee_id, req_date, branch)
 );
 
+-- ``branch_visit_requirements`` joriy qiymatni saqlaydi -- talab
+-- keyinchalik xodim faoliyatini baholashga ta'sir qilishi mumkin,
+-- shuning uchun har bir yaratish/o'zgartirish/o'chirish shu yerga
+-- alohida audit qatori qo'shadi (qarang
+-- ``repositories/attendance.py::set_branch_visit_requirement``/
+-- ``remove_branch_visit_requirement``). Faqat tarix -- avtomatik
+-- jazo/hukm EMAS.
+CREATE TABLE IF NOT EXISTS branch_visit_requirement_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    req_date TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    old_min_stay_minutes INTEGER,
+    new_min_stay_minutes INTEGER,
+    action TEXT NOT NULL,
+    changed_by INTEGER,
+    changed_at TEXT NOT NULL
+);
+
 -- Filialga kirish/chiqish eventlari -- provider-independent (Face ID
 -- keyinchalik ulanadi, hozir qo'lda/boshqa manbadan yoziladi). Hech
 -- qachon o'chirilmaydi.

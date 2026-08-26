@@ -29,9 +29,15 @@ def build_dashboard(user_id: int) -> dict | None:
         },
         "points": discipline.get_period_point_totals(user_id),
         "yesterday": attendance_service.get_yesterday_summary(user_id),
-        "hours": {"label": "Ma'lumot yo'q"},
+        "hours": attendance_service.get_month_to_date_hours(user_id),
         "recent_days": attendance_service.get_recent_days_summary(user_id, days=2),
     }
+
+
+def _format_hours(value: float) -> str:
+    """180.0 -> "180", 172.5 -> "172.5" -- inson o'qishi uchun sodda,
+    ortiqcha nol/floating-point dumisiz."""
+    return f"{value:g}"
 
 
 def format_dashboard_text(dashboard: dict) -> str:
@@ -54,7 +60,20 @@ def format_dashboard_text(dashboard: dict) -> str:
     else:
         lines.append("⏰ Kecha: Ma'lumot yo'q")
 
-    lines.append(f"🕒 Oy boshidan ishlangan soat: {dashboard['hours']['label']}")
+    hours = dashboard["hours"]
+    planned_hours = hours["planned_hours"]
+    if planned_hours is None:
+        lines.append("🗓 Reja soati: Ma'lumot yetarli emas")
+        if hours["missing_days_count"] > 0:
+            lines.append(f"📅 Grafik kiritilmagan: {hours['missing_days_count']} kun")
+    else:
+        lines.append(f"🗓 Reja soati: {_format_hours(planned_hours)} soat")
+
+    if hours["worked_days_count"] == 0:
+        lines.append("🕒 Haqiqiy soat: Ma'lumot yo'q")
+    else:
+        lines.append(f"🕒 Haqiqiy soat: {_format_hours(hours['actual_hours'])} soat")
+
     lines.append("")
     lines.append("📅 Oxirgi 2 kun:")
     for day in dashboard["recent_days"]:

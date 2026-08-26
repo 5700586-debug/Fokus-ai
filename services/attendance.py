@@ -291,7 +291,7 @@ def get_month_to_date_hours(employee_id: int) -> dict | None:
     date_range = _month_to_date_range(profile)
     if date_range is None:
         return {
-            "planned_hours": None, "actual_hours": 0.0, "missing_days_count": 0,
+            "planned_hours": None, "actual_hours": 0.0, "worked_days_count": 0, "missing_days_count": 0,
             "range_start": None, "range_end": None,
         }
 
@@ -308,14 +308,17 @@ def get_month_to_date_hours(employee_id: int) -> dict | None:
         events_by_date.setdefault(event_date, []).append(event)
 
     actual_hours = 0.0
+    worked_days_count = 0
     for event_date in events_by_date:
         worked = get_worked_hours_for_day(employee_id, event_date)
         if worked is not None:
             actual_hours += worked
+            worked_days_count += 1
 
     return {
         "planned_hours": planned["planned_hours"],
         "actual_hours": actual_hours,
+        "worked_days_count": worked_days_count,
         "missing_days_count": planned["missing_days_count"],
         "range_start": range_start.isoformat(),
         "range_end": range_end.isoformat(),

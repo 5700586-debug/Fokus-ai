@@ -78,6 +78,18 @@ ACTION_LOOKUP_ANY_SALARY = "lookup_any_salary"
 ACTION_DECIDE_APPEAL = "decide_appeal"
 ACTION_DECIDE_ATTENDANCE_PERMISSION = "decide_attendance_permission"
 
+# ADVANCED WORK SCHEDULE + MOBILITY V1 -- hozircha hech qanday
+# Telegram handler bu ACTION_*larni chaqirmaydi (UI hali qurilmagan),
+# lekin kelajakdagi boshqaruv shu chegaraga mos bo'lishi uchun oldindan
+# tayyorlangan. Birortasi ham ROLE_PERMISSIONS'ga qo'shilmagan --
+# hozircha faqat Founder bypass orqali ishlaydi; Nazoratchiga (yoki
+# kelajakdagi boshqa vakolatli rolga) shu amalni berish alohida,
+# ataylab qilinadigan qaror bo'lishi kerak, avtomatik emas.
+ACTION_MANAGE_SCHEDULE_POLICY = "manage_schedule_policy"
+ACTION_MANAGE_DAILY_SCHEDULE = "manage_daily_schedule"
+ACTION_MANAGE_MOBILITY_POLICY = "manage_mobility_policy"
+ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS = "manage_branch_visit_requirements"
+
 # nazoratchi_bot.py — xodimga doimiy vazifa/hudud biriktirish (Founder-only;
 # ko'rish — xodim kartasida — ACTION_EVALUATE_EMPLOYEE orqali, nazoratchi
 # allaqachon shu amalga ega).

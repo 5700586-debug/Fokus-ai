@@ -120,6 +120,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("cash_shifts", "received_cash_balance", "INTEGER"),
     ("cash_shifts", "discrepancy_reason_text", "TEXT"),
     ("company_rules", "default_penalty_amount", "INTEGER"),
+    ("employee_scheduled_shifts", "schedule_mode", "TEXT"),
 ]
 
 

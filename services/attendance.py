@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 import employees
 import company_time
 from repositories import attendance as attendance_repo
+from services import rules as rules_service
 
 SOURCE_MANUAL_ENTRY = "manual_nazoratchi_entry"
 
@@ -25,6 +26,17 @@ EVENT_CHECK_OUT = "check_out"
 
 SHIFT_STATUS_WORK = "work"
 SHIFT_STATUS_OFF = "off"
+
+SCHEDULE_MODE_FIXED_1 = "fixed_1"
+SCHEDULE_MODE_FIXED_2 = "fixed_2"
+SCHEDULE_MODE_FLEXIBLE = "flexible"
+_KNOWN_SCHEDULE_MODES = (SCHEDULE_MODE_FIXED_1, SCHEDULE_MODE_FIXED_2, SCHEDULE_MODE_FLEXIBLE)
+
+MOBILITY_NONE = "none"
+MOBILITY_BRANCH_VISIT_REQUIRED = "branch_visit_required"
+
+VISIT_ENTER = "enter"
+VISIT_EXIT = "exit"
 
 REASON_UNJUSTIFIED = "unjustified"
 REASON_MANAGER_PERMISSION_PENDING = "manager_permission_pending"
@@ -68,17 +80,40 @@ def record_manual_arrival(employee_id: int, event_date: str, arrival_time_text: 
     return True
 
 
+def _is_overnight_shift(shift: dict | None) -> bool:
+    """``planned_end < planned_start`` = keyingi kunga o'tadigan tun
+    smenasi (qarang ADVANCED WORK SCHEDULE V1, 6-bo'lim). ``start ==
+    end`` yozish paytida allaqachon rad etilgani uchun bu yerda faqat
+    qat'iy ``<`` tekshiriladi."""
+    if shift is None or shift.get("status") != SHIFT_STATUS_WORK:
+        return False
+    start_parsed = _parse_hhmm(shift.get("planned_start") or "")
+    end_parsed = _parse_hhmm(shift.get("planned_end") or "")
+    if start_parsed is None or end_parsed is None:
+        return False
+    start_total = start_parsed[0] * 60 + start_parsed[1]
+    end_total = end_parsed[0] * 60 + end_parsed[1]
+    return end_total < start_total
+
+
 def record_manual_departure(employee_id: int, event_date: str, departure_time_text: str) -> bool:
-    """``record_manual_arrival``dagi bilan bir xil qat'iy "HH:MM" formati
-    -- hozircha hech qanday handler bu funksiyani chaqirmaydi (Telegram
-    UI o'zgartirilmagan), faqat servis qatlamida ``check_out`` eventini
-    yozish qobiliyati tayyorlanadi."""
+    """``event_date`` -- LOGICAL SHIFT sanasi (smena boshlangan kun).
+    Agar shu sana uchun strukturali schedule mavjud va tun smenasi
+    bo'lsa (``planned_end < planned_start``), chiqish vaqti keyingi
+    kalendar kuniga yoziladi (masalan smena 14:00->01:00, chiqish
+    01:30 -> DBda ``event_date + 1``). Strukturali schedule umuman
+    yo'q yoki kunduzgi bo'lsa -- eski, backward-compatible SAME-DAY
+    xatti-harakat o'zgarishsiz qoladi."""
     parsed = _parse_hhmm(departure_time_text)
     if parsed is None:
         return False
 
     hour, minute = parsed
+    shift = attendance_repo.get_shift_for_date(employee_id, event_date)
     event_day = date.fromisoformat(event_date)
+    if _is_overnight_shift(shift):
+        event_day = event_day + timedelta(days=1)
+
     event_time = datetime(
         event_day.year, event_day.month, event_day.day, hour, minute, tzinfo=company_time.resolve_timezone()
     ).isoformat()
@@ -137,32 +172,84 @@ def get_recent_days_summary(employee_id: int, days: int = 2) -> list[dict]:
 # ----------------------------------------------------- ishlangan soatlar --
 
 
-def get_worked_hours_for_day(employee_id: int, event_date: str) -> float | None:
-    """Faqat kunning BIRINCHI valid ``check_in``i va OXIRGI valid
-    ``check_out``i orasidagi vaqt -- ikkalasi ham mavjud bo'lmasa yoki
-    interval manfiy/mantiqsiz bo'lsa ``None`` (bu kun "to'liq ishlangan"
-    deb HISOBLANMAYDI, reja soatiga ham qo'shilmaydi)."""
-    events = attendance_repo.list_events_for_date(employee_id, event_date)
+def _pair_check_in_check_out(events: list[dict], check_in_date: str) -> float | None:
+    """Umumiy juftlash: BIRINCHI ``check_in`` (aynan ``check_in_date``
+    kunida bo'lgani -- boshqa logical shiftning check_in'i tasodifan
+    aralashib ketmasin) va undan KEYIN bo'lgan OXIRGI valid
+    ``check_out``. 24 soatdan oshiq yoki manfiy/nol interval -- soxta
+    deb rad etiladi."""
     check_ins = sorted(
-        (e["event_time"] for e in events if e["event_type"] == EVENT_CHECK_IN)
+        e["event_time"] for e in events if e["event_type"] == EVENT_CHECK_IN and e["event_time"][:10] == check_in_date
     )
-    check_outs = sorted(
-        (e["event_time"] for e in events if e["event_type"] == EVENT_CHECK_OUT)
-    )
-    if not check_ins or not check_outs:
+    if not check_ins:
         return None
 
     try:
         first_check_in = datetime.fromisoformat(check_ins[0])
-        last_check_out = datetime.fromisoformat(check_outs[-1])
     except ValueError:
         return None
 
+    valid_check_outs = []
+    for event in events:
+        if event["event_type"] != EVENT_CHECK_OUT:
+            continue
+        try:
+            check_out_dt = datetime.fromisoformat(event["event_time"])
+        except ValueError:
+            continue
+        if check_out_dt > first_check_in:
+            valid_check_outs.append(check_out_dt)
+
+    if not valid_check_outs:
+        return None
+
+    last_check_out = max(valid_check_outs)
     duration = (last_check_out - first_check_in).total_seconds() / 3600.0
-    if duration <= 0:
+    if duration <= 0 or duration > 24:
         return None
 
     return duration
+
+
+def get_worked_hours_for_day(employee_id: int, shift_date: str) -> float | None:
+    """``shift_date`` -- LOGICAL SHIFT sanasi (kalendar kuni emas).
+    Kunduzgi/strukturasiz kun uchun eski xatti-harakat: check_in va
+    check_out ikkalasi ham ``shift_date``ning o'z kalendar kunida
+    bo'lishi kerak. Tun smenasi (``planned_end < planned_start``) uchun
+    check_in ``shift_date``da, check_out esa keyingi kalendar kunida
+    bo'lishi mumkin -- lekin FAQAT agar keyingi kun uchun boshqa
+    strukturali WORK smena mavjud bo'lmasa cheksiz; mavjud bo'lsa,
+    qidiruv oynasi o'sha smenaning boshlanishidan OLDIN to'xtaydi (ikki
+    qo'shni smena eventlari bir-biriga aralashmasin)."""
+    shift = attendance_repo.get_shift_for_date(employee_id, shift_date)
+
+    if not _is_overnight_shift(shift):
+        events = attendance_repo.list_events_for_date(employee_id, shift_date)
+        return _pair_check_in_check_out(events, shift_date)
+
+    shift_day = date.fromisoformat(shift_date)
+    next_day = shift_day + timedelta(days=1)
+    next_shift = attendance_repo.get_shift_for_date(employee_id, next_day.isoformat())
+
+    if next_shift is not None and next_shift.get("status") == SHIFT_STATUS_WORK:
+        next_start = _parse_hhmm(next_shift.get("planned_start") or "")
+        if next_start is not None:
+            window_end = datetime(
+                next_day.year, next_day.month, next_day.day, next_start[0], next_start[1],
+                tzinfo=company_time.resolve_timezone(),
+            )
+        else:
+            window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=company_time.resolve_timezone())
+    else:
+        window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=company_time.resolve_timezone())
+
+    events = attendance_repo.list_events_for_range(
+        employee_id, shift_date, (next_day + timedelta(days=1)).isoformat()
+    )
+    window_end_iso = window_end.isoformat()
+    relevant_events = [e for e in events if e["event_time"] <= window_end_iso]
+
+    return _pair_check_in_check_out(relevant_events, shift_date)
 
 
 def _month_to_date_range(profile: dict) -> tuple[date, date] | None:
@@ -190,18 +277,79 @@ def _month_to_date_range(profile: dict) -> tuple[date, date] | None:
     return range_start, today
 
 
+# ---------------------------------------------------- grafik siyosati --
+
+
+def resolve_schedule_mode(employee_id: int) -> str | None:
+    """employee override > role default > UNKNOWN (``None``). Policy
+    yo'q xodimga hech qanday standart (masalan ``fixed_1``) O'YLAB
+    TOPILMAYDI -- ``None`` shunchaki UNKNOWN degani."""
+    override = attendance_repo.get_employee_schedule_policy(employee_id)
+    if override is not None:
+        return override
+
+    profile = employees.get_profile(employee_id)
+    role_key = profile.get("role_key") if profile else None
+    if role_key is None:
+        return None
+
+    return attendance_repo.get_role_schedule_policy(role_key)
+
+
+def set_employee_schedule_mode(employee_id: int, schedule_mode: str, updated_by: int | None = None) -> bool:
+    """Xodimga aniq grafik siyosati override beradi (role defaultdan
+    ustun). Noma'lum ``schedule_mode`` qiymati rad etiladi."""
+    if schedule_mode not in _KNOWN_SCHEDULE_MODES:
+        return False
+    attendance_repo.set_employee_schedule_policy(employee_id, schedule_mode, updated_by)
+    return True
+
+
+def set_role_schedule_mode(role_key: str, schedule_mode: str, updated_by: int | None = None) -> bool:
+    if schedule_mode not in _KNOWN_SCHEDULE_MODES:
+        return False
+    attendance_repo.set_role_schedule_policy(role_key, schedule_mode, updated_by)
+    return True
+
+
 # ------------------------------------------------- reja smena jadvali --
 
 
+def _is_late_change(employee_id: int, shift_date: str) -> bool:
+    """Smena ALLAQACHON (o'zining ESKI, hali o'zgartirilmagan
+    ``planned_start``iga ko'ra) boshlangandan keyin o'zgartirilyaptimi
+    -- faqat BELGI, avtomatik jarima/aybdorlik hukmi emas (qarang
+    5-bo'lim)."""
+    existing = attendance_repo.get_shift_for_date(employee_id, shift_date)
+    if existing is None or existing.get("status") != SHIFT_STATUS_WORK or not existing.get("planned_start"):
+        return False
+
+    parsed = _parse_hhmm(existing["planned_start"])
+    if parsed is None:
+        return False
+
+    shift_day = date.fromisoformat(shift_date)
+    shift_start_dt = datetime(
+        shift_day.year, shift_day.month, shift_day.day, parsed[0], parsed[1], tzinfo=company_time.resolve_timezone()
+    )
+    return company_time.now() >= shift_start_dt
+
+
 def set_scheduled_work_shift(
-    employee_id: int, shift_date: str, start_text: str, end_text: str, source: str, created_by: int | None = None
+    employee_id: int, shift_date: str, start_text: str, end_text: str, source: str,
+    created_by: int | None = None, schedule_mode: str | None = None, reason: str | None = None,
 ) -> bool:
     """Kunduzgi (``end > start``) yoki tun smenasi (``end < start`` --
     keyingi kunga o'tadi) -- ikkalasi ham qabul qilinadi. ``start ==
     end`` NOTO'G'RI qiymat, rad etiladi (``False``). Bitta xodim/sana
     uchun atomik UPSERT (``repositories/attendance.py::set_work_shift``)
     -- oxirgi qonuniy chaqiruv qiymati saqlanadi, dublikat qator
-    yaratmaydi."""
+    yaratmaydi. Eski qiymat (bo'lsa) audit jadvaliga yoziladi, va agar
+    ESKI smena allaqachon boshlangan bo'lsa ``is_late_change`` belgisi
+    bilan. ``schedule_mode`` berilmasa xodimning joriy siyosatidan
+    (``resolve_schedule_mode``) olinadi -- faqat audit/ma'lumot uchun,
+    UNKNOWN bo'lsa ham yozuvning o'zi baribir amalga oshadi (chunki
+    aniq ``start_text``/``end_text`` berilgan)."""
     start_parsed = _parse_hhmm(start_text)
     end_parsed = _parse_hhmm(end_text)
     if start_parsed is None or end_parsed is None or start_parsed == end_parsed:
@@ -209,12 +357,48 @@ def set_scheduled_work_shift(
 
     planned_start = f"{start_parsed[0]:02d}:{start_parsed[1]:02d}"
     planned_end = f"{end_parsed[0]:02d}:{end_parsed[1]:02d}"
-    attendance_repo.set_work_shift(employee_id, shift_date, planned_start, planned_end, source, created_by)
+    mode = schedule_mode if schedule_mode is not None else resolve_schedule_mode(employee_id)
+    is_late = _is_late_change(employee_id, shift_date)
+
+    attendance_repo.set_work_shift(
+        employee_id, shift_date, planned_start, planned_end, mode, source, created_by, reason, is_late,
+    )
     return True
 
 
-def set_scheduled_day_off(employee_id: int, shift_date: str, source: str, created_by: int | None = None) -> None:
-    attendance_repo.set_day_off(employee_id, shift_date, source, created_by)
+def set_scheduled_day_off(
+    employee_id: int, shift_date: str, source: str, created_by: int | None = None,
+    schedule_mode: str | None = None, reason: str | None = None,
+) -> None:
+    mode = schedule_mode if schedule_mode is not None else resolve_schedule_mode(employee_id)
+    is_late = _is_late_change(employee_id, shift_date)
+    attendance_repo.set_day_off(employee_id, shift_date, mode, source, created_by, reason, is_late)
+
+
+def apply_daily_work_schedule(
+    employee_id: int, shift_date: str, source: str, start_text: str | None = None, end_text: str | None = None,
+    created_by: int | None = None, reason: str | None = None,
+) -> bool:
+    """Xodimning grafik SIYOSATIGA ko'ra kunlik WORK yozuvi yaratadi.
+    ``fixed_1``/``fixed_2`` uchun aniq vaqt berilmasa markazlashtirilgan
+    shablondan (``services/rules.py::get_fixed_shift_template``)
+    foydalanadi. ``flexible`` (yoki siyosat UNKNOWN) uchun aniq
+    ``start_text``/``end_text`` SHART -- berilmasa yozuv qilinmaydi
+    (``False``, hech narsa DBga yozilmaydi)."""
+    mode = resolve_schedule_mode(employee_id)
+
+    if start_text is None or end_text is None:
+        if mode not in (SCHEDULE_MODE_FIXED_1, SCHEDULE_MODE_FIXED_2):
+            return False
+        template = rules_service.get_fixed_shift_template(mode)
+        if template is None:
+            return False
+        start_text, end_text = template
+
+    return set_scheduled_work_shift(
+        employee_id, shift_date, start_text, end_text, source,
+        created_by=created_by, schedule_mode=mode, reason=reason,
+    )
 
 
 def _shift_duration_hours(planned_start: str, planned_end: str) -> float:
@@ -299,21 +483,20 @@ def get_month_to_date_hours(employee_id: int) -> dict | None:
 
     planned = get_month_to_date_planned_hours(employee_id)
 
-    events = attendance_repo.list_events_for_range(
-        employee_id, range_start.isoformat(), (range_end + timedelta(days=1)).isoformat()
-    )
-    events_by_date: dict[str, list[dict]] = {}
-    for event in events:
-        event_date = event["event_time"][:10]
-        events_by_date.setdefault(event_date, []).append(event)
-
+    # Har bir LOGICAL shift sanasi bo'yicha (kalendar kuni bo'yicha
+    # emas) -- shuning uchun tun smenasining check_out'i keyingi
+    # kalendar kuniga tushsa ham, o'sha smena FAQAT o'zining haqiqiy
+    # boshlanish sanasida (bir marta) hisoblanadi, keyingi oy/kunga
+    # "yangi" smena sifatida sizib chiqmaydi.
     actual_hours = 0.0
     worked_days_count = 0
-    for event_date in events_by_date:
-        worked = get_worked_hours_for_day(employee_id, event_date)
+    current = range_start
+    while current <= range_end:
+        worked = get_worked_hours_for_day(employee_id, current.isoformat())
         if worked is not None:
             actual_hours += worked
             worked_days_count += 1
+        current += timedelta(days=1)
 
     return {
         "planned_hours": planned["planned_hours"],
@@ -349,3 +532,160 @@ def decide_manager_permission(employee_id: int, event_date: str, approved: bool,
     return attendance_repo.decide_manager_permission(
         employee_id, event_date, REASON_MANAGER_PERMISSION_PENDING, new_status, decided_by
     )
+
+
+# --------------------------------------------------- mobillik siyosati --
+
+
+def resolve_mobility_policy(employee_id: int) -> str | None:
+    """employee override > role default > UNKNOWN (``None``) -- xuddi
+    ``resolve_schedule_mode``dagi bilan bir xil naqsh, Nazoratchiga
+    HARDCODE qilinmagan (kelajakda boshqa lavozimga ham berilishi
+    mumkin)."""
+    override = attendance_repo.get_employee_mobility_policy(employee_id)
+    if override is not None:
+        return override
+
+    profile = employees.get_profile(employee_id)
+    role_key = profile.get("role_key") if profile else None
+    if role_key is None:
+        return None
+
+    return attendance_repo.get_role_mobility_policy(role_key)
+
+
+def set_employee_mobility_mode(employee_id: int, mobility_policy: str, updated_by: int | None = None) -> None:
+    attendance_repo.set_employee_mobility_policy(employee_id, mobility_policy, updated_by)
+
+
+def set_role_mobility_mode(role_key: str, mobility_policy: str, updated_by: int | None = None) -> None:
+    attendance_repo.set_role_mobility_policy(role_key, mobility_policy, updated_by)
+
+
+# ------------------------------------------------- filial talab/tashrif --
+
+
+def set_branch_visit_requirement(
+    employee_id: int, req_date: str, branch: str, min_stay_minutes: int, created_by: int | None = None
+) -> bool:
+    """``min_stay_minutes`` har doim ANIQ kiritiladi -- global 30
+    kodda hech qachon hardcode qilinmaydi (qarang 12-bo'lim). Nomusbat
+    qiymat rad etiladi."""
+    if min_stay_minutes <= 0:
+        return False
+    attendance_repo.set_branch_visit_requirement(employee_id, req_date, branch, min_stay_minutes, created_by)
+    return True
+
+
+def get_branch_visit_requirements(employee_id: int, req_date: str) -> list[dict]:
+    return attendance_repo.get_branch_visit_requirements_for_date(employee_id, req_date)
+
+
+def record_branch_visit_event(
+    employee_id: int, branch: str, event_type: str, event_time: str, source: str, raw_reference: str | None = None
+) -> int | None:
+    """Provider-independent -- Face ID yoki boshqa manba keyinchalik
+    xuddi shu funksiyani chaqiradi. Noma'lum ``event_type`` uchun
+    yozuv qilinmaydi (``None``)."""
+    if event_type not in (VISIT_ENTER, VISIT_EXIT):
+        return None
+    return attendance_repo.record_branch_visit_event(employee_id, branch, event_type, event_time, source, raw_reference)
+
+
+def _pair_enter_exit_intervals(events: list[dict]) -> tuple[list[tuple[datetime, datetime]], bool]:
+    """Ketma-ket holat-mashinasi: ochiq ``enter`` paytida yana ``enter``
+    kelsa e'tiborsiz qoldiriladi (allaqachon ichkarida), ochiq
+    ``enter``siz ``exit`` kelsa e'tiborsiz qoldiriladi (mos kelmagan
+    shovqin). Qaytaradi: (yopiq intervallar, oxirida yopilmagan
+    ``enter`` bormi)."""
+    sorted_events = sorted(events, key=lambda e: e["event_time"])
+    intervals: list[tuple[datetime, datetime]] = []
+    open_enter: datetime | None = None
+
+    for event in sorted_events:
+        try:
+            timestamp = datetime.fromisoformat(event["event_time"])
+        except ValueError:
+            continue
+
+        if event["event_type"] == VISIT_ENTER:
+            if open_enter is None:
+                open_enter = timestamp
+        elif event["event_type"] == VISIT_EXIT and open_enter is not None:
+            if timestamp > open_enter:
+                intervals.append((open_enter, timestamp))
+            open_enter = None
+
+    return intervals, open_enter is not None
+
+
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    """Bir-birini qoplaydigan intervallarni birlashtiradi -- bir
+    daqiqa ikki marta sanalmasin (qarang 14-bo'lim)."""
+    if not intervals:
+        return []
+
+    ordered = sorted(intervals, key=lambda interval: interval[0])
+    merged = [ordered[0]]
+    for start, end in ordered[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def get_branch_stay_minutes(employee_id: int, branch: str, window_start_iso: str, window_end_iso: str) -> dict:
+    """``[window_start_iso, window_end_iso)`` oralig'ida shu filialda
+    o'tkazilgan umumiy daqiqa. Yopilmagan ``enter`` (exit yo'q) bo'lsa
+    ``status="incomplete"``, ``minutes=None`` -- FAILED deb uydirilmaydi.
+    Hech qanday tashrif bo'lmasa (yoki barchasi to'liq/mos kelmagan
+    shovqin) haqiqiy ``0`` daqiqa qaytariladi -- bu ham "complete"
+    natija (xodim haqiqatan bormagan)."""
+    events = attendance_repo.list_branch_visit_events(employee_id, branch, window_start_iso, window_end_iso)
+    intervals, unclosed = _pair_enter_exit_intervals(events)
+    if unclosed:
+        return {"status": "incomplete", "minutes": None}
+
+    merged = _merge_intervals(intervals)
+    total_minutes = sum((end - start).total_seconds() for start, end in merged) / 60.0
+    return {"status": "complete", "minutes": total_minutes}
+
+
+def _mobility_window_for_logical_date(employee_id: int, req_date: str) -> tuple[str, str]:
+    """Kunduzgi/strukturasiz kun uchun oddiy kalendar kuni. Agar shu
+    sanada tun smenasi bo'lsa, oyna keyingi kalendar kunini ham qamrab
+    oladi -- calendar midnight sabab bitta tashrif ikki kunga
+    bo'linib ketmasin (qarang 15-bo'lim)."""
+    shift = attendance_repo.get_shift_for_date(employee_id, req_date)
+    day = date.fromisoformat(req_date)
+    end = day + timedelta(days=2 if _is_overnight_shift(shift) else 1)
+    return day.isoformat(), end.isoformat()
+
+
+def get_daily_branch_compliance(employee_id: int, req_date: str) -> list[dict]:
+    """Kunlik filial talab-bajarilishi ro'yxati. Talab UMUMAN
+    belgilanmagan bo'lsa BO'SH ro'yxat qaytadi -- bu avtomatik PASS
+    degani EMAS, chaqiruvchi "talab yo'q" holatini o'zi alohida
+    talqin qilishi kerak."""
+    requirements = attendance_repo.get_branch_visit_requirements_for_date(employee_id, req_date)
+    if not requirements:
+        return []
+
+    window_start, window_end = _mobility_window_for_logical_date(employee_id, req_date)
+
+    results = []
+    for requirement in requirements:
+        stay = get_branch_stay_minutes(employee_id, requirement["branch"], window_start, window_end)
+        met = None if stay["status"] == "incomplete" else stay["minutes"] >= requirement["min_stay_minutes"]
+        results.append(
+            {
+                "branch": requirement["branch"],
+                "required_minutes": requirement["min_stay_minutes"],
+                "actual_minutes": stay["minutes"],
+                "status": stay["status"],
+                "met": met,
+            }
+        )
+    return results

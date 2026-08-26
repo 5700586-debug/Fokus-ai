@@ -199,6 +199,8 @@ jobs:
           tests/test_nazoratchi_attendance_review.py
           tests/test_work_hours.py
           tests/test_scheduled_shifts.py
+          tests/test_schedule_policy_and_overnight.py
+          tests/test_branch_mobility.py
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

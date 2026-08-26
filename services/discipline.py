@@ -10,7 +10,9 @@ audit sifatida qoladi).
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
+import company_time
 from repositories import discipline as discipline_repo
 from services import rules as rules_service
 
@@ -70,6 +72,38 @@ def adjust_bonus_bank(user_id: int, delta: int, reason: str, ref_type: str, ref_
 
 def get_bonus_ledger(user_id: int, limit: int = 20) -> list[dict]:
     return discipline_repo.get_bonus_ledger(user_id, limit)
+
+
+def _current_period_start_utc_iso() -> str:
+    """Joriy (kompaniya vaqt zonasidagi) oyning 00:00 boshlanishi,
+    UTC ISO ko'rinishida — ``bonus_bank_ledger.created_at`` HAM har
+    doim UTC ISO (``repositories/discipline.py::_now()``) sifatida
+    saqlanadi, shuning uchun ikkalasi to'g'ridan-to'g'ri solishtirish
+    mumkin bo'lishi uchun bu yerda ham UTC'ga aylantiriladi (aks holda
+    oy chegarasida — mahalliy va UTC orasidagi 5 soatlik farq tufayli
+    — noto'g'ri natija chiqishi mumkin edi)."""
+    local_today = company_time.today()
+    local_month_start = datetime(
+        local_today.year, local_today.month, 1, tzinfo=company_time.resolve_timezone()
+    )
+    return local_month_start.astimezone(timezone.utc).isoformat()
+
+
+def get_period_point_totals(user_id: int) -> dict:
+    """Joriy oy uchun Bonus/Minus/Jami ball — ``bonus_bank_ledger``dan
+    hisoblanadi (kunlik baho va jarima allaqachon shu ledgerga yozadi,
+    qarang ``record_daily_grade``/``apply_penalty``). Eski oylar hech
+    qachon o'chirilmaydi/tozalanmaydi — bu funksiya faqat KO'RSATISH
+    uchun davrni filtrlaydi, yangi oy boshlanishi bilan tabiiy ravishda
+    0/0/0dan boshlanadi (chunki hali shu oyga tegishli yozuv yo'q)."""
+    since_iso = _current_period_start_utc_iso()
+    totals = discipline_repo.get_bonus_ledger_totals_since(user_id, since_iso)
+    return {
+        "period_key": company_time.today().strftime("%Y-%m"),
+        "bonus": totals["bonus"],
+        "minus": totals["minus"],
+        "net": totals["net"],
+    }
 
 
 # --------------------------------------------------------- company rules --

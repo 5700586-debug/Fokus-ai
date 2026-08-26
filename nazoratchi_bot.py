@@ -36,6 +36,8 @@ Founder ham (barcha amallarga ruxsatli bo'lgani uchun) shu oqimni
 ishlata oladi — filial-mustaqil ko'rish huquqi
 ``permissions._CROSS_BRANCH_ROLES``da nazoratchi allaqachon bor."""
 
+from datetime import timedelta
+
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -47,12 +49,19 @@ import discipline_bot
 import employees
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import role_name
+from services import attendance as attendance_service
 from services import discipline, discipline_ai, permissions, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
     waiting_reason = State()
     confirming_match = State()
+
+
+class AttendanceStates(StatesGroup):
+    waiting_arrival_time = State()
+    waiting_force_majeure_reason = State()
+    waiting_other_reason = State()
 
 
 _CB_BRANCHES = "nzr_branches"
@@ -67,6 +76,18 @@ _CB_ACK_PREFIX = "nzr_ack:"
 _CB_APPEAL_PREFIX = "nzr_appeal:"
 _CB_MATCH_CONFIRM_PREFIX = "nzr_match_yes:"
 _CB_MATCH_REJECT_PREFIX = "nzr_match_no:"
+_CB_ATTENDANCE_PREFIX = "nzr_att:"
+_CB_ATT_REASON_PREFIX = "nzr_attreason:"
+_CB_ATT_MGR_DECIDE_PREFIX = "nzr_attmgr:"
+
+# Callback_data ichida qisqa bo'lishi uchun sabab kalitlari — to'liq
+# ``services/attendance`` doimiylariga shu yerda moslashtiriladi.
+_ATT_REASON_KEYS = {
+    "unjustified": attendance_service.REASON_UNJUSTIFIED,
+    "manager": attendance_service.REASON_MANAGER_PERMISSION_PENDING,
+    "force": attendance_service.REASON_FORCE_MAJEURE,
+    "other": attendance_service.REASON_OTHER,
+}
 
 _SOURCE_LABELS = {
     time_bonus_service.SOURCE_AUTO: "AVTO",
@@ -162,6 +183,13 @@ def _simple_employee_card_text(profile: dict) -> str:
         label = discipline.GRADE_LABELS.get(grade["grade_key"], grade["grade_key"])
         lines.append(f"⭐ Bugungi ish bahosi: {grade['grade_points']} ({label})")
 
+    lines.append("")
+    yesterday = attendance_service.get_yesterday_summary(profile["user_id"])
+    if yesterday["arrival_time"]:
+        lines.append(f"⏰ Kechagi davomat: {yesterday['arrival_time']} — {yesterday['label']}")
+    else:
+        lines.append("⏰ Kechagi davomat: Ma'lumot yo'q")
+
     return "\n".join(lines)
 
 
@@ -184,8 +212,40 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
         ]
     )
     rows.append([InlineKeyboardButton(text="➖ Ball ayirish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="⏰ Davomat", callback_data=f"{_CB_ATTENDANCE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _attendance_reason_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Sababsiz kech qoldi", callback_data=f"{_CB_ATT_REASON_PREFIX}{user_id}:unjustified")],
+            [InlineKeyboardButton(text="✅ Rahbar ruxsat bergan", callback_data=f"{_CB_ATT_REASON_PREFIX}{user_id}:manager")],
+            [InlineKeyboardButton(text="⚠️ Fors-major holat", callback_data=f"{_CB_ATT_REASON_PREFIX}{user_id}:force")],
+            [InlineKeyboardButton(text="📝 Boshqa sabab", callback_data=f"{_CB_ATT_REASON_PREFIX}{user_id}:other")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")],
+        ]
+    )
+
+
+def _attendance_screen_text(profile: dict, summary: dict) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    lines = [f"👤 {full_name}", f"📅 Kecha ({summary['date']}):"]
+    if summary["arrival_time"]:
+        lines.append(f"⏰ Kelgan vaqti: {summary['arrival_time']}")
+        lines.append(f"Holat: {summary['label']}")
+        if summary.get("note"):
+            lines.append(f"Izoh: {summary['note']}")
+    else:
+        lines.append("Ma'lumot yo'q.")
+    return "\n".join(lines)
+
+
+def _attendance_manual_entry_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")]]
+    )
 
 
 def _penalty_rule_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -617,6 +677,191 @@ def register(dp: Dispatcher, openai_client) -> None:
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
             await callback.message.answer("✍️ Sababingizni matn yoki ovozli xabar sifatida yuboring.")
+
+    # -------------------------------------------------------------- davomat --
+
+    def _yesterday_iso() -> str:
+        return (company_time.today() - timedelta(days=1)).isoformat()
+
+    async def _render_attendance_screen(callback: CallbackQuery, profile: dict) -> None:
+        user_id = profile["user_id"]
+        summary = attendance_service.get_day_summary(user_id, _yesterday_iso())
+
+        if summary["arrival_time"] is None:
+            await callback.message.edit_text(
+                _attendance_screen_text(profile, summary) + "\n\n🕐 Kelish vaqtini HH:MM formatida yuboring:",
+                reply_markup=_attendance_manual_entry_keyboard(user_id),
+            )
+            return
+
+        if summary["reason_status"] is None:
+            await callback.message.edit_text(
+                _attendance_screen_text(profile, summary) + "\n\nSabab tanlansinmi?",
+                reply_markup=_attendance_reason_keyboard(user_id),
+            )
+            return
+
+        await callback.message.edit_text(
+            _attendance_screen_text(profile, summary),
+            reply_markup=_attendance_manual_entry_keyboard(user_id),
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_ATTENDANCE_PREFIX))
+    async def attendance_review(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = employees.get_profile(user_id)
+        if profile is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        summary = attendance_service.get_day_summary(user_id, _yesterday_iso())
+        if summary["arrival_time"] is None:
+            await state.update_data(attendance_employee_id=user_id)
+            await state.set_state(AttendanceStates.waiting_arrival_time)
+
+        if callback.message:
+            await _render_attendance_screen(callback, profile)
+        await callback.answer()
+
+    @dp.message(StateFilter(AttendanceStates.waiting_arrival_time))
+    async def attendance_arrival_time_input(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("attendance_employee_id")
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        text = (message.text or "").strip()
+        if not attendance_service.record_manual_arrival(user_id, _yesterday_iso(), text):
+            await message.answer("❌ Vaqtni HH:MM formatida kiriting (masalan 07:58):")
+            return
+
+        await state.clear()
+        summary = attendance_service.get_day_summary(user_id, _yesterday_iso())
+        await message.answer(
+            _attendance_screen_text(profile, summary) + "\n\nSabab tanlansinmi?",
+            reply_markup=_attendance_reason_keyboard(user_id),
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_ATT_REASON_PREFIX))
+    async def attendance_reason_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        reason_key = parts[2]
+        profile = employees.get_profile(user_id)
+        if profile is None or reason_key not in _ATT_REASON_KEYS:
+            await callback.answer("Xodim yoki sabab topilmadi.", show_alert=True)
+            return
+
+        event_date = _yesterday_iso()
+
+        if reason_key == "unjustified":
+            attendance_service.mark_unjustified(user_id, event_date)
+            await callback.answer("✅ Qayd etildi: sababsiz kechikish.")
+            if callback.message:
+                await _render_attendance_screen(callback, profile)
+            return
+
+        if reason_key == "manager":
+            attendance_service.request_manager_permission(user_id, event_date)
+            await callback.answer("✅ Rahbarga so'rov yuborildi.")
+            full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+            try:
+                await callback.bot.send_message(
+                    FOUNDER_ID,
+                    f"❓ {full_name} bugun kechroq kelishga ruxsat berdingizmi?",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="✅ Ha", callback_data=f"{_CB_ATT_MGR_DECIDE_PREFIX}{user_id}:yes"
+                                ),
+                                InlineKeyboardButton(
+                                    text="❌ Yo'q", callback_data=f"{_CB_ATT_MGR_DECIDE_PREFIX}{user_id}:no"
+                                ),
+                            ]
+                        ]
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Founderga rahbar-ruxsati so'rovini yuborib bo'lmadi ({user_id}): {error!r}")
+            if callback.message:
+                await _render_attendance_screen(callback, profile)
+            return
+
+        state_by_key = {
+            "force": AttendanceStates.waiting_force_majeure_reason,
+            "other": AttendanceStates.waiting_other_reason,
+        }
+        await state.update_data(attendance_employee_id=user_id)
+        await state.set_state(state_by_key[reason_key])
+        await callback.answer()
+        if callback.message:
+            await callback.message.answer("✍️ Qisqacha sababni yozing:")
+
+    @dp.message(StateFilter(AttendanceStates.waiting_force_majeure_reason))
+    async def attendance_force_majeure_reason(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("attendance_employee_id")
+        await state.clear()
+
+        text = (message.text or "").strip()
+        if not text or user_id is None:
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        attendance_service.mark_force_majeure(user_id, _yesterday_iso(), text)
+        await message.answer("✅ Qayd etildi: fors-major holat.")
+
+    @dp.message(StateFilter(AttendanceStates.waiting_other_reason))
+    async def attendance_other_reason(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("attendance_employee_id")
+        await state.clear()
+
+        text = (message.text or "").strip()
+        if not text or user_id is None:
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        attendance_service.mark_other_reason(user_id, _yesterday_iso(), text)
+        await message.answer("✅ Qayd etildi: boshqa sabab.")
+
+    @dp.callback_query(F.data.startswith(_CB_ATT_MGR_DECIDE_PREFIX))
+    async def attendance_manager_decide(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_DECIDE_ATTENDANCE_PERMISSION):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        approved = parts[2] == "yes"
+        decided = attendance_service.decide_manager_permission(
+            user_id, _yesterday_iso(), approved, callback.from_user.id
+        )
+        if not decided:
+            await callback.answer("Bu so'rov allaqachon hal qilingan.", show_alert=True)
+            return
+
+        await callback.answer("✅ Qabul qilindi.")
+        if callback.message:
+            result_text = "✅ Ruxsat tasdiqlandi." if approved else "❌ Ruxsat tasdiqlanmadi."
+            await callback.message.edit_text(result_text, reply_markup=None)
 
     # ----------------------------------------------------- vazifa biriktirish --
 

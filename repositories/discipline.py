@@ -81,6 +81,31 @@ def adjust_bonus_bank(
         conn.close()
 
 
+def get_bonus_ledger_totals_since(user_id: int, since_iso: str) -> dict:
+    """``bonus_bank_ledger``dagi ``since_iso``dan keyingi yozuvlarni
+    musbat (bonus) va manfiy (minus) qatorlarga ajratib yig'adi —
+    joriy davr (masalan joriy oy) uchun alohida Bonus/Minus/Jami
+    ko'rsatish uchun (dashboard). Balansning o'zi (``salaries.bonus_bank``)
+    umrbod yig'iladigan qiymat bo'lib qoladi — bu funksiya faqat
+    KO'RSATISH uchun davr bo'yicha filtrlangan yig'indi beradi, hech
+    narsani qayta yozmaydi/tiklamaydi."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN change_amount > 0 THEN change_amount ELSE 0 END), 0) AS bonus, "
+            "COALESCE(SUM(CASE WHEN change_amount < 0 THEN -change_amount ELSE 0 END), 0) AS minus "
+            "FROM bonus_bank_ledger WHERE user_id = ? AND created_at >= ?",
+            (user_id, since_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    bonus = row["bonus"] if row else 0
+    minus = row["minus"] if row else 0
+    return {"bonus": bonus, "minus": minus, "net": bonus - minus}
+
+
 def get_bonus_ledger(user_id: int, limit: int = 20) -> list[dict]:
     conn = get_connection()
     try:

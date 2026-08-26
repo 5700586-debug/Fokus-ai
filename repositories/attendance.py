@@ -68,3 +68,37 @@ def confirm_reason(employee_id: int, event_date: str, confirmed_by: int) -> None
         conn.commit()
     finally:
         conn.close()
+
+
+def get_reason(employee_id: int, event_date: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM attendance_reasons WHERE employee_id = ? AND event_date = ?",
+            (employee_id, event_date),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
+def decide_manager_permission(
+    employee_id: int, event_date: str, expected_status: str, new_status: str, confirmed_by: int
+) -> bool:
+    """FAQAT ``reason_status`` hali ``expected_status`` (odatda
+    ``manager_permission_pending``) bo'lsa yangilaydi — atomik
+    ``UPDATE ... WHERE reason_status = ?`` orqali, ikkinchi/parallel
+    "Ha"/"Yo'q" bosilishi birinchi qarorni bosib o'tmasligi uchun
+    (qarang ``employees.approve_profile``dagi bir xil naqsh)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE attendance_reasons SET reason_status = ?, confirmed_by = ?, confirmed_at = ? "
+            "WHERE employee_id = ? AND event_date = ? AND reason_status = ?",
+            (new_status, confirmed_by, _now(), employee_id, event_date, expected_status),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()

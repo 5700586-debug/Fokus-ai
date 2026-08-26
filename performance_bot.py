@@ -22,7 +22,7 @@ from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKey
 from db import IntegrityError
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized
-from services import driver_checks, market_observation, permissions, star_engine, supervisor_scoring
+from services import driver_checks, employee_dashboard, market_observation, permissions, star_engine, supervisor_scoring
 from services import meal_plan as meal_plan_service
 from services import rules as rules_service
 
@@ -112,6 +112,23 @@ def register(dp: Dispatcher) -> None:
                 lines.append(f"{row['year_month']}: {row['stars']}⭐ — {row['bonus_amount']} so'm")
         else:
             lines.append("Hali bonus tarixi yo'q.")
+
+        dashboard = employee_dashboard.build_dashboard(message.from_user.id)
+        if dashboard is not None:
+            photo_file_id = dashboard["profile"]["photo_file_id"]
+            if photo_file_id:
+                # Foto o'zining alohida try/except'ida — muvaffaqiyatsiz
+                # bo'lsa ham (masalan eskirgan file_id) pastdagi matnli
+                # dashboard baribir yuboriladi (qarang recruiting_bot.py
+                # dagi bir xil izolyatsiya naqshi).
+                try:
+                    await message.answer_photo(photo_file_id)
+                except Exception as error:  # noqa: BLE001
+                    print(f"/mystars fotosini yuborib bo'lmadi ({message.from_user.id}): {error!r}")
+
+            lines.append("")
+            lines.append("—" * 10)
+            lines.append(employee_dashboard.format_dashboard_text(dashboard))
 
         await message.answer("\n".join(lines))
 

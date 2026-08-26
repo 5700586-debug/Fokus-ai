@@ -9,7 +9,91 @@ ishdan keyin yangilanadi. Ziddiyat bo'lsa, haqiqiy Git/GitHub holati
 - **✅ VAZIFA+NAZORATCHI+BONUS V1 — STAGE 1-8 TUGADI, endi APELLYATSIYA oqimi ham QAT'IY (deterministik) REAL TELEGRAM E2E orqali tasdiqlangan.** Avvalgi urinish (`28dcb99`) "Xodimga xabar → e'tiroz" qadamini faqat ADAPTIV/moslashuvchan tarzda sinardi (tanlangan xodim tasodifan shu test akkaunt bo'lib qolsagina to'liq sinaladi, aks holda BLOCKED deb yozib PASS beraverardi) — bu "BLOCKED bo'lsa PASS qilma" talabiga zid edi. Tuzatish: yangi Founder-only, `ENVIRONMENT == "test"`-only `/e2exodim` buyrug'i (`nazoratchi_bot.py`) shu test akkauntning O'ZINI birinchi filialga tasdiqlangan xodim sifatida ro'yxatdan o'tkazadi (faqat `employees` jadvaliga yozadi — `roles`/`allowed_users`ga HECH QACHON tegmaydi, shuning uchun haqiqiy ruxsatlar yoki single-slot rollarga ta'sir qilmaydi). `e2e/run_nazoratchi_e2e.py` endi moslashuvchan filial-qidiruv o'rniga aniq shu bootstrap qilingan xodimni ("E2E Sinov" nomi bilan) topadi va ochadi — shundan keyin: karta → ISH BAHOSI "2" → o'zining ajratilgan vaqtinchalik nizom bandi (`900001`) orqali BALL AYIRISH (-30) → XODIM XABARI shu chatga kelgani → "✋ E'tirozim bor" bosilgani → sabab yuborilgach APELLYATSIYA ochilgani — BARCHASI endi majburiy tekshiruv (StepFailed), moslashuvchan/BLOCKED yo'l yo'q. `2e28743` push'idan keyin `fokus-ai-test` shu commitga qayta deploy qilindi (ikkita deploy triggerlandi, ikkalasi ham `live`ga yetdi — `GET /deploys?limit=1` orqali `2e28743`da live ekani tasdiqlangan) va CI'da **ikkalasi ham PASSED**: `Smoke tests` (Run 80) va `E2E (real Telegram, fokus-ai-test)` (Run 33) — commit'da 0 ta diagnostika comment (soxta-PASS emas, `continue-on-error` faqat CONCLUSION'ga ta'sir qiladi, comment postlash shartI ichki OUTCOME'ga bog'liq). STAGE 9 (aniq so'm bonus formulasi) ATAYLAB qurilmagan — Founder tasdiqlashi kerak. Batafsil pastda.
 - **GitHub holati:** Sinxron — lokal HEAD va `origin`dagi shu branch bir xil.
 - **Render TEST holati:** `fokus-ai-test` `2e28743`da live — `/e2exodim` va apellyatsiya E2E tuzatishi jonli botda.
-- **🚧 YANGI ISH — VAZIFA + NAZORATCHI + BONUS V1 (bosqichma-bosqich quriladi, STAGE 1-6 TUGADI):**
+
+## ⚠️ DIQQAT — ISHCHI KATALOGDA COMMIT QILINMAGAN O'ZGARISHLAR BOR
+
+**BONUS/MINUS BALL + DAVOMAT/KECHIKISH + XODIM DASHBOARD V1** — kod
+YOZILDI (quyida to'liq ro'yxat), lekin **hech qanday commit yo'q, `origin`ga
+push QILINMAGAN, va targeted testlar HECH QACHON ISHGA TUSHIRILMAGAN**
+(pytest bilan ham, GitHub Actions bilan ham) — quyidagi sabab bilan:
+
+**Sabab (haqiqiy environment nosozligi, biznes qaror emas):** shu sessiyada
+Windows'dan (PowerShell/CMD) foydalanish ANIQ taqiqlangan edi, faqat
+"remote sandbox/GitHub Actions/Claude muhiti" orqali ishlash so'ralgan
+edi. Ammo bu muhitda: (1) `Bash` tool umuman ishlamaydi (hatto `echo
+hello` ham darhol xatolik beradi, sandboxsiz holatda ham), (2) masofaviy/
+worktree izolyatsiya (Agent tool `isolation: "remote"`, shuningdek alohida
+`EnterWorktree` tool) — TO'RT marta ketma-ket bir xil deterministik xato
+bilan muvaffaqiyatsiz bo'ldi: `"git resolves its working tree to <path>
+(a core.worktree redirect...)"` — bu izolyatsiya vositasining Windows yo'l
+solishtirish (drive harf registri: `c:\...` ish kataloги vs git'ning
+normalizatsiya qilgan `C:/...`) bilan bog'liq ichki xatosiga o'xshaydi,
+repo'dagi biror narsa emas. Natijada git/pytest ishga tushiradigan
+HECH QANDAY vosita qolmadi — faqat fayl o'qish/qidirish/tahrirlash
+(Read/Write/Edit/Glob/Grep) ishlaydi, ular esa commit/push/test
+BAJAROLMAYDI. Diagnostika uchun `.claude/worktrees/` ostida 4 ta bo'sh,
+buzilgan worktree qoldig'i qoldi (`agent-a776ea71`, `agent-afab378e`,
+`agent-aebbad36`, `bonus-dashboard-v1`) — bularni Founder qo'lda
+`git worktree remove --force` yoki papkani o'chirib tozalashi kerak
+(ishchi kodga aloqasi yo'q, faqat vositaning debri).
+
+**Nima qilindi (kod DIQQAT bilan yozildi, mavjud arxitektura naqshlariga
+qat'iy amal qilib, lekin HALI TASDIQLANMAGAN):**
+- **Bonus/Minus BALL** — YANGI jadval QURILMADI: `bonus_bank_ledger`
+  (mavjud, `schema/discipline.py`) tekshirilib, u ALLAQACHON ball
+  semantikasida ekani aniqlandi (jarima va kunlik baho allaqachon shu
+  ledgerga yozadi, `/mymaosh`/`/maosh`da "ball" deb ko'rsatiladi, PUL
+  emas) — shuning uchun yangi, alohida ledger yaratish spekulyativ
+  bo'lardi. Qo'shildi: `repositories/discipline.py::get_bonus_ledger_totals_since`
+  (davr bo'yicha musbat/manfiy yig'indi) + `services/discipline.py::get_period_point_totals`
+  (joriy oy chegarasi `company_time` orqali, UTC/mahalliy farqi hisobga
+  olingan). Davr yopilishi/reset — HECH QANDAY kod/cron shart emas: yangi
+  oy tabiiy ravishda 0/0/0dan boshlanadi (hali shu oyga tegishli yozuv
+  yo'qligi sababli), eski oy yozuvlari HECH QACHON o'chirilmaydi.
+- **Davomat/kechikish ko'rib chiqish** — yangi `services/attendance.py`:
+  Nazoratchi qo'lda kelish vaqtini kiritadi (mavjud
+  `repositories/attendance.record_event`ga yozadi, `source="manual_nazoratchi_entry"`
+  — real Face ID integratsiyasi QURILMADI, faqat shu qatlamga qo'lda
+  ma'lumot kiritish yo'li), so'ng 4 ta sabab tugmasi (`nazoratchi_bot.py`):
+  ❌ Sababsiz, ✅ Rahbar ruxsati, ⚠️ Fors-major, 📝 Boshqa sabab. "Rahbar
+  ruxsati" — Founderga avtomatik Ha/Yo'q so'rovi yuboriladi
+  (`_CB_ATT_MGR_DECIDE_PREFIX`, yangi `permissions.ACTION_DECIDE_ATTENDANCE_PERMISSION`,
+  Founder-only), qarori atomik `UPDATE ... WHERE reason_status = 'manager_permission_pending'`
+  orqali yoziladi (`repositories/attendance.py::decide_manager_permission`)
+  — ikkinchi Ha/Yo'q bosilishi birinchi qarorni bosib o'tolmaydi. Hech
+  qanday minus ball miqdori O'YLAB TOPILMADI — bu modul faqat holatni
+  saqlaydi, jarima Founder keyinroq aniqlashi kerak.
+- **Xodim dashboard** — yangi entry point QURILMADI, ALLAQACHON mavjud
+  `/mystars` (`performance_bot.py`, "Mening yulduzlarim" — xodimning o'z
+  holatini ko'rish uchun eski, tanish buyruq) KENGAYTIRILDI: yangi
+  `services/employee_dashboard.py` — profil (ism/lavozim/filial/foto),
+  🟢 Bonus/🔴 Minus/⭐ Jami (joriy davr), kechagi davomat, oy boshidan
+  ishlangan soat (ISHONCHLI manba topilmadi — "Ma'lumot yo'q" fallback,
+  hech qanday raqam o'ylab topilmagan), oxirgi 2 kunlik tafsilot (DBda
+  eski tarix o'chirilmaydi, faqat KO'RSATISH chegarasi). Foto bo'lsa
+  alohida, izolyatsiya qilingan `try/except` bilan yuboriladi (mavjud
+  `recruiting_bot.py` naqshi) — muvaffaqiyatsiz bo'lsa ham matnli
+  dashboard baribir yuboriladi.
+- **O'zgargan/yangi fayllar:** `repositories/discipline.py`,
+  `services/discipline.py`, `repositories/attendance.py`,
+  `services/attendance.py` (yangi), `services/employee_dashboard.py`
+  (yangi), `services/permissions.py`, `nazoratchi_bot.py`,
+  `performance_bot.py`, `tests/test_bonus_point_ledger.py` (yangi),
+  `tests/test_employee_dashboard.py` (yangi),
+  `tests/test_nazoratchi_attendance_review.py` (yangi).
+- **Keyingi qadam (Founder yoki ishlaydigan Bash/git muhitida keyingi
+  sessiya uchun):** o'zgarishlarni `git status`/`git diff` bilan ko'rib
+  chiqish, targeted testlarni ishga tushirish (`pytest tests/test_bonus_point_ledger.py
+  tests/test_employee_dashboard.py tests/test_nazoratchi_attendance_review.py -q`),
+  xato topilsa tuzatish, so'ng 2-4 ta mantiqiy commit qilib
+  `feature/hr-conversational-interview`ga push qilish. Ochiq biznes
+  qarorlari (hali O'YLAB TOPILMAGAN, kod ularni kutib turadi): 1 ball
+  necha so'm, vaqtida/erta kelish uchun necha bonus ball, 2+ soat
+  sababsiz kechikish uchun necha minus ball, Nazoratchi noto'g'ri
+  tasdiqlasa necha minus, takroriy fors-major nechinchi martadan
+  majburiy rahbar tasdig'iga chiqadi.
+
+- **🚧 ESKI ISH — VAZIFA + NAZORATCHI + BONUS V1 (bosqichma-bosqich quriladi, STAGE 1-6 TUGADI):**
   - **STAGE 1 (`f1cacc5`) — Nazoratchi filial → aktiv xodimlar → xodim kartasi.** Yangi `nazoratchi_bot.py`, `/filiallar`. Filial nomlari `RECRUITING_BRANCH_NAMES`dan, aktiv xodimlar `employees.list_approved_by_branch()`dan (Founder'ning "Do'konlar"da ham ishlatiladigan), ruxsat mavjud `ACTION_EVALUATE_EMPLOYEE` (yangi ACTION_* yo'q). Stateless inline-callback drill-down (filial→2-tadan xodim tugmasi→karta), FSM state kerak emas.
   - **STAGE 2 (`f8b2cc7`) — Doimiy vazifa/hudud biriktirish.** Yangi `schema/supervision.py` (`tasks`+`task_assignments`, ko'p-ko'pga, `UNIQUE(task_id, employee_id)`), `repositories/tasks.py`+`services/tasks.py`. Kartada ko'rinadi, xodim hech narsa bosmaydi. Founder-only `/vazifabiriktir`/`/vazifabekor` (yangi `ACTION_MANAGE_TASK_ASSIGNMENTS`).
   - **STAGE 3 (`09b2ec9`) — Vaqt bonusi (qo'lda fallback).** `time_bonus_grants` (`schema/supervision.py`da STAGE 2'da tayyorlangan), `UNIQUE(employee_id, grant_date)` + `ON CONFLICT DO NOTHING` — duplicate/race-safe (avtomatik `source=AUTO` ham xuddi shu jadvalga yozadi, ikkalasi bir-birini bosib o'tolmaydi). Kartada "➕ Vaqt bonusini tasdiqlash" faqat hali tasdiqlanmagan bo'lsa ko'rinadi.

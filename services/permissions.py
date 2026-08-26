@@ -76,6 +76,7 @@ ACTION_MANAGE_DISCIPLINE_RULES = "manage_discipline_rules"
 ACTION_SET_SALARY = "set_salary"
 ACTION_LOOKUP_ANY_SALARY = "lookup_any_salary"
 ACTION_DECIDE_APPEAL = "decide_appeal"
+ACTION_DECIDE_ATTENDANCE_PERMISSION = "decide_attendance_permission"
 
 # nazoratchi_bot.py — xodimga doimiy vazifa/hudud biriktirish (Founder-only;
 # ko'rish — xodim kartasida — ACTION_EVALUATE_EMPLOYEE orqali, nazoratchi

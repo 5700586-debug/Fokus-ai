@@ -25,15 +25,18 @@ list`) ustuvor — bu faylning o'zi emas.
   bot ruxsatini olib tashlash hamon alohida `/removeuser` orqali
   (V1 ataylab shunday: bitta kanonik status manbai). Testlar:
   `tests/test_employee_offboarding.py` (15 ta, Linux'da PASSED).
-- **⚠️ Alohida, avvaldan mavjud muammo (bu ish bilan bog'liq emas):**
+- **✅ TUZATILDI (2026-08-26, commit `ed672c9`, faqat test kodi):**
   `tests/test_mobility_management_ui.py` va
-  `tests/test_schedule_management_ui.py` fayllarida `pytestmark =
-  pytest.mark.anyio` (va `anyio_backend` fixture) YO'Q — shuning uchun
-  ulardagi barcha async testlar "async def functions are not natively
-  supported" bilan FAIL bo'ladi, ikkalasi ham `smoke-tests.yml`ga
-  kiritilgan. Marker qo'shib sinab ko'rilganda 59 ta o'tadi, 8 tasi
-  haqiqatan yiqiladi (asosan test kutilmalari — `sent[0]` endi
-  `AnswerCallbackQuery`). Bu alohida vazifa sifatida tuzatilishi kerak.
+  `tests/test_schedule_management_ui.py` — loyihaning AnyIO sozlamasi
+  (`pytestmark = pytest.mark.anyio` + `anyio_backend` fixture) qo'shildi
+  va ochilgan 8 ta eskirgan assertion tuzatildi: compliance ekrani
+  (`nzr_mob_reqs`) `edit_text`dan oldin `callback.answer()` chaqirgani
+  uchun `sent[0]` endi `AnswerCallbackQuery` — assertionlar indeks
+  o'rniga aktyor chatidagi ekran xabari bo'yicha (`_actor_screen`)
+  ishlaydi; `test_founder_has_no_self_*_restriction` esa Founder uchun
+  profil yaratmasdan o'z kartasini ochardi (handler to'g'ri "Xodim
+  topilmadi." beradi) — profil qo'shildi. `nazoratchi_bot.py`
+  o'zgarmadi, haqiqiy defekt topilmadi. Linux'da 67 ta PASSED.
 - **Oxirgi commit:** `ec5e45f` — "Post E2E diagnostics as a commit comment on failure". **✅ Real Telegram E2E endi PASSED** (shu commit uchun) — E2E workflow'ga doimiy diagnostika-comment infratuzilma qo'shildi (FAILED bo'lsa avtomatik commit comment orqali to'liq sabab ko'rinadi, Founder aralashuvisiz), va aynan shu push'dagi run PASSED chiqdi. Launch-core status (SMENA/KASSA/NAZORATCHI: TAYYOR, BONUS: qisman, VAZIFA: yo'q) va "jarima" so'zini UI'dan olib tashlash (commit `2d286cb`) `FOKUS_AI_STATE.md`da batafsil.
 
 - **Gemini konsultant (read-only)** — rasmiy `google-github-actions/run-gemini-cli@v0`.

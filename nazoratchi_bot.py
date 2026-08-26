@@ -48,8 +48,9 @@ import company_time
 import discipline_bot
 import employees
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
-from roles import role_name
+from roles import get_role, role_name
 from services import attendance as attendance_service
+from services import audit
 from services import discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
@@ -120,6 +121,10 @@ _CB_MOBILITY_REMOVE_NO_PREFIX = "nzr_mob_remove_no:"
 _CB_MOBILITY_MODE_PREFIX = "nzr_mob_mode:"
 _CB_MOBILITY_MODE_SET_PREFIX = "nzr_mob_mode_set:"
 _CB_MOBILITY_DATE_PREFIX = "nzr_mob_date:"
+
+_CB_OFFBOARD_PREFIX = "nzr_offb:"
+_CB_OFFBOARD_YES_PREFIX = "nzr_offb_yes:"
+_CB_OFFBOARD_NO_PREFIX = "nzr_offb_no:"
 
 _MOBILITY_SOURCE = "nazoratchi_ui"
 _MOBILITY_QUICK_MINUTES = (20, 30, 45, 60)
@@ -263,6 +268,7 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
     rows.append([InlineKeyboardButton(text="⏰ Davomat", callback_data=f"{_CB_ATTENDANCE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="🗓 Ish grafigi", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="📍 Filial nazorati", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="🚪 Ishdan chiqarish", callback_data=f"{_CB_OFFBOARD_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -552,6 +558,44 @@ def _mobility_mode_keyboard(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _offboard_confirm_text(profile: dict) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    return "\n".join(
+        [
+            "🚪 Ishdan chiqarish",
+            "",
+            f"👤 {full_name}",
+            f"🏬 Filial: {profile.get('branch') or '-'}",
+            f"🏷 Lavozim: {role_name(profile.get('role_key'))}",
+            "",
+            "ℹ️ Tarix o'chmaydi: baholar, ballar, davomat, vazifalar va ish "
+            "grafigi yozuvlari saqlanib qoladi. Xodim faqat aktiv xodimlar "
+            "ro'yxatidan chiqariladi.",
+            "",
+            "Tasdiqlaysizmi?",
+        ]
+    )
+
+
+def _offboard_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ha, ishdan chiqarish", callback_data=f"{_CB_OFFBOARD_YES_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_OFFBOARD_NO_PREFIX}{user_id}"),
+            ]
+        ]
+    )
+
+
+def _offboard_result_text(profile: dict) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    return (
+        f"🚪 {full_name} aktiv xodimlar ro'yxatidan chiqarildi.\n\n"
+        "📚 Barcha tarixiy ma'lumotlari saqlanib qoldi."
+    )
+
+
 def _penalty_rule_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Faqat Founder tomonidan ball miqdori belgilangan ("tasdiqlangan")
     nizom bandlari — AI ham, Nazoratchi ham yangi miqdorni o'zi
@@ -682,6 +726,16 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(f"🏬 {branch}\n\n👥 Xodimni tanlang:", reply_markup=keyboard)
         await callback.answer()
 
+    async def _render_employee_card(callback: CallbackQuery, profile: dict) -> None:
+        user_id = profile["user_id"]
+        if callback.message:
+            await callback.message.edit_text(
+                _simple_employee_card_text(profile),
+                reply_markup=_employee_card_keyboard(
+                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
+                ),
+            )
+
     @dp.callback_query(F.data.startswith(_CB_EMPLOYEE_PREFIX))
     async def employee_pick(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
@@ -693,13 +747,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        if callback.message:
-            await callback.message.edit_text(
-                _simple_employee_card_text(profile),
-                reply_markup=_employee_card_keyboard(
-                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                ),
-            )
+        await _render_employee_card(callback, profile)
         await callback.answer()
 
     @dp.callback_query(F.data.startswith(_CB_TIME_BONUS_PREFIX))
@@ -1843,6 +1891,100 @@ def register(dp: Dispatcher, openai_client) -> None:
             _mobility_screen_text(profile, parsed.isoformat()),
             reply_markup=_mobility_menu_keyboard(user_id),
         )
+
+    # ---------------------------------------------------- ishdan chiqarish --
+
+    async def _ensure_offboard_access(callback: CallbackQuery, employee_id: int) -> dict | None:
+        """``_ensure_mobility_access`` bilan bir xil naqsh, BITTA farq
+        bilan: bu yerda Founder uchun ham o'z-o'ziga tegmaslik cheklovi
+        amal qiladi (Founder o'zini ishdan chiqara olmaydi)."""
+        if not await permissions.ensure_permission(callback, permissions.ACTION_OFFBOARD_EMPLOYEE):
+            return None
+
+        actor_id = callback.from_user.id
+        profile = employees.get_profile(employee_id)
+        if profile is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return None
+
+        if employee_id == actor_id:
+            await callback.answer("O'zingizni ishdan chiqara olmaysiz.", show_alert=True)
+            return None
+
+        if not permissions.can_access_branch(actor_id, profile.get("branch")):
+            await callback.answer("Bu xodim boshqa filialga tegishli.", show_alert=True)
+            return None
+
+        return profile
+
+    @dp.callback_query(F.data.startswith(_CB_OFFBOARD_PREFIX))
+    async def offboard_start(callback: CallbackQuery) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_offboard_access(callback, user_id)
+        if profile is None:
+            return
+
+        if callback.message:
+            await callback.message.edit_text(
+                _offboard_confirm_text(profile),
+                reply_markup=_offboard_confirm_keyboard(user_id),
+            )
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith(_CB_OFFBOARD_NO_PREFIX))
+    async def offboard_cancel(callback: CallbackQuery) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_offboard_access(callback, user_id)
+        if profile is None:
+            return
+
+        await _render_employee_card(callback, profile)
+        await callback.answer("Bekor qilindi.")
+
+    @dp.callback_query(F.data.startswith(_CB_OFFBOARD_YES_PREFIX))
+    async def offboard_confirm(callback: CallbackQuery) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_offboard_access(callback, user_id)
+        if profile is None:
+            return
+
+        # Atomik ``UPDATE ... WHERE status = 'approved'`` — ikkinchi
+        # (takroriy bosilgan) tasdiq ``None`` qaytaradi, shuning uchun
+        # audit ham, xabar ham faqat bir marta bo'ladi.
+        offboarded = employees.offboard_profile(user_id)
+        if offboarded is None:
+            await callback.answer("ℹ️ Bu xodim allaqachon aktiv ro'yxatda emas.", show_alert=True)
+            return
+
+        audit.log_event(
+            audit.EVENT_EMPLOYEE_OFFBOARDED,
+            actor_id=callback.from_user.id,
+            actor_role=get_role(callback.from_user.id),
+            chat_id=callback.message.chat.id if callback.message else None,
+            target_id=user_id,
+            old_value=employees.STATUS_APPROVED,
+            new_value=employees.STATUS_OFFBOARDED,
+        )
+
+        await callback.answer("✅ Xodim aktiv ro'yxatdan chiqarildi.")
+        if callback.message:
+            await callback.message.edit_text(
+                _offboard_result_text(offboarded),
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filiallar", callback_data=_CB_BRANCHES)]]
+                ),
+            )
+
+        # Xabar yuborish ikkinchi darajali — DB'dagi holat o'zgarishi
+        # allaqachon yakunlangan, xato bo'lsa ham qaytarilmaydi.
+        try:
+            await callback.bot.send_message(
+                user_id,
+                "🚪 Siz aktiv xodimlar ro'yxatidan chiqarildingiz.\n\n"
+                "📚 Ish tarixingiz saqlanib qoladi. Savollaringiz bo'lsa rahbariyatga murojaat qiling.",
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga ishdan chiqarish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
 
     # ----------------------------------------------------- vazifa biriktirish --
 

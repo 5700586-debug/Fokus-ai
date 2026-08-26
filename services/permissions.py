@@ -95,6 +95,12 @@ ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS = "manage_branch_visit_requirements"
 # allaqachon shu amalga ega).
 ACTION_MANAGE_TASK_ASSIGNMENTS = "manage_task_assignments"
 
+# nazoratchi_bot.py — xodimni aktiv ro'yxatdan chiqarish (ishdan
+# chiqarish). Tarix o'chirilmaydi, faqat ``employees.status`` o'zgaradi.
+# Filial chegarasi ALOHIDA tekshiriladi (``can_access_branch``) —
+# bu amalga ruxsat o'zi filial chegarasini bermaydi.
+ACTION_OFFBOARD_EMPLOYEE = "offboard_employee"
+
 # saturn_group_bot.py (Founder-only).
 ACTION_SATURN_TEST = "saturn_test"
 
@@ -126,6 +132,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         ACTION_MANAGE_DAILY_SCHEDULE,
         ACTION_MANAGE_MOBILITY_POLICY,
         ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS,
+        ACTION_OFFBOARD_EMPLOYEE,
     },
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION},
     "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT},

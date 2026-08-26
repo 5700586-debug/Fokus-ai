@@ -11,6 +11,13 @@ from datetime import datetime, timezone
 from db import get_connection
 from roles import role_name
 
+# Xodimning aktiv/aktiv emasligi uchun YAGONA kanonik manba —
+# ``employees.status``. Aktiv ro'yxat (``list_approved_by_branch``) aynan
+# shu ustunga tayanadi, shuning uchun ishdan chiqarish ham faqat shu
+# yerda holat almashtiradi (yozuv hech qachon o'chirilmaydi).
+STATUS_APPROVED = "approved"
+STATUS_OFFBOARDED = "offboarded"
+
 _EMPLOYEE_FIELDS = [
     "invite_token",
     "telegram_username",
@@ -158,6 +165,38 @@ def approve_profile(user_id: int, approved_by: int) -> dict | None:
             "UPDATE employees SET status = 'approved', approved_at = ?, approved_by = ? "
             "WHERE user_id = ? AND status = 'submitted'",
             (now, approved_by, user_id),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    if not updated:
+        return None
+
+    return get_profile(user_id)
+
+
+def offboard_profile(user_id: int) -> dict | None:
+    """Xodimni aktiv ro'yxatdan chiqaradi — FAQAT hozir aktiv
+    (``'approved'``) bo'lsa, ``approve_profile``dagi bilan bir xil
+    atomik ``UPDATE ... WHERE status = ?`` naqshi orqali: ikkinchi
+    (takroriy bosilgan yoki parallel) chaqiruv hech narsa
+    o'zgartirmaydi va ``None`` qaytaradi — chaqiruvchi shunda audit
+    yozmasligi va xabarni qayta yubormasligi kerak.
+
+    Xodim yozuvi HECH QACHON o'chirilmaydi (``DELETE`` yo'q) — profil,
+    kontaktlar va boshqa jadvallardagi butun tarix (ball ledgeri,
+    davomat, vazifa biriktirishlari, ish grafigi) joyida qoladi va
+    ``get_profile()`` orqali o'qilaveradi. Kim/qachon chiqargani alohida
+    ustunda emas, mavjud audit infratuzilmasida
+    (``security_audit_log``) saqlanadi.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE employees SET status = ? WHERE user_id = ? AND status = ?",
+            (STATUS_OFFBOARDED, user_id, STATUS_APPROVED),
         )
         conn.commit()
         updated = cursor.rowcount > 0

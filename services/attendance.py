@@ -280,6 +280,18 @@ def _month_to_date_range(profile: dict) -> tuple[date, date] | None:
 # ---------------------------------------------------- grafik siyosati --
 
 
+def is_valid_hhmm(text: str) -> bool:
+    """Handler qatlami uchun ochiq (public) validatsiya -- ichki
+    ``_parse_hhmm`` boshqa modulga to'g'ridan-to'g'ri ko'rsatilmasin."""
+    return _parse_hhmm(text) is not None
+
+
+def get_shift_for_date(employee_id: int, shift_date: str) -> dict | None:
+    """Handler qatlami uchun ingichka o'ram -- ``repositories/``ga
+    to'g'ridan-to'g'ri kirmasin (mavjud loyiha qatlamlanishi)."""
+    return attendance_repo.get_shift_for_date(employee_id, shift_date)
+
+
 def resolve_schedule_mode(employee_id: int) -> str | None:
     """employee override > role default > UNKNOWN (``None``). Policy
     yo'q xodimga hech qanday standart (masalan ``fixed_1``) O'YLAB

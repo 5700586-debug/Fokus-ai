@@ -36,7 +36,7 @@ Founder ham (barcha amallarga ruxsatli bo'lgani uchun) shu oqimni
 ishlata oladi — filial-mustaqil ko'rish huquqi
 ``permissions._CROSS_BRANCH_ROLES``da nazoratchi allaqachon bor."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
@@ -50,7 +50,7 @@ import employees
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import role_name
 from services import attendance as attendance_service
-from services import discipline, discipline_ai, permissions, tasks as tasks_service, time_bonus as time_bonus_service
+from services import discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
@@ -62,6 +62,12 @@ class AttendanceStates(StatesGroup):
     waiting_arrival_time = State()
     waiting_force_majeure_reason = State()
     waiting_other_reason = State()
+
+
+class ScheduleStates(StatesGroup):
+    waiting_flexible_start = State()
+    waiting_flexible_end = State()
+    waiting_custom_date = State()
 
 
 _CB_BRANCHES = "nzr_branches"
@@ -79,6 +85,20 @@ _CB_MATCH_REJECT_PREFIX = "nzr_match_no:"
 _CB_ATTENDANCE_PREFIX = "nzr_att:"
 _CB_ATT_REASON_PREFIX = "nzr_attreason:"
 _CB_ATT_MGR_DECIDE_PREFIX = "nzr_attmgr:"
+_CB_SCHEDULE_PREFIX = "nzr_sched:"
+_CB_SCHEDULE_FIXED_PREFIX = "nzr_sched_fixed:"
+_CB_SCHEDULE_FLEX_PREFIX = "nzr_sched_flex:"
+_CB_SCHEDULE_OFF_PREFIX = "nzr_sched_off:"
+_CB_SCHEDULE_DATE_PREFIX = "nzr_sched_date:"
+_CB_SCHEDULE_CONFIRM_PREFIX = "nzr_sched_confirm:"
+_CB_SCHEDULE_CANCEL_PREFIX = "nzr_sched_cancel:"
+
+_SCHEDULE_SOURCE = "nazoratchi_ui"
+_SCHEDULE_MODE_LABELS = {
+    attendance_service.SCHEDULE_MODE_FIXED_1: "1-smena",
+    attendance_service.SCHEDULE_MODE_FIXED_2: "2-smena",
+    attendance_service.SCHEDULE_MODE_FLEXIBLE: "Erkin grafik",
+}
 
 # Callback_data ichida qisqa bo'lishi uchun sabab kalitlari — to'liq
 # ``services/attendance`` doimiylariga shu yerda moslashtiriladi.
@@ -213,6 +233,7 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
     )
     rows.append([InlineKeyboardButton(text="➖ Ball ayirish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⏰ Davomat", callback_data=f"{_CB_ATTENDANCE_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="🗓 Ish grafigi", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -245,6 +266,92 @@ def _attendance_screen_text(profile: dict, summary: dict) -> str:
 def _attendance_manual_entry_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")]]
+    )
+
+
+def _schedule_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1-smena", callback_data=f"{_CB_SCHEDULE_FIXED_PREFIX}{user_id}:fixed_1"),
+                InlineKeyboardButton(text="2-smena", callback_data=f"{_CB_SCHEDULE_FIXED_PREFIX}{user_id}:fixed_2"),
+            ],
+            [InlineKeyboardButton(text="🕐 Erkin vaqt", callback_data=f"{_CB_SCHEDULE_FLEX_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="🛌 Dam olish", callback_data=f"{_CB_SCHEDULE_OFF_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="📅 Boshqa sana", callback_data=f"{_CB_SCHEDULE_DATE_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")],
+        ]
+    )
+
+
+def _schedule_screen_text(profile: dict, schedule_date: str) -> str:
+    full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+    user_id = profile["user_id"]
+
+    existing = attendance_service.get_shift_for_date(user_id, schedule_date)
+    if existing is None:
+        mode_label = _SCHEDULE_MODE_LABELS.get(attendance_service.resolve_schedule_mode(user_id), "Noma'lum")
+        plan_line = "Ma'lumot yo'q"
+    elif existing["status"] == attendance_service.SHIFT_STATUS_OFF:
+        mode_label = "Dam olish"
+        plan_line = "Dam olish kuni"
+    else:
+        mode_label = _SCHEDULE_MODE_LABELS.get(existing.get("schedule_mode"), "Noma'lum")
+        plan_line = f"{existing['planned_start']}–{existing['planned_end']}"
+
+    return (
+        f"👤 {full_name}\n"
+        f"📅 Sana: {schedule_date}\n"
+        f"📌 Grafik turi: {mode_label}\n"
+        f"🕒 Reja: {plan_line}"
+    )
+
+
+def _schedule_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"{_CB_SCHEDULE_CONFIRM_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_SCHEDULE_CANCEL_PREFIX}{user_id}"),
+            ]
+        ]
+    )
+
+
+def _schedule_confirm_text(full_name: str, schedule_date: str, pending: dict) -> str:
+    if pending["status"] == attendance_service.SHIFT_STATUS_OFF:
+        plan_line = "Dam olish"
+    else:
+        plan_line = f"{pending['start']}–{pending['end']}"
+
+    return (
+        f"👤 Xodim: {full_name}\n"
+        f"📅 Sana: {schedule_date}\n"
+        f"🕒 Yangi grafik: {plan_line}"
+    )
+
+
+def _schedule_result_text(full_name: str, schedule_date: str, pending: dict) -> str:
+    if pending["status"] == attendance_service.SHIFT_STATUS_OFF:
+        plan_line = "Dam olish"
+        mode_label = "Dam olish"
+    else:
+        plan_line = f"{pending['start']}–{pending['end']}"
+        mode_label = _SCHEDULE_MODE_LABELS.get(pending.get("mode"), "Noma'lum")
+
+    formatted_date = schedule_date
+    try:
+        parsed_date = date.fromisoformat(schedule_date)
+        formatted_date = parsed_date.strftime("%d.%m.%Y")
+    except ValueError:
+        pass
+
+    return (
+        "✅ Grafik saqlandi\n\n"
+        f"👤 {full_name}\n"
+        f"📅 {formatted_date}\n"
+        f"🕒 {plan_line}\n"
+        f"📌 {mode_label}"
     )
 
 
@@ -862,6 +969,262 @@ def register(dp: Dispatcher, openai_client) -> None:
         if callback.message:
             result_text = "✅ Ruxsat tasdiqlandi." if approved else "❌ Ruxsat tasdiqlanmadi."
             await callback.message.edit_text(result_text, reply_markup=None)
+
+    # -------------------------------------------------------- ish grafigi --
+
+    async def _ensure_schedule_access(callback: CallbackQuery, employee_id: int) -> dict | None:
+        """Ruxsat + o'z-o'ziga tegmaslik + filial chegarasi -- bitta
+        joyda. Muvaffaqiyatli bo'lsa xodim profili qaytadi, aks holda
+        ``None`` (``callback.answer()`` allaqachon chaqirilgan bo'ladi).
+        Founder o'zining grafigini ham o'zgartira oladi (self-edit
+        cheklovi FAQAT Founder bo'lmagan foydalanuvchiga tegishli)."""
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DAILY_SCHEDULE):
+            return None
+
+        actor_id = callback.from_user.id
+        profile = employees.get_profile(employee_id)
+        if profile is None:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return None
+
+        if employee_id == actor_id and actor_id != FOUNDER_ID:
+            await callback.answer("O'z grafigingizni o'zingiz o'zgartira olmaysiz.", show_alert=True)
+            return None
+
+        if not permissions.can_access_branch(actor_id, profile.get("branch")):
+            await callback.answer("Bu xodim boshqa filialga tegishli.", show_alert=True)
+            return None
+
+        return profile
+
+    async def _render_schedule_menu(callback: CallbackQuery, profile: dict, schedule_date: str) -> None:
+        if callback.message:
+            await callback.message.edit_text(
+                _schedule_screen_text(profile, schedule_date),
+                reply_markup=_schedule_menu_keyboard(profile["user_id"]),
+            )
+
+    async def _show_schedule_confirm(callback: CallbackQuery, state: FSMContext, profile: dict, schedule_date: str, pending: dict) -> None:
+        await state.update_data(schedule_pending=pending)
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        if callback.message:
+            await callback.message.edit_text(
+                _schedule_confirm_text(full_name, schedule_date, pending),
+                reply_markup=_schedule_confirm_keyboard(profile["user_id"]),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_PREFIX))
+    async def schedule_open(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        today = company_time.today().isoformat()
+        await state.update_data(schedule_employee_id=user_id, schedule_date=today, schedule_pending=None)
+        await _render_schedule_menu(callback, profile, today)
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_FIXED_PREFIX))
+    async def schedule_pick_fixed(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        mode = parts[2]
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        template = rules_service.get_fixed_shift_template(mode)
+        if template is None:
+            await callback.answer("Shablon topilmadi.", show_alert=True)
+            return
+
+        start_text, end_text = template
+        data = await state.get_data()
+        schedule_date = data.get("schedule_date") or company_time.today().isoformat()
+
+        pending = {
+            "status": attendance_service.SHIFT_STATUS_WORK, "start": start_text, "end": end_text, "mode": mode,
+        }
+        await callback.answer()
+        await _show_schedule_confirm(callback, state, profile, schedule_date, pending)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_FLEX_PREFIX))
+    async def schedule_pick_flexible_start(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        await state.update_data(schedule_employee_id=user_id)
+        await state.set_state(ScheduleStates.waiting_flexible_start)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("🕐 Boshlanish vaqtini kiriting (HH:MM):", reply_markup=None)
+
+    @dp.message(StateFilter(ScheduleStates.waiting_flexible_start))
+    async def schedule_flexible_start_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not attendance_service.is_valid_hhmm(text):
+            await message.answer("❌ Noto'g'ri format. Vaqtni HH:MM ko'rinishida kiriting (masalan 10:00):")
+            return
+
+        await state.update_data(schedule_flex_start=text)
+        await state.set_state(ScheduleStates.waiting_flexible_end)
+        await message.answer("🕐 Tugash vaqtini kiriting (HH:MM):")
+
+    @dp.message(StateFilter(ScheduleStates.waiting_flexible_end))
+    async def schedule_flexible_end_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not attendance_service.is_valid_hhmm(text):
+            await message.answer("❌ Noto'g'ri format. Vaqtni HH:MM ko'rinishida kiriting (masalan 20:00):")
+            return
+
+        data = await state.get_data()
+        start_text = data.get("schedule_flex_start")
+        user_id = data.get("schedule_employee_id")
+        schedule_date = data.get("schedule_date") or company_time.today().isoformat()
+
+        if start_text == text:
+            await message.answer("❌ Boshlanish va tugash vaqti bir xil bo'lishi mumkin emas. Tugash vaqtini qayta kiriting:")
+            return
+
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        pending = {
+            "status": attendance_service.SHIFT_STATUS_WORK, "start": start_text, "end": text,
+            "mode": attendance_service.SCHEDULE_MODE_FLEXIBLE,
+        }
+        await state.update_data(schedule_pending=pending)
+        await message.answer(
+            _schedule_confirm_text(full_name, schedule_date, pending),
+            reply_markup=_schedule_confirm_keyboard(user_id),
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_OFF_PREFIX))
+    async def schedule_pick_off(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        schedule_date = data.get("schedule_date") or company_time.today().isoformat()
+
+        pending = {"status": attendance_service.SHIFT_STATUS_OFF}
+        await callback.answer()
+        await _show_schedule_confirm(callback, state, profile, schedule_date, pending)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_DATE_PREFIX))
+    async def schedule_pick_other_date(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        await state.update_data(schedule_employee_id=user_id)
+        await state.set_state(ScheduleStates.waiting_custom_date)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("📅 Sanani YYYY-MM-DD formatida kiriting:", reply_markup=None)
+
+    @dp.message(StateFilter(ScheduleStates.waiting_custom_date))
+    async def schedule_custom_date_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        try:
+            parsed = date.fromisoformat(text)
+        except ValueError:
+            await message.answer("❌ Sanani aniq YYYY-MM-DD formatida kiriting (masalan 2026-08-26):")
+            return
+
+        data = await state.get_data()
+        user_id = data.get("schedule_employee_id")
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        await state.update_data(schedule_date=parsed.isoformat(), schedule_pending=None)
+        await message.answer(
+            _schedule_screen_text(profile, parsed.isoformat()),
+            reply_markup=_schedule_menu_keyboard(user_id),
+        )
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_CONFIRM_PREFIX))
+    async def schedule_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        actor_id = callback.from_user.id
+        if actor_id in discipline_bot._PENDING_PENALTY_APPLICATIONS:
+            await callback.answer()
+            return
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.add(actor_id)
+
+        try:
+            data = await state.get_data()
+            pending = data.get("schedule_pending")
+            schedule_date = data.get("schedule_date") or company_time.today().isoformat()
+            if not pending:
+                await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+                return
+
+            if pending["status"] == attendance_service.SHIFT_STATUS_OFF:
+                attendance_service.set_scheduled_day_off(user_id, schedule_date, _SCHEDULE_SOURCE, created_by=actor_id)
+            else:
+                attendance_service.set_scheduled_work_shift(
+                    user_id, schedule_date, pending["start"], pending["end"], _SCHEDULE_SOURCE,
+                    created_by=actor_id, schedule_mode=pending.get("mode"),
+                )
+
+            await state.update_data(schedule_pending=None)
+            full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+            await callback.answer("✅ Saqlandi.")
+            if callback.message:
+                await callback.message.edit_text(
+                    _schedule_result_text(full_name, schedule_date, pending), reply_markup=None
+                )
+
+            try:
+                if pending["status"] == attendance_service.SHIFT_STATUS_OFF:
+                    notice_plan = "Dam olish"
+                else:
+                    notice_plan = f"{pending['start']}–{pending['end']}"
+                await callback.bot.send_message(
+                    user_id,
+                    f"🗓 Ish grafigingiz belgilandi/o'zgartirildi\n\n📅 Sana: {schedule_date}\n🕒 Vaqt: {notice_plan}",
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Xodimga grafik xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+        finally:
+            discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(actor_id)
+
+    @dp.callback_query(F.data.startswith(_CB_SCHEDULE_CANCEL_PREFIX))
+    async def schedule_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        schedule_date = data.get("schedule_date") or company_time.today().isoformat()
+        await state.update_data(schedule_pending=None)
+        await callback.answer("Bekor qilindi.")
+        await _render_schedule_menu(callback, profile, schedule_date)
 
     # ----------------------------------------------------- vazifa biriktirish --
 

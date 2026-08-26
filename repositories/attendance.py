@@ -42,6 +42,24 @@ def list_events_for_date(employee_id: int, date_str: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive: str) -> list[dict]:
+    """``[start_date, end_date_exclusive)`` oralig'idagi barcha eventlar —
+    ``event_time`` doim ``YYYY-MM-DD``dan boshlanadigan ISO satr sifatida
+    saqlanadi (qarang ``record_event``), shuning uchun oddiy satr
+    solishtiruvi sana chegarasini to'g'ri ushlaydi."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM attendance_events WHERE employee_id = ? AND event_time >= ? AND event_time < ? "
+            "ORDER BY event_time",
+            (employee_id, start_date, end_date_exclusive),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def set_reason(employee_id: int, event_date: str, reason_status: str, note: str | None = None) -> None:
     conn = get_connection()
     try:

@@ -8,6 +8,8 @@ Telegram oqimi.
 
 from datetime import timedelta
 
+import pytest
+
 import company_time
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -17,9 +19,16 @@ from services import attendance as attendance_service
 from services import permissions as permissions_service
 from tests.bot_harness import send, send_callback
 
+pytestmark = pytest.mark.anyio
+
 _BRANCH_A = RECRUITING_BRANCH_NAMES[0]
 _BRANCH_B = RECRUITING_BRANCH_NAMES[1]
 _NAZORATCHI_ID = 890001
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def _make_nazoratchi(user_id: int = _NAZORATCHI_ID) -> None:
@@ -43,6 +52,14 @@ def _make_employee(user_id: int, branch: str = _BRANCH_A, role_key: str = "kassi
 def _visit_time(day, hour: int, minute: int) -> str:
     from datetime import datetime
     return datetime(day.year, day.month, day.day, hour, minute, tzinfo=company_time.resolve_timezone()).isoformat()
+
+
+def _actor_screen(sent, actor_id: int = _NAZORATCHI_ID):
+    """Ba'zi handlerlar ekranni chizishdan OLDIN ``callback.answer()``
+    chaqiradi, ya'ni ``sent[0]`` ``AnswerCallbackQuery`` bo'lishi mumkin —
+    shuning uchun ekran indeks bo'yicha emas, aktyorning chatiga
+    yuborilgan xabar bo'yicha topiladi."""
+    return next(m for m in sent if getattr(m, "chat_id", None) == actor_id)
 
 
 async def _open_mobility_menu(main, bot, actor_id: int, employee_id: int):
@@ -112,10 +129,12 @@ async def test_nazoratchi_cannot_edit_own_mobility(bot_dp):
 
 async def test_founder_has_no_self_management_restriction(bot_dp):
     main, bot = bot_dp
+    _make_employee(FOUNDER_ID)
 
     sent = await _open_mobility_menu(main, bot, FOUNDER_ID, FOUNDER_ID)
 
-    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    screen = _actor_screen(sent, FOUNDER_ID)
+    buttons = [btn.callback_data for row in screen.reply_markup.inline_keyboard for btn in row]
     assert f"nzr_mob_add:{FOUNDER_ID}" in buttons
 
 
@@ -627,7 +646,7 @@ async def test_compliance_met_when_stay_exceeds_requirement(bot_dp):
     attendance_service.record_branch_visit_event(employee_id, _BRANCH_A, "exit", _visit_time(today, 10, 35), "test")
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "Bajarildi" in sent[0].text
+    assert "Bajarildi" in _actor_screen(sent).text
 
 
 async def test_compliance_not_met_when_stay_is_short(bot_dp):
@@ -642,7 +661,7 @@ async def test_compliance_not_met_when_stay_is_short(bot_dp):
     attendance_service.record_branch_visit_event(employee_id, _BRANCH_A, "exit", _visit_time(today, 10, 20), "test")
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "Yetarli emas" in sent[0].text
+    assert "Yetarli emas" in _actor_screen(sent).text
 
 
 async def test_compliance_incomplete_when_exit_missing(bot_dp):
@@ -656,7 +675,7 @@ async def test_compliance_incomplete_when_exit_missing(bot_dp):
     attendance_service.record_branch_visit_event(employee_id, _BRANCH_A, "enter", _visit_time(today, 10, 0), "test")
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "to'liq emas" in sent[0].text
+    assert "to'liq emas" in _actor_screen(sent).text
 
 
 async def test_no_requirement_is_not_an_automatic_pass(bot_dp):
@@ -666,8 +685,9 @@ async def test_no_requirement_is_not_an_automatic_pass(bot_dp):
     _make_employee(employee_id)
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "belgilanmagan" in sent[0].text
-    assert "Bajarildi" not in sent[0].text
+    screen_text = _actor_screen(sent).text
+    assert "belgilanmagan" in screen_text
+    assert "Bajarildi" not in screen_text
 
 
 async def test_requirement_with_no_visit_shows_zero_and_not_met(bot_dp):
@@ -680,8 +700,9 @@ async def test_requirement_with_no_visit_shows_zero_and_not_met(bot_dp):
     attendance_service.set_branch_visit_requirement(employee_id, today.isoformat(), _BRANCH_A, 30)
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "Haqiqiy: 0" in sent[0].text
-    assert "Yetarli emas" in sent[0].text
+    screen_text = _actor_screen(sent).text
+    assert "Haqiqiy: 0" in screen_text
+    assert "Yetarli emas" in screen_text
 
 
 async def test_overnight_visit_belongs_to_the_logical_shift_date(bot_dp):
@@ -698,7 +719,7 @@ async def test_overnight_visit_belongs_to_the_logical_shift_date(bot_dp):
     attendance_service.record_branch_visit_event(employee_id, _BRANCH_A, "exit", _visit_time(next_day, 0, 30), "test")
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_mob_reqs:{employee_id}", target_chat_id=_NAZORATCHI_ID)
-    assert "Bajarildi" in sent[0].text
+    assert "Bajarildi" in _actor_screen(sent).text
 
 
 # ------------------------------------------------------------ NOTIFICATION --

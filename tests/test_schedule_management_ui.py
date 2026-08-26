@@ -8,6 +8,8 @@ Telegram oqimi.
 
 from datetime import timedelta
 
+import pytest
+
 import company_time
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -16,9 +18,16 @@ from roles import set_role
 from services import permissions as permissions_service
 from tests.bot_harness import send, send_callback
 
+pytestmark = pytest.mark.anyio
+
 _BRANCH_A = RECRUITING_BRANCH_NAMES[0]
 _BRANCH_B = RECRUITING_BRANCH_NAMES[1]
 _NAZORATCHI_ID = 880001
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def _make_nazoratchi(user_id: int = _NAZORATCHI_ID) -> None:
@@ -39,6 +48,14 @@ def _make_employee(user_id: int, branch: str = _BRANCH_A, role_key: str = "kassi
         },
     )
     employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+
+
+def _actor_screen(sent, actor_id: int = _NAZORATCHI_ID):
+    """Ba'zi handlerlar ekranni chizishdan OLDIN ``callback.answer()``
+    chaqiradi, ya'ni ``sent[0]`` ``AnswerCallbackQuery`` bo'lishi mumkin —
+    shuning uchun ekran indeks bo'yicha emas, aktyorning chatiga
+    yuborilgan xabar bo'yicha topiladi."""
+    return next(m for m in sent if getattr(m, "chat_id", None) == actor_id)
 
 
 async def _open_schedule_menu(main, bot, actor_id: int, employee_id: int):
@@ -94,10 +111,12 @@ async def test_nazoratchi_cannot_edit_own_schedule(bot_dp):
 
 async def test_founder_has_no_self_edit_restriction(bot_dp):
     main, bot = bot_dp
+    _make_employee(FOUNDER_ID)
 
     sent = await _open_schedule_menu(main, bot, FOUNDER_ID, FOUNDER_ID)
 
-    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    screen = _actor_screen(sent, FOUNDER_ID)
+    buttons = [btn.callback_data for row in screen.reply_markup.inline_keyboard for btn in row]
     assert f"nzr_sched_fixed:{FOUNDER_ID}:fixed_1" in buttons
 
 

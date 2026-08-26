@@ -163,8 +163,8 @@ def test_dashboard_shows_planned_and_actual_hours_when_data_is_complete():
 
     assert dashboard["hours"]["planned_hours"] == 9.0 * day_count
     assert dashboard["hours"]["actual_hours"] == 9.0 * day_count
-    assert f"🗓 Reja soati: {9 * day_count:g} soat" in text
-    assert f"🕒 Haqiqiy soat: {9 * day_count:g} soat" in text
+    assert f"📋 Reja soati: {9 * day_count:g} soat" in text
+    assert f"🕒 Ishlangan soat: {9 * day_count:g} soat" in text
 
 
 def test_dashboard_formats_planned_hours_as_a_clean_integer():
@@ -177,7 +177,7 @@ def test_dashboard_formats_planned_hours_as_a_clean_integer():
     text = employee_dashboard.format_dashboard_text(dashboard)
 
     assert dashboard["hours"]["planned_hours"] == 9.0
-    assert "🗓 Reja soati: 9 soat" in text
+    assert "📋 Reja soati: 9 soat" in text
 
 
 def test_dashboard_formats_actual_hours_with_a_decimal_when_needed():
@@ -192,7 +192,7 @@ def test_dashboard_formats_actual_hours_with_a_decimal_when_needed():
     text = employee_dashboard.format_dashboard_text(dashboard)
 
     assert dashboard["hours"]["actual_hours"] == 8.5
-    assert "🕒 Haqiqiy soat: 8.5 soat" in text
+    assert "🕒 Ishlangan soat: 8.5 soat" in text
 
 
 def test_dashboard_shows_no_data_message_when_planned_hours_is_none():
@@ -203,7 +203,7 @@ def test_dashboard_shows_no_data_message_when_planned_hours_is_none():
     text = employee_dashboard.format_dashboard_text(dashboard)
 
     assert dashboard["hours"]["planned_hours"] is None
-    assert "🗓 Reja soati: Ma'lumot yetarli emas" in text
+    assert "📋 Reja soati: Ma'lumot yo'q" in text
 
 
 def test_dashboard_shows_missing_days_count_when_schedule_incomplete():
@@ -237,7 +237,7 @@ def test_dashboard_shows_no_data_for_actual_hours_when_no_complete_day_exists():
     text = employee_dashboard.format_dashboard_text(dashboard)
 
     assert dashboard["hours"]["worked_days_count"] == 0
-    assert "🕒 Haqiqiy soat: Ma'lumot yo'q" in text
+    assert "🕒 Ishlangan soat: Ma'lumot yo'q" in text
 
 
 def test_dashboard_shows_real_actual_hours_when_at_least_one_complete_day_exists():
@@ -252,7 +252,7 @@ def test_dashboard_shows_real_actual_hours_when_at_least_one_complete_day_exists
     text = employee_dashboard.format_dashboard_text(dashboard)
 
     assert dashboard["hours"]["worked_days_count"] == 1
-    assert "🕒 Haqiqiy soat: 8 soat" in text
+    assert "🕒 Ishlangan soat: 8 soat" in text
 
 
 def test_dashboard_existing_blocks_are_unaffected_by_hours_wiring():
@@ -262,7 +262,7 @@ def test_dashboard_existing_blocks_are_unaffected_by_hours_wiring():
     dashboard = employee_dashboard.build_dashboard(user_id)
     text = employee_dashboard.format_dashboard_text(dashboard)
 
-    assert dashboard["profile"]["full_name"] == "Xodim Test"
+    assert dashboard["profile"]["full_name"] == "Test Xodim"
     assert "🟢 Bonus:" in text
     assert "🔴 Minus:" in text
     assert "⭐ Jami:" in text

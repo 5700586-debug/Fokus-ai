@@ -63,16 +63,16 @@ def format_dashboard_text(dashboard: dict) -> str:
     hours = dashboard["hours"]
     planned_hours = hours["planned_hours"]
     if planned_hours is None:
-        lines.append("🗓 Reja soati: Ma'lumot yetarli emas")
+        lines.append("📋 Reja soati: Ma'lumot yo'q")
         if hours["missing_days_count"] > 0:
             lines.append(f"📅 Grafik kiritilmagan: {hours['missing_days_count']} kun")
     else:
-        lines.append(f"🗓 Reja soati: {_format_hours(planned_hours)} soat")
+        lines.append(f"📋 Reja soati: {_format_hours(planned_hours)} soat")
 
     if hours["worked_days_count"] == 0:
-        lines.append("🕒 Haqiqiy soat: Ma'lumot yo'q")
+        lines.append("🕒 Ishlangan soat: Ma'lumot yo'q")
     else:
-        lines.append(f"🕒 Haqiqiy soat: {_format_hours(hours['actual_hours'])} soat")
+        lines.append(f"🕒 Ishlangan soat: {_format_hours(hours['actual_hours'])} soat")
 
     lines.append("")
     lines.append("📅 Oxirgi 2 kun:")

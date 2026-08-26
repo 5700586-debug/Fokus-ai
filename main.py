@@ -349,6 +349,7 @@ _SHARED_COMMANDS = [
     "/mystars — Mening yulduzlarim",
     "/mymaosh — Mening oylik/bonus holatim",
     "/apellyatsiya — Ball ayirishga e'tiroz bildirish",
+    "/grafik — 📅 Grafikni o'zgartirish (so'rov)",
     "/bugungiporga — Bugungi reyting",
     "/oylikturnir — Oylik reyting",
     "/listnizom — Korxona nizomlari",

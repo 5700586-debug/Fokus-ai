@@ -13,6 +13,7 @@ Founder bypass'i orqali ishlaydi.
 from datetime import date, datetime
 
 import company_time
+import employees
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -23,6 +24,7 @@ from db import IntegrityError
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized
 from services import driver_checks, employee_dashboard, market_observation, permissions, star_engine, supervisor_scoring
+from services import attendance as attendance_service
 from services import meal_plan as meal_plan_service
 from services import rules as rules_service
 
@@ -38,10 +40,24 @@ def _kb(*rows: list[str]) -> ReplyKeyboardMarkup:
 
 _SKIP_KB = _kb([_SKIP_TEXT])
 
+_SCHEDULE_OFF_TEXT = "🛌 Dam olish"
+_SCHEDULE_WORK_TEXT = "🕒 Ish vaqti"
+_SCHEDULE_TYPE_KB = _kb([_SCHEDULE_OFF_TEXT, _SCHEDULE_WORK_TEXT])
+_SCHEDULE_NOT_EMPLOYEE_TEXT = (
+    "❌ Siz tasdiqlangan xodim emassiz — grafik o'zgartirish so'rovini yubora olmaysiz."
+)
+
 
 def _parse_date_ddmmyyyy(text: str) -> date | None:
     try:
         return datetime.strptime(text.strip(), "%d.%m.%Y").date()
+    except ValueError:
+        return None
+
+
+def _parse_time_hhmm(text: str) -> str | None:
+    try:
+        return datetime.strptime(text.strip(), "%H:%M").strftime("%H:%M")
     except ValueError:
         return None
 
@@ -56,6 +72,14 @@ class MarketLogStates(StatesGroup):
     minimum_batch = State()
     notes = State()
     photo = State()
+
+
+class ScheduleChangeStates(StatesGroup):
+    shift_date = State()
+    change_type = State()
+    start_time = State()
+    end_time = State()
+    reason = State()
 
 
 class DriverCheckStates(StatesGroup):
@@ -131,6 +155,130 @@ def register(dp: Dispatcher) -> None:
             lines.append(employee_dashboard.format_dashboard_text(dashboard))
 
         await message.answer("\n".join(lines))
+
+    # ------------------------------------------------------- /grafik --
+
+    def _approved_employee_id(user_id: int) -> int | None:
+        """So'rov faqat KANONIK, ``approved`` holatdagi xodim profili
+        uchun ochiladi — profil yo'q, hali tasdiqlanmagan yoki ishdan
+        chiqarilgan (``offboarded``) bo'lsa ``None``."""
+        profile = employees.get_profile(user_id)
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED:
+            return None
+        return user_id
+
+    @dp.message(Command("grafik"))
+    async def schedule_change_start(message: Message, state: FSMContext) -> None:
+        if not message.from_user or not is_authorized(message.from_user.id):
+            return
+
+        await state.clear()
+
+        if _approved_employee_id(message.from_user.id) is None:
+            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=ReplyKeyboardRemove())
+            return
+
+        await state.set_state(ScheduleChangeStates.shift_date)
+        await message.answer(
+            "📅 Grafikni o'zgartirish.\nQaysi sana uchun? (masalan 01.09.2026)",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+    @dp.message(StateFilter(ScheduleChangeStates.shift_date))
+    async def schedule_change_date(message: Message, state: FSMContext) -> None:
+        shift_date = _parse_date_ddmmyyyy(message.text or "")
+        if shift_date is None:
+            await message.answer("❌ Sanani KK.OO.YYYY ko'rinishida kiriting (masalan 01.09.2026).")
+            return
+
+        await state.update_data(shift_date=shift_date.isoformat())
+        await state.set_state(ScheduleChangeStates.change_type)
+        await message.answer("Shu kunga nima so'raysiz?", reply_markup=_SCHEDULE_TYPE_KB)
+
+    @dp.message(StateFilter(ScheduleChangeStates.change_type))
+    async def schedule_change_type(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+
+        if text == _SCHEDULE_OFF_TEXT:
+            await state.update_data(requested_status=attendance_service.SHIFT_STATUS_OFF)
+            await state.set_state(ScheduleChangeStates.reason)
+            await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SKIP_KB)
+            return
+
+        if text != _SCHEDULE_WORK_TEXT:
+            await message.answer("❌ Quyidagi tugmalardan birini tanlang.", reply_markup=_SCHEDULE_TYPE_KB)
+            return
+
+        await state.update_data(requested_status=attendance_service.SHIFT_STATUS_WORK)
+        await state.set_state(ScheduleChangeStates.start_time)
+        await message.answer("Ish boshlanish vaqti (masalan 09:00):", reply_markup=ReplyKeyboardRemove())
+
+    @dp.message(StateFilter(ScheduleChangeStates.start_time))
+    async def schedule_change_start_time(message: Message, state: FSMContext) -> None:
+        start_text = _parse_time_hhmm(message.text or "")
+        if start_text is None:
+            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 09:00).")
+            return
+
+        await state.update_data(start_text=start_text)
+        await state.set_state(ScheduleChangeStates.end_time)
+        await message.answer("Ish tugash vaqti (masalan 18:00):")
+
+    @dp.message(StateFilter(ScheduleChangeStates.end_time))
+    async def schedule_change_end_time(message: Message, state: FSMContext) -> None:
+        end_text = _parse_time_hhmm(message.text or "")
+        if end_text is None:
+            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 18:00).")
+            return
+
+        data = await state.get_data()
+        if end_text == data.get("start_text"):
+            await message.answer("❌ Tugash vaqti boshlanish vaqti bilan bir xil bo'lmasin.")
+            return
+
+        await state.update_data(end_text=end_text)
+        await state.set_state(ScheduleChangeStates.reason)
+        await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SKIP_KB)
+
+    @dp.message(StateFilter(ScheduleChangeStates.reason))
+    async def schedule_change_reason(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        data = await state.get_data()
+        await state.clear()
+
+        # Xodim shu daqiqadagi HAQIQIY yuboruvchidan qayta aniqlanadi
+        # (oqim davomida saqlangan qiymatdan emas) — oqim o'rtasida
+        # profil holati o'zgargan bo'lsa ham so'rov yozilmasin.
+        employee_id = _approved_employee_id(message.from_user.id) if message.from_user else None
+        shift_date = data.get("shift_date")
+        requested_status = data.get("requested_status")
+
+        if employee_id is None:
+            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=ReplyKeyboardRemove())
+            return
+
+        request_id = None
+        if shift_date and requested_status:
+            request_id = attendance_service.create_schedule_change_request(
+                employee_id,
+                shift_date,
+                requested_status,
+                start_text=data.get("start_text"),
+                end_text=data.get("end_text"),
+                reason=None if text == _SKIP_TEXT else (text or None),
+            )
+
+        if request_id is None:
+            await message.answer(
+                "❌ So'rov saqlanmadi. Sana va vaqtni tekshirib, /grafik orqali qaytadan urinib ko'ring.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return
+
+        await message.answer(
+            "✅ So'rovingiz qabul qilindi. Rahbar tasdiqlagunicha grafik o'zgarmaydi.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
 
     # ----------------------------------------------- /setrule, /listrules --
 

@@ -10,6 +10,28 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
+- **Yangi (2026-08-26): Grafik o'zgartirish so'rovi UI V1 (xodim tomoni).**
+  Xodim menyusidagi "⭐ Mening natijalarim" bo'limiga bitta yangi amal
+  qo'shildi — `/grafik` ("📅 Grafikni o'zgartirish (so'rov)",
+  `main._SHARED_COMMANDS`). Oqim (`performance_bot.py`,
+  `ScheduleChangeStates`): sana (KK.OO.YYYY) -> "🛌 Dam olish" yoki
+  "🕒 Ish vaqti" -> ish uchun boshlanish/tugash vaqti -> ixtiyoriy sabab.
+  `schedule_mode` ATAYLAB so'ralmaydi — tasdiqlashda mavjud
+  `set_scheduled_work_shift` xodimning o'z siyosatidan aniqlaydi.
+  Yozuv FAQAT `services/attendance.create_schedule_change_request`
+  orqali (`pending`), schedule'ga to'g'ridan-to'g'ri tegilmaydi.
+  Xodim har bir qadamda (boshida va yuborish paytida qayta) kanonik
+  `employees.get_profile` + `status == approved` orqali aniqlanadi —
+  profilsiz/tasdiqlanmagan/`offboarded` foydalanuvchi bitta tushunarli
+  xabar bilan rad etiladi, FSM holati ochilmaydi. Holat muvaffaqiyat/
+  bekor qilish/xatolikda tozalanadi (mavjud `_ClearStaleStateMiddleware`
+  + `state.clear()` naqshi). Nazoratchi/Founder uchun TASDIQLASH UI hali
+  ATAYLAB YO'Q (core'dagi `decide_schedule_change_request` mavjud, lekin
+  Telegram tugmasi yo'q). Testlar:
+  `tests/test_schedule_change_request_ui.py` (10 ta, Linux'da PASSED).
+  Eslatma: `tests/test_menu_and_fsm_escape.py`dagi 2 ta nazoratchi-menyu
+  assertion FAILED, lekin bu **shu o'zgarishdan oldin ham** yiqilardi
+  (HEAD'da tekshirilgan) — alohida, tegishli bo'lmagan masala.
 - **Yangi (2026-08-26): Grafik o'zgartirish so'rovi core V1.** Xodim
   bitta sanaga grafik o'zgartirish so'rovi yaratadi (`work` +
   start/end/mode yoki `off`, sabab optional) — yangi

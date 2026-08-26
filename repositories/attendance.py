@@ -205,6 +205,88 @@ def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive
     return [dict(row) for row in rows]
 
 
+# -------------------------------------- grafik o'zgartirish so'rovlari --
+
+
+def create_schedule_change_request(
+    employee_id: int, shift_date: str, requested_status: str,
+    requested_start: str | None, requested_end: str | None, requested_schedule_mode: str | None,
+    reason: str | None, created_by: int | None, status: str,
+) -> int:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO employee_schedule_change_requests "
+            "(employee_id, shift_date, requested_status, requested_start, requested_end, "
+            "requested_schedule_mode, reason, status, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                employee_id, shift_date, requested_status, requested_start, requested_end,
+                requested_schedule_mode, reason, status, created_by, _now(),
+            ),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_schedule_change_request(request_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM employee_schedule_change_requests WHERE id = ?", (request_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
+def list_schedule_change_requests(employee_id: int | None = None, status: str | None = None) -> list[dict]:
+    query = "SELECT * FROM employee_schedule_change_requests"
+    conditions: list[str] = []
+    params: list = []
+    if employee_id is not None:
+        conditions.append("employee_id = ?")
+        params.append(employee_id)
+    if status is not None:
+        conditions.append("status = ?")
+        params.append(status)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY id"
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(query, tuple(params)).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def decide_schedule_change_request(
+    request_id: int, expected_status: str, new_status: str, decided_by: int
+) -> bool:
+    """FAQAT so'rov hali ``expected_status`` (``pending``) bo'lsa
+    yangilaydi — atomik ``UPDATE ... WHERE status = ?`` orqali, ikkinchi/
+    parallel qaror birinchisini bosib o'tmasligi uchun (xuddi
+    ``decide_manager_permission``dagi naqsh). ``True`` — qarorni aynan
+    shu chaqiruv yozdi."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE employee_schedule_change_requests SET status = ?, decided_by = ?, decided_at = ? "
+            "WHERE id = ? AND status = ?",
+            (new_status, decided_by, _now(), request_id, expected_status),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------- grafik siyosati --
 
 

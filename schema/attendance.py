@@ -68,6 +68,27 @@ CREATE TABLE IF NOT EXISTS employee_schedule_revisions (
     is_late_change INTEGER NOT NULL DEFAULT 0
 );
 
+-- Xodimning grafik o'zgartirish SO'ROVI -- alohida schedule tizimi
+-- EMAS: tasdiqlangandan keyin natija baribir ``employee_scheduled_shifts``
+-- + ``employee_schedule_revisions``ga yoziladi (qarang
+-- ``services/attendance.py::decide_schedule_change_request``). Bu jadval
+-- faqat so'rov/qaror tarixini saqlaydi, hech qachon o'chirilmaydi.
+CREATE TABLE IF NOT EXISTS employee_schedule_change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    shift_date TEXT NOT NULL,
+    requested_status TEXT NOT NULL,
+    requested_start TEXT,
+    requested_end TEXT,
+    requested_schedule_mode TEXT,
+    reason TEXT,
+    status TEXT NOT NULL,
+    created_by INTEGER,
+    created_at TEXT NOT NULL,
+    decided_by INTEGER,
+    decided_at TEXT
+);
+
 -- Xodimning umumiy grafik SIYOSATI (fixed_1/fixed_2/flexible) --
 -- kunlik ``employee_scheduled_shifts`` yozuvidan ATAYLAB ALOHIDA.
 -- Resolution tartibi: employee override -> role default -> UNKNOWN

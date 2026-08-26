@@ -20,6 +20,7 @@ from repositories import attendance as attendance_repo
 from services import rules as rules_service
 
 SOURCE_MANUAL_ENTRY = "manual_nazoratchi_entry"
+SOURCE_SCHEDULE_REQUEST = "employee_schedule_request"
 
 EVENT_CHECK_IN = "check_in"
 EVENT_CHECK_OUT = "check_out"
@@ -31,6 +32,10 @@ SCHEDULE_MODE_FIXED_1 = "fixed_1"
 SCHEDULE_MODE_FIXED_2 = "fixed_2"
 SCHEDULE_MODE_FLEXIBLE = "flexible"
 _KNOWN_SCHEDULE_MODES = (SCHEDULE_MODE_FIXED_1, SCHEDULE_MODE_FIXED_2, SCHEDULE_MODE_FLEXIBLE)
+
+SCHEDULE_REQUEST_PENDING = "pending"
+SCHEDULE_REQUEST_APPROVED = "approved"
+SCHEDULE_REQUEST_REJECTED = "rejected"
 
 MOBILITY_NONE = "none"
 MOBILITY_BRANCH_VISIT_REQUIRED = "branch_visit_required"
@@ -410,6 +415,93 @@ def apply_daily_work_schedule(
     return set_scheduled_work_shift(
         employee_id, shift_date, start_text, end_text, source,
         created_by=created_by, schedule_mode=mode, reason=reason,
+    )
+
+
+# -------------------------------------- grafik o'zgartirish so'rovlari --
+
+
+def create_schedule_change_request(
+    employee_id: int, shift_date: str, requested_status: str, start_text: str | None = None,
+    end_text: str | None = None, schedule_mode: str | None = None, reason: str | None = None,
+    created_by: int | None = None,
+) -> int | None:
+    """Xodimning bitta sanaga grafik o'zgartirish so'rovi -- ``pending``
+    holatda saqlanadi, schedule'ning O'ZIGA hali tegilmaydi. So'ralgan
+    qiymatlar shu yerda, tasdiqlashdan OLDIN, mavjud schedule
+    qoidalari bilan (``_parse_hhmm``, ``start != end``, ma'lum
+    ``schedule_mode``) tekshiriladi -- noto'g'ri so'rov umuman
+    yaratilmaydi (``None``), ya'ni tasdiqlovchi validatsiyani chetlab
+    o'ta olmaydi."""
+    if requested_status not in (SHIFT_STATUS_WORK, SHIFT_STATUS_OFF):
+        return None
+
+    try:
+        date.fromisoformat(shift_date)
+    except ValueError:
+        return None
+
+    if schedule_mode is not None and schedule_mode not in _KNOWN_SCHEDULE_MODES:
+        return None
+
+    requested_start = requested_end = None
+    if requested_status == SHIFT_STATUS_WORK:
+        if start_text is None or end_text is None:
+            return None
+        start_parsed = _parse_hhmm(start_text)
+        end_parsed = _parse_hhmm(end_text)
+        if start_parsed is None or end_parsed is None or start_parsed == end_parsed:
+            return None
+        requested_start = f"{start_parsed[0]:02d}:{start_parsed[1]:02d}"
+        requested_end = f"{end_parsed[0]:02d}:{end_parsed[1]:02d}"
+
+    return attendance_repo.create_schedule_change_request(
+        employee_id, shift_date, requested_status, requested_start, requested_end,
+        schedule_mode, reason, created_by if created_by is not None else employee_id,
+        SCHEDULE_REQUEST_PENDING,
+    )
+
+
+def get_schedule_change_request(request_id: int) -> dict | None:
+    return attendance_repo.get_schedule_change_request(request_id)
+
+
+def list_schedule_change_requests(employee_id: int | None = None, status: str | None = None) -> list[dict]:
+    return attendance_repo.list_schedule_change_requests(employee_id, status)
+
+
+def decide_schedule_change_request(request_id: int, approved: bool, decided_by: int) -> bool:
+    """Nazoratchi/Founder qarori. ``True`` — qarorni aynan shu chaqiruv
+    yozdi (va tasdiq bo'lsa schedule qo'llandi). ``False`` — so'rov yo'q
+    yoki allaqachon hal qilingan: takroriy/parallel qaror hech narsani
+    qayta yozmaydi va yangi revision yaratmaydi, chunki holat OLDIN
+    atomik ``pending -> approved/rejected`` o'tkaziladi, schedule esa
+    faqat shundan keyin qo'llanadi."""
+    request = attendance_repo.get_schedule_change_request(request_id)
+    if request is None:
+        return False
+
+    new_status = SCHEDULE_REQUEST_APPROVED if approved else SCHEDULE_REQUEST_REJECTED
+    if not attendance_repo.decide_schedule_change_request(
+        request_id, SCHEDULE_REQUEST_PENDING, new_status, decided_by
+    ):
+        return False
+
+    if not approved:
+        return True
+
+    if request["requested_status"] == SHIFT_STATUS_OFF:
+        set_scheduled_day_off(
+            request["employee_id"], request["shift_date"], SOURCE_SCHEDULE_REQUEST,
+            created_by=decided_by, schedule_mode=request["requested_schedule_mode"],
+            reason=request["reason"],
+        )
+        return True
+
+    return set_scheduled_work_shift(
+        request["employee_id"], request["shift_date"], request["requested_start"], request["requested_end"],
+        SOURCE_SCHEDULE_REQUEST, created_by=decided_by,
+        schedule_mode=request["requested_schedule_mode"], reason=request["reason"],
     )
 
 

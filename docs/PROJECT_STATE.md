@@ -10,6 +10,30 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
+- **Yangi (2026-08-26): Grafik o'zgartirish so'rovi core V1.** Xodim
+  bitta sanaga grafik o'zgartirish so'rovi yaratadi (`work` +
+  start/end/mode yoki `off`, sabab optional) — yangi
+  `employee_schedule_change_requests` jadvali `pending` holatda saqlaydi,
+  schedule'ning o'ziga tegilmaydi. Vaqt/status/mode validatsiyasi
+  YARATISHDA (`services/attendance.create_schedule_change_request`)
+  mavjud schedule qoidalari bilan bo'ladi (`_parse_hhmm`, `start != end`,
+  `_KNOWN_SCHEDULE_MODES`) — noto'g'ri so'rov umuman yozilmaydi, ya'ni
+  tasdiqlovchi validatsiyani chetlab o'ta olmaydi. Qaror
+  (`decide_schedule_change_request`) OLDIN atomik
+  `UPDATE ... WHERE status = 'pending'` orqali o'tadi, schedule esa faqat
+  shundan keyin qo'llanadi — takroriy/parallel approve/reject no-op
+  (schedule qayta yozilmaydi, revision dublikat bo'lmaydi). Approve
+  mavjud `set_scheduled_work_shift`/`set_scheduled_day_off` orqali
+  ishlaydi, shuning uchun natija baribir `employee_scheduled_shifts` +
+  `employee_schedule_revisions`ga tushadi — parallel ikkinchi schedule
+  tizimi YO'Q. Reject schedule'ga umuman tegmaydi. Hech qanday `DELETE`
+  yo'q. Telegram UI, notification, avtomatik minus/bonus ATAYLAB YO'Q
+  (V1 faqat core qatlam). Testlar:
+  `tests/test_schedule_change_requests.py` (12 ta) —
+  `tests/test_scheduled_shifts.py` bilan birga Linux'da 23 PASSED.
+  Eslatma: `tests/test_nazoratchi_attendance_review.py`dagi 2 ta
+  UI-matn assertion FAILED, lekin bu **shu o'zgarishdan oldin ham**
+  yiqilardi (tekshirilgan) — alohida, tegishli bo'lmagan masala.
 - **Yangi (2026-08-26): Xodimni ishdan chiqarish V1.** Xodim kartasida
   (`nazoratchi_bot.py`) "🚪 Ishdan chiqarish" -> tasdiqlash ekrani ->
   `employees.status` `approved` -> `offboarded` (yagona kanonik manba,

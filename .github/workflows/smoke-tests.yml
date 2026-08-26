@@ -194,6 +194,9 @@ jobs:
           tests/test_nazoratchi_supervision.py::test_e2exodim_is_a_noop_for_non_founder
           tests/test_nazoratchi_supervision.py::test_e2exodim_is_idempotent
           tests/test_nazoratchi_supervision.py::test_bootstrapped_founder_employee_shows_up_in_filiallar_flow
+          tests/test_bonus_point_ledger.py
+          tests/test_employee_dashboard.py
+          tests/test_nazoratchi_attendance_review.py
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

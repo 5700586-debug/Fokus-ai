@@ -1577,6 +1577,25 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         return request, profile
 
+    async def _notify_schedule_request_decision(callback: CallbackQuery, request: dict, approved: bool) -> None:
+        """Xabar FAQAT qaror aynan shu chaqiruvda yozilganidan keyin
+        yuboriladi — eskirgan/ikki marta bosilgan tugma bu yergacha
+        yetib kelmaydi, shuning uchun dublikat xabar bo'lmaydi.
+        Yuborish xatosi allaqachon yozilgan qarorni bekor qilmaydi
+        (yuqoridagi ``schedule_confirm`` bilan bir xil naqsh)."""
+        lines = [
+            "✅ Grafik so'rovingiz tasdiqlandi" if approved else "❌ Grafik so'rovingiz rad etildi",
+            "",
+            f"📅 Sana: {_format_date_display(request['shift_date'])}",
+        ]
+        if approved:
+            lines.append(f"🔄 Yangi grafik: {_schedule_request_plan(request)}")
+
+        try:
+            await callback.bot.send_message(request["employee_id"], "\n".join(lines))
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga grafik qarori xabarini yuborib bo'lmadi ({request['employee_id']}): {error!r}")
+
     async def _decide_schedule_request(callback: CallbackQuery, request_id: int, approved: bool) -> None:
         request, _profile = await _load_request_for_actor(callback, request_id)
         if request is None:
@@ -1592,6 +1611,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         )
         if decided:
             await callback.answer("✅ Tasdiqlandi." if approved else "❌ Rad etildi.")
+            await _notify_schedule_request_decision(callback, request, approved)
         else:
             await callback.answer("Bu so'rov allaqachon hal qilingan.", show_alert=True)
 

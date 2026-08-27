@@ -10,6 +10,18 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
+- **Yangi (2026-08-26): Grafik so'rovi qarori bo'yicha xodimga
+  BILDIRISHNOMA V1.** `/grafik` oqimi endi yopiq — nazoratchi/Founder
+  so'rovni tasdiqlagach yoki rad etgach, xodim Telegramda bitta xabar
+  oladi (sana + qaror; tasdiqda so'ralgan grafik xulosasi ham —
+  "Dam olish" yoki "10:00–19:00"). Xabar FAQAT kanonik qaror aynan shu
+  chaqiruvda yozilgandan keyin yuboriladi (`_decide_schedule_request`
+  ichidagi `decided` shoxi, `nazoratchi_bot.py`), shuning uchun
+  eskirgan/ikki marta bosilgan tugma dublikat xabar yubormaydi. Yuborish
+  xatosi izolyatsiya qilingan `try/except` ichida (mavjud
+  `schedule_confirm` naqshi) — DB qarori va schedule natijasi bekor
+  QILINMAYDI. Ruxsat, atomik `pending -> approved/rejected` va schedule
+  yangilash yo'li o'zgarmagan; yangi jadval/bog'liqlik yo'q.
 - **Yangi (2026-08-26): Grafik o'zgartirish so'rovini TASDIQLASH UI V1
   (nazoratchi/Founder tomoni).** Endi xodimning `/grafik` so'rovi
   Telegramda hal qilinadi — avval faqat core mavjud edi. Yangi
@@ -30,9 +42,9 @@ list`) ustuvor — bu faylning o'zi emas.
   safar DBdan qayta o'qiladi va haqiqiy himoya — servisdagi atomik
   `pending -> approved/rejected` o'tishi: eskirgan/ikki marta bosilgan
   tugma schedule'ni qayta yozmaydi va yangi revision yaratmaydi.
-  Xodimga avtomatik bildirishnoma ATAYLAB YO'Q (V1 doirasidan
-  tashqarida). Testlar: `tests/test_schedule_change_approval_ui.py`
-  (13 ta, Linux'da PASSED). Yo'l-yo'lakay
+  Xodimga avtomatik bildirishnoma endi BOR (pastga qarang).
+  Testlar: `tests/test_schedule_change_approval_ui.py`
+  (18 ta, Linux'da PASSED). Yo'l-yo'lakay
   `tests/test_menu_and_fsm_escape.py`dagi 2 ta ESKIRGAN
   nazoratchi-menyu assertion (shu o'zgarishdan OLDIN ham yiqilardi,
   `/filiallar` qo'shilganidan beri) yangi menyu holatiga moslashtirildi

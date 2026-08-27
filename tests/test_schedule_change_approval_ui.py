@@ -11,6 +11,7 @@ bosilgan tugma hech narsani qayta yozmasligi.
 from datetime import timedelta
 
 import pytest
+from aiogram.methods import SendMessage
 
 import company_time
 import employees
@@ -314,3 +315,112 @@ async def test_founder_sees_and_decides_requests_from_any_branch(bot_dp):
     )
 
     assert attendance_repo.get_shift_for_date(other_branch_employee, day)["planned_start"] == "10:00"
+
+
+# ------------------------------------------------- XODIMGA BILDIRISHNOMA --
+
+
+def _employee_messages(sent, employee_id: int = _EMPLOYEE_ID) -> list[str]:
+    return [
+        m.text
+        for m in sent
+        if isinstance(m, SendMessage) and m.chat_id == employee_id
+    ]
+
+
+async def test_approve_notifies_the_employee_once_with_the_new_schedule(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_employee()
+    day = _tomorrow()
+    request_id = _work_request(shift_date=day)
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_yes:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+
+    notices = _employee_messages(sent)
+    assert len(notices) == 1
+    assert "tasdiqlandi" in notices[0]
+    assert (company_time.today() + timedelta(days=1)).strftime("%d.%m.%Y") in notices[0]
+    assert "10:00–19:00" in notices[0]
+
+
+async def test_approve_off_request_notifies_the_employee_about_the_day_off(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_employee()
+    request_id = _off_request()
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_yes:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+
+    notices = _employee_messages(sent)
+    assert len(notices) == 1
+    assert "tasdiqlandi" in notices[0]
+    assert "Dam olish" in notices[0]
+
+
+async def test_reject_notifies_the_employee_once(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_employee()
+    request_id = _work_request()
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_no:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+
+    notices = _employee_messages(sent)
+    assert len(notices) == 1
+    assert "rad etildi" in notices[0]
+
+
+async def test_stale_second_click_does_not_send_another_notification(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_employee()
+    request_id = _work_request()
+
+    first = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_yes:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+    assert len(_employee_messages(first)) == 1
+
+    second = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_yes:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+    third = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_no:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+
+    assert _employee_messages(second) == []
+    assert _employee_messages(third) == []
+
+
+async def test_failed_notification_keeps_the_decision_and_the_schedule(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_employee()
+    day = _tomorrow()
+    request_id = _work_request(shift_date=day)
+
+    original_call = type(bot).__call__
+
+    async def failing_call(self, method, request_timeout=None):
+        if isinstance(method, SendMessage) and method.chat_id == _EMPLOYEE_ID:
+            raise RuntimeError("xodim botni bloklagan")
+        return await original_call(self, method, request_timeout)
+
+    monkeypatch.setattr(type(bot), "__call__", failing_call)
+
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_schedreq_yes:{request_id}", target_chat_id=_NAZORATCHI_ID
+    )
+
+    assert attendance_service.get_schedule_change_request(request_id)["status"] == (
+        attendance_service.SCHEDULE_REQUEST_APPROVED
+    )
+    assert attendance_repo.get_shift_for_date(_EMPLOYEE_ID, day)["planned_start"] == "10:00"
+    assert "Kutilayotgan so'rov yo'q" in _actor_screen(sent).text

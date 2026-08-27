@@ -25,6 +25,7 @@ from . import (
     market,
     meal_plans,
     notifications,
+    one_on_one,
     performance,
     recruiting,
     reports,
@@ -55,4 +56,5 @@ SCHEMA_STATEMENTS: list[str] = [
     saturn_group.SCHEMA,
     recruiting.SCHEMA,
     supervision.SCHEMA,
+    one_on_one.SCHEMA,
 ]

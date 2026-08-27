@@ -10,6 +10,28 @@ list`) ustuvor — bu faylning o'zi emas.
 ## Development
 
 - **Faol branch:** `feature/hr-conversational-interview`
+- **Yangi (2026-08-27): Haftalik 1:1 suhbat CORE V1.** Rahbar <-> xodim
+  haftalik qisqa suhbati uchun yagona kanonik yozish/o'qish yo'li:
+  yangi `employee_one_on_ones` jadvali (`schema/one_on_one.py`),
+  `repositories/one_on_one.py` va `services/one_on_one.py`. Natija
+  FAQAT beshta qiymatdan biri (`ok`, `difficulty`, `suggestion`,
+  `serious_issue`, `other`), qisqa `summary` ixtiyoriy. Hafta kaliti —
+  suhbat sanasi tushgan haftaning DUSHANBA sanasi (`week_start`,
+  `week_start_for`); bitta xodimga bitta haftada bitta yozuv
+  (servis tekshiruvi + `UNIQUE(employee_id, week_start)`, poyga
+  holatida `IntegrityError` -> `None`). Xodim mavjud kanonik manba
+  orqali aniqlanadi (`employees.get_profile` + `status == approved`) —
+  noma'lum/tasdiqlanmagan/`offboarded` xodimga yozuv umuman
+  yaratilmaydi, parallel xodim modeli YO'Q. Follow-up shu qatorning
+  ustunlari (`followup_text` + `open/resolved`): `get_open_followup`
+  keyingi suhbat uchun eng so'nggi ochiq masalani qaytaradi,
+  `resolve_followup` esa mavjud atomik `UPDATE ... WHERE status = ?`
+  naqshi bilan yopadi (takroriy chaqiruv no-op, matn saqlanadi, hech
+  qanday `DELETE` yo'q). Telegram UI, bildirishnoma, scheduler,
+  ball/bonus/minus va psixologik baholash ATAYLAB YO'Q (V1 faqat core).
+  Yangi bog'liqlik yo'q. Testlar: `tests/test_one_on_one.py` (13 ta) +
+  `tests/test_schema.py`, `tests/test_db_migration.py` (8 ta) —
+  Linux'da PASSED.
 - **Yangi (2026-08-26): Grafik so'rovi qarori bo'yicha xodimga
   BILDIRISHNOMA V1.** `/grafik` oqimi endi yopiq — nazoratchi/Founder
   so'rovni tasdiqlagach yoki rad etgach, xodim Telegramda bitta xabar

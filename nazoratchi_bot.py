@@ -51,6 +51,7 @@ from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import get_role, role_name
 from services import attendance as attendance_service
 from services import audit
+from services import one_on_one as one_on_one_service
 from services import discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
@@ -74,6 +75,10 @@ class ScheduleStates(StatesGroup):
 class MobilityStates(StatesGroup):
     waiting_custom_minutes = State()
     waiting_custom_date = State()
+
+
+class OneOnOneStates(StatesGroup):
+    waiting_summary = State()
 
 
 _CB_BRANCHES = "nzr_branches"
@@ -129,6 +134,45 @@ _CB_MOBILITY_REMOVE_NO_PREFIX = "nzr_mob_remove_no:"
 _CB_MOBILITY_MODE_PREFIX = "nzr_mob_mode:"
 _CB_MOBILITY_MODE_SET_PREFIX = "nzr_mob_mode_set:"
 _CB_MOBILITY_DATE_PREFIX = "nzr_mob_date:"
+
+# Haftalik 1:1 suhbat -- prefikslar ATAYLAB ":" bilan tugaydi, shu
+# sababli "nzr_1on1:5" "nzr_1on1_st:..." kabi kengroq prefikslarga
+# tushib qolmaydi (aksincha ham to'g'ri).
+_CB_ONE_ON_ONE_PREFIX = "nzr_1on1:"
+_CB_ONE_ON_ONE_STATUS_PREFIX = "nzr_1on1_st:"
+_CB_ONE_ON_ONE_REASON_PREFIX = "nzr_1on1_r:"
+_CB_ONE_ON_ONE_OTHER_PREFIX = "nzr_1on1_other:"
+
+_ONE_ON_ONE_STATUS_LABELS = {
+    one_on_one_service.OUTCOME_OK: "✅ Hammasi joyida",
+    one_on_one_service.OUTCOME_DIFFICULTY: "⚠️ Qiyinchilik bor",
+    one_on_one_service.OUTCOME_SUGGESTION: "💡 Taklif bor",
+    one_on_one_service.OUTCOME_SERIOUS_ISSUE: "🚨 Jiddiy muammo bor",
+    one_on_one_service.OUTCOME_OTHER: "📝 Boshqa",
+}
+
+_ONE_ON_ONE_QUICK_REASONS = {
+    one_on_one_service.OUTCOME_OK: [
+        "Ish yaxshi ketyapti",
+        "Jamoada muammo yo'q",
+        "Vazifalar o'z vaqtida bajarilmoqda",
+    ],
+    one_on_one_service.OUTCOME_DIFFICULTY: [
+        "Ish jadvali og'ir kelmoqda",
+        "Hamkasblar bilan tushunmovchilik bor",
+        "Topshiriq/vazifa tushunarsiz",
+    ],
+    one_on_one_service.OUTCOME_SUGGESTION: [
+        "Ish jarayonini yaxshilash taklifi bor",
+        "Qo'shimcha o'quv/treninggi kerak",
+        "Ish joyi yoki asboblarni yaxshilash kerak",
+    ],
+    one_on_one_service.OUTCOME_SERIOUS_ISSUE: [
+        "Hamkasb/mijoz bilan ziddiyat bo'ldi",
+        "Xavfsizlik yoki tartib buzilishi bor",
+        "Shoshilinch rahbariyat yordami kerak",
+    ],
+}
 
 _CB_OFFBOARD_PREFIX = "nzr_offb:"
 _CB_OFFBOARD_YES_PREFIX = "nzr_offb_yes:"
@@ -276,8 +320,42 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
     rows.append([InlineKeyboardButton(text="⏰ Davomat", callback_data=f"{_CB_ATTENDANCE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="🗓 Ish grafigi", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="📍 Filial nazorati", callback_data=f"{_CB_MOBILITY_PREFIX}{user_id}")])
+    rows.append([InlineKeyboardButton(text="🤝 Haftalik suhbat", callback_data=f"{_CB_ONE_ON_ONE_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="🚪 Ishdan chiqarish", callback_data=f"{_CB_OFFBOARD_PREFIX}{user_id}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_data)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _one_on_one_back_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Xodim kartasiga qaytish", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")]
+        ]
+    )
+
+
+def _one_on_one_status_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"{_CB_ONE_ON_ONE_STATUS_PREFIX}{user_id}:{outcome}")]
+        for outcome, label in _ONE_ON_ONE_STATUS_LABELS.items()
+    ]
+    rows.append(
+        [InlineKeyboardButton(text="⬅️ Xodim kartasiga qaytish", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _one_on_one_reason_keyboard(user_id: int, outcome: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=reason, callback_data=f"{_CB_ONE_ON_ONE_REASON_PREFIX}{user_id}:{outcome}:{index}")]
+        for index, reason in enumerate(_ONE_ON_ONE_QUICK_REASONS[outcome])
+    ]
+    rows.append(
+        [InlineKeyboardButton(text="📝 Boshqa sabab", callback_data=f"{_CB_ONE_ON_ONE_OTHER_PREFIX}{user_id}:{outcome}")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="⬅️ Xodim kartasiga qaytish", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -2081,6 +2159,147 @@ def register(dp: Dispatcher, openai_client) -> None:
             _mobility_screen_text(profile, parsed.isoformat()),
             reply_markup=_mobility_menu_keyboard(user_id),
         )
+
+    # ------------------------------------------------------- 1:1 suhbat --
+
+    def _one_on_one_save(user_id: int, outcome: str, summary: str, actor_id: int) -> str:
+        record_id = one_on_one_service.create_one_on_one(user_id, actor_id, outcome, summary=summary)
+        if record_id is None:
+            return "ℹ️ Bu xodim bilan shu hafta uchun suhbat allaqachon saqlangan."
+        return "✅ Haftalik suhbat saqlandi."
+
+    @dp.callback_query(F.data.startswith(_CB_ONE_ON_ONE_PREFIX))
+    async def one_on_one_open(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = employees.get_profile(user_id)
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        today = company_time.today().isoformat()
+        existing = one_on_one_service.get_one_on_one_for_week(user_id, today)
+        await callback.answer()
+        if callback.message:
+            if existing is not None:
+                await callback.message.edit_text(
+                    "ℹ️ Bu xodim bilan shu hafta uchun suhbat allaqachon saqlangan.",
+                    reply_markup=_one_on_one_back_keyboard(user_id),
+                )
+            else:
+                await callback.message.edit_text(
+                    "🤝 Haftalik suhbat natijasini tanlang:",
+                    reply_markup=_one_on_one_status_keyboard(user_id),
+                )
+
+    @dp.callback_query(F.data.startswith(_CB_ONE_ON_ONE_STATUS_PREFIX))
+    async def one_on_one_status_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        outcome = parts[2]
+        profile = employees.get_profile(user_id)
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        if outcome == one_on_one_service.OUTCOME_OTHER:
+            await state.update_data(one_on_one_employee_id=user_id, one_on_one_outcome=outcome)
+            await state.set_state(OneOnOneStates.waiting_summary)
+            await callback.answer()
+            if callback.message:
+                await callback.message.edit_text("✍️ Qisqacha yozing:", reply_markup=None)
+            return
+
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                "🤝 Sababni tanlang:", reply_markup=_one_on_one_reason_keyboard(user_id, outcome)
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_ONE_ON_ONE_REASON_PREFIX))
+    async def one_on_one_reason_pick(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 3)
+        if len(parts) != 4:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        outcome = parts[2]
+        try:
+            index = int(parts[3])
+        except ValueError:
+            await callback.answer()
+            return
+
+        profile = employees.get_profile(user_id)
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        reasons = _ONE_ON_ONE_QUICK_REASONS.get(outcome) or []
+        if index < 0 or index >= len(reasons):
+            await callback.answer()
+            return
+
+        result_text = _one_on_one_save(user_id, outcome, reasons[index], callback.from_user.id)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(result_text, reply_markup=_one_on_one_back_keyboard(user_id))
+
+    @dp.callback_query(F.data.startswith(_CB_ONE_ON_ONE_OTHER_PREFIX))
+    async def one_on_one_other_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer()
+            return
+
+        user_id = int(parts[1])
+        outcome = parts[2]
+        profile = employees.get_profile(user_id)
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        await state.update_data(one_on_one_employee_id=user_id, one_on_one_outcome=outcome)
+        await state.set_state(OneOnOneStates.waiting_summary)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text("✍️ Qisqacha yozing:", reply_markup=None)
+
+    @dp.message(StateFilter(OneOnOneStates.waiting_summary))
+    async def one_on_one_summary_input(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("one_on_one_employee_id")
+        outcome = data.get("one_on_one_outcome")
+
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("✍️ Bo'sh matn qabul qilinmaydi. Qisqacha yozing:")
+            return
+
+        await state.clear()
+        profile = employees.get_profile(user_id) if user_id is not None else None
+        if profile is None or profile.get("status") != employees.STATUS_APPROVED or outcome is None:
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        result_text = _one_on_one_save(user_id, outcome, text, message.from_user.id)
+        await message.answer(result_text, reply_markup=_one_on_one_back_keyboard(user_id))
 
     # ---------------------------------------------------- ishdan chiqarish --
 

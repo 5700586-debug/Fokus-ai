@@ -104,6 +104,19 @@ jobs:
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
         run: python -m e2e.run_cashshift_e2e | tee e2e_cashshift_output.log
 
+      # Beshinchi ssenariy -- TA'MINOTCHI XARID oqimi (qarang
+      # e2e/run_supplier_e2e.py). Xuddi shu job ichida, avvalgi to'rt
+      # step tugagach ketma-ket ishlaydi.
+      - name: Run real Telegram SUPPLIER PURCHASE E2E scenario against fokus-ai-test
+        id: e2e_supplier_run
+        continue-on-error: true
+        env:
+          E2E_TELEGRAM_API_ID: ${{ secrets.E2E_TELEGRAM_API_ID }}
+          E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
+          E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
+          E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
+        run: python -m e2e.run_supplier_e2e | tee e2e_supplier_output.log
+
       # Xom job log'ga tashqi tomondan autentifikatsiyasiz kirish
       # imkonsizligi tasdiqlangani uchun (GitHub REST/HTML orqali
       # bir necha usul sinaldi) -- muvaffaqiyatsizlikda skript(lar)
@@ -115,7 +128,7 @@ jobs:
       # biri muvaffaqiyatsiz bo'lsa ham shu step ishga tushadi, faqat
       # tegishli log(lar)ni qo'shadi.
       - name: Post E2E diagnostics as a commit comment on failure
-        if: steps.e2e_run.outcome == 'failure' || steps.e2e_recruiting_run.outcome == 'failure' || steps.e2e_nazoratchi_run.outcome == 'failure' || steps.e2e_cashshift_run.outcome == 'failure'
+        if: steps.e2e_run.outcome == 'failure' || steps.e2e_recruiting_run.outcome == 'failure' || steps.e2e_nazoratchi_run.outcome == 'failure' || steps.e2e_cashshift_run.outcome == 'failure' || steps.e2e_supplier_run.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -124,6 +137,7 @@ jobs:
           RECRUITING_FAILED: ${{ steps.e2e_recruiting_run.outcome == 'failure' }}
           NAZORATCHI_FAILED: ${{ steps.e2e_nazoratchi_run.outcome == 'failure' }}
           CASHSHIFT_FAILED: ${{ steps.e2e_cashshift_run.outcome == 'failure' }}
+          SUPPLIER_FAILED: ${{ steps.e2e_supplier_run.outcome == 'failure' }}
         run: |
           python - <<'PY'
           import json
@@ -151,6 +165,11 @@ jobs:
                   log = f.read()
               sections.append("### Cash Shift Daily Report E2E (run_cashshift_e2e.py)\n\n```\n" + log[-25000:] + "\n```")
 
+          if os.environ.get("SUPPLIER_FAILED") == "true":
+              with open("e2e_supplier_output.log", "r", errors="replace") as f:
+                  log = f.read()
+              sections.append("### Supplier Purchase E2E (run_supplier_e2e.py)\n\n```\n" + log[-25000:] + "\n```")
+
           body = "## E2E diagnostics (auto-posted on failure)\n\n" + "\n\n".join(sections)
 
           with open("comment_body.json", "w") as f:
@@ -165,5 +184,5 @@ jobs:
             -d @comment_body.json
 
       - name: Fail the job if any E2E scenario failed
-        if: steps.e2e_run.outcome == 'failure' || steps.e2e_recruiting_run.outcome == 'failure' || steps.e2e_nazoratchi_run.outcome == 'failure' || steps.e2e_cashshift_run.outcome == 'failure'
+        if: steps.e2e_run.outcome == 'failure' || steps.e2e_recruiting_run.outcome == 'failure' || steps.e2e_nazoratchi_run.outcome == 'failure' || steps.e2e_cashshift_run.outcome == 'failure' || steps.e2e_supplier_run.outcome == 'failure'
         run: exit 1

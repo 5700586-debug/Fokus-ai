@@ -30,6 +30,7 @@ from . import (
     recruiting,
     reports,
     saturn_group,
+    shift_daily_report,
     shift_deficiencies,
     suppliers,
     supervision,
@@ -59,4 +60,5 @@ SCHEMA_STATEMENTS: list[str] = [
     supervision.SCHEMA,
     one_on_one.SCHEMA,
     shift_deficiencies.SCHEMA,
+    shift_daily_report.SCHEMA,
 ]

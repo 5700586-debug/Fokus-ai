@@ -75,11 +75,25 @@ async def _clear_deficiency_gate(main, bot, user_id: int) -> None:
     await send_callback(main.dp, bot, user_id, data="csdef_none", target_chat_id=user_id)  # firma yo'q
 
 
+async def _clear_daily_report_gate(main, bot, user_id: int) -> None:
+    """Yangi kunlik 3-savol hisoboti gate'i (prixodsiz tovar/narx
+    shikoyati/xodim shikoyati — qarang ``cash_shift_bot.py``dagi
+    ``DailyReportStates``/``shift_daily_report``) — mavjud kamchilik
+    gate'idan keyin, real yopish jarayonidan oldin turadi. Bu yerda 3
+    savolni ham "yo'q/eng kam" javob bilan tezda o'tkazib yuboradi —
+    testning o'zi sinayotgan smena-yopish oqimiga tegilmaydi.
+    """
+    await send_callback(main.dp, bot, user_id, data="csdr_prixod:0", target_chat_id=user_id)
+    await send_callback(main.dp, bot, user_id, data="csdr_price:0", target_chat_id=user_id)
+    await send_callback(main.dp, bot, user_id, data="csdr_staff_no", target_chat_id=user_id)
+
+
 async def _close_shift_happy_path(
     main, bot, user_id: int, cash_sales="100000", card_sales="0", other="0", actual="100000"
 ):
     await send(main.dp, bot, user_id, text="/closeshift")
     await _clear_deficiency_gate(main, bot, user_id)
+    await _clear_daily_report_gate(main, bot, user_id)
     await send(main.dp, bot, user_id, photo_file_id="sales_photo")
     await send(main.dp, bot, user_id, photo_file_id="cash_photo")
     await send(main.dp, bot, user_id, text=cash_sales)
@@ -276,6 +290,7 @@ async def test_closeshift_confirm_skipped_when_already_pending_for_same_kassir(b
 
     await send(main.dp, bot, 111, text="/closeshift")
     await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -438,6 +453,7 @@ async def test_supervisor_recheck_message_has_no_raw_slash_command(bot_dp):
         await send(main.dp, bot, 111, text="/closeshift")
         if i == 0:
             await _clear_deficiency_gate(main, bot, 111)
+            await _clear_daily_report_gate(main, bot, 111)
             await send(main.dp, bot, 111, photo_file_id="sales_photo")
             await send(main.dp, bot, 111, photo_file_id="cash_photo")
         await send(main.dp, bot, 111, text="100000")

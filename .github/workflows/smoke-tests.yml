@@ -205,6 +205,8 @@ jobs:
           tests/test_mobility_management_ui.py
           tests/test_shift_deficiency_service.py
           tests/test_shift_deficiency_bot_flow.py
+          tests/test_shift_daily_report_service.py
+          tests/test_shift_daily_report_bot_flow.py
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

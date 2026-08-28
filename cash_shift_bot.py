@@ -25,9 +25,9 @@ from aiogram.types import (
 )
 
 from config import FOUNDER_ID
-from employees import get_profile
+from employees import STATUS_APPROVED, get_profile, list_approved_by_branch
 from providers.file_storage import get_file_storage_provider
-from services import cash_expense, cash_shift, chat_cleanup, permissions, shift_deficiency
+from services import cash_expense, cash_shift, chat_cleanup, permissions, shift_daily_report, shift_deficiency
 
 _CLOSESHIFT_WORKFLOW = "cash_shift_close"
 
@@ -156,6 +156,11 @@ class DeficiencyStates(StatesGroup):
     item_name = State()
     item_amount = State()
     yesterday_missing_numbers = State()
+
+
+class DailyReportStates(StatesGroup):
+    no_prixod_custom = State()
+    staff_complaint_note = State()
 
 
 def _parse_amount(text: str) -> int | None:
@@ -408,6 +413,122 @@ async def _enter_deficiency_step(reply_target: Message, state: FSMContext, shift
 
     if step == shift_deficiency.STEP_YESTERDAY:
         await _enter_yesterday_review(reply_target, state, shift)
+        return
+
+    await _enter_daily_report_step(reply_target, state, shift)
+
+
+# ------------------------------------------------------- kunlik hisobot (V1) --
+
+_NO_PRIXOD_BUTTON_VALUES = ["0", "1", "2", "3", "4", "5", "6plus"]
+_NO_PRIXOD_BUTTON_LABELS = {
+    "0": "Yo'q", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6plus": "6+",
+}
+
+_PRICE_COMPLAINT_BUTTON_LABELS = {
+    "0": "Yo'q, bo'lmadi", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5",
+    "6-10": "6–10", "10+": "10+",
+}
+
+_COMPLAINT_TYPE_LABELS = {
+    shift_daily_report.COMPLAINT_TYPE_RUDE: "😠 Qo'pol muomala",
+    shift_daily_report.COMPLAINT_TYPE_INATTENTIVE: "😐 E'tiborsizlik",
+    shift_daily_report.COMPLAINT_TYPE_SLOW: "🐢 Sekin xizmat",
+    shift_daily_report.COMPLAINT_TYPE_WRONG_INFO: "❌ Noto'g'ri ma'lumot",
+    shift_daily_report.COMPLAINT_TYPE_PRODUCT_NOT_FOUND: "🔍 Bor mahsulotni topib bera olmadi",
+    shift_daily_report.COMPLAINT_TYPE_INDIFFERENT: "😶 Loqaydlik",
+    shift_daily_report.COMPLAINT_TYPE_OTHER: "📝 Boshqa",
+}
+
+
+def _daily_report_no_prixod_kb() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(text=_NO_PRIXOD_BUTTON_LABELS[value], callback_data=f"csdr_prixod:{value}")
+        for value in _NO_PRIXOD_BUTTON_VALUES
+    ]
+    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _daily_report_price_kb() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(text=label, callback_data=f"csdr_price:{value}")
+        for value, label in _PRICE_COMPLAINT_BUTTON_LABELS.items()
+    ]
+    rows = [buttons[i:i + 4] for i in range(0, len(buttons), 4)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _daily_report_staff_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Yo'q, bo'lmadi", callback_data="csdr_staff_no"),
+        InlineKeyboardButton(text="Bo'ldi", callback_data="csdr_staff_yes"),
+    ]])
+
+
+def _daily_report_employee_kb(employee_profiles: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for profile in employee_profiles:
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part)
+        rows.append(
+            [InlineKeyboardButton(text=full_name or str(profile["user_id"]), callback_data=f"csdr_staff_emp:{profile['user_id']}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _daily_report_complaint_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=f"csdr_staff_type:{key}")]
+            for key, label in _COMPLAINT_TYPE_LABELS.items()
+        ]
+    )
+
+
+async def _send_no_prixod_signal(bot, shift: dict, count: int) -> None:
+    text = (
+        "🔴 KO'P PRIXODSIZ TOVAR\n\n"
+        f"Kassir: {_employee_name(shift['employee_id'])}\n"
+        f"Filial: {shift.get('branch') or '-'}\n"
+        f"Bugun prixodi chiqmagan tovar: {count} ta"
+    )
+
+    from roles import find_user_by_role
+
+    recipients = {FOUNDER_ID}
+    nazoratchi_id = find_user_by_role("nazoratchi")
+    if nazoratchi_id is not None:
+        recipients.add(nazoratchi_id)
+
+    for recipient_id in recipients:
+        await bot.send_message(recipient_id, text)
+
+
+async def _enter_daily_report_step(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    step = shift_daily_report.get_next_step(shift["id"])
+
+    if step == shift_daily_report.STEP_NO_PRIXOD:
+        sent = await reply_target.answer(
+            "📦 Bugun prixodi chiqmagan tovarlar nechta bo'ldi?",
+            reply_markup=_daily_report_no_prixod_kb(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        return
+
+    if step == shift_daily_report.STEP_PRICE_COMPLAINT:
+        sent = await reply_target.answer(
+            "💰 Bugun \"narxi qimmat\" degan mijozlar bo'ldimi?",
+            reply_markup=_daily_report_price_kb(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        return
+
+    if step == shift_daily_report.STEP_STAFF_COMPLAINT:
+        sent = await reply_target.answer(
+            "🗣 Bugun xodimlarning muomalasi bo'yicha xaridor shikoyat qildimi?",
+            reply_markup=_daily_report_staff_kb(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
         return
 
     await _enter_close_shift_photo_flow(reply_target, state, shift)
@@ -919,6 +1040,171 @@ def register(dp: Dispatcher) -> None:
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.answer("✅ Qayd etildi.")
         await _enter_deficiency_step(callback.message, state, shift)
+
+    # -------------------------------------------------- kunlik hisobot (V1) --
+
+    @dp.callback_query(F.data.startswith("csdr_prixod:"))
+    async def daily_report_no_prixod_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        value = callback.data.split(":", 1)[1]
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await callback.answer()
+            return
+
+        if value == "6plus":
+            await state.set_state(DailyReportStates.no_prixod_custom)
+            await callback.message.edit_reply_markup(reply_markup=None)
+            sent = await callback.message.answer("Aniq nechta bo'ldi? (kamida 6, butun son):")
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+            await callback.answer()
+            return
+
+        count = int(value)
+        shift_daily_report.save_no_prixod_count(shift["id"], count)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+
+        if shift_daily_report.is_no_prixod_signal(count):
+            await _send_no_prixod_signal(callback.bot, shift, count)
+
+        await _enter_daily_report_step(callback.message, state, shift)
+
+    @dp.message(StateFilter(DailyReportStates.no_prixod_custom))
+    async def daily_report_no_prixod_custom(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 6:
+            await message.answer("❌ Faqat 6 yoki undan katta butun son kiriting:")
+            return
+
+        count = int(text)
+        shift_daily_report.save_no_prixod_count(shift["id"], count)
+        await state.set_state(None)
+
+        if shift_daily_report.is_no_prixod_signal(count):
+            await _send_no_prixod_signal(message.bot, shift, count)
+
+        await _enter_daily_report_step(message, state, shift)
+
+    @dp.callback_query(F.data.startswith("csdr_price:"))
+    async def daily_report_price_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        bucket = callback.data.split(":", 1)[1]
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None or bucket not in shift_daily_report.PRICE_COMPLAINT_BUCKETS:
+            await callback.answer()
+            return
+
+        shift_daily_report.save_price_complaint_bucket(shift["id"], bucket)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _enter_daily_report_step(callback.message, state, shift)
+
+    @dp.callback_query(F.data == "csdr_staff_no")
+    async def daily_report_staff_none(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await callback.answer()
+            return
+
+        shift_daily_report.save_staff_complaint_none(shift["id"])
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _enter_daily_report_step(callback.message, state, shift)
+
+    @dp.callback_query(F.data == "csdr_staff_yes")
+    async def daily_report_staff_yes(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await callback.answer()
+            return
+
+        employee_profiles = list_approved_by_branch(shift.get("branch"))
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        sent = await callback.message.answer(
+            "👤 Qaysi xodim ustidan shikoyat qildi?", reply_markup=_daily_report_employee_kb(employee_profiles)
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+    @dp.callback_query(F.data.startswith("csdr_staff_emp:"))
+    async def daily_report_staff_employee_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        employee_id = int(callback.data.split(":", 1)[1])
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await callback.answer()
+            return
+
+        profile = get_profile(employee_id)
+        if profile is None or profile.get("status") != STATUS_APPROVED:
+            await callback.answer("Xodim topilmadi.", show_alert=True)
+            return
+
+        await state.update_data(daily_report_complaint_employee_id=employee_id)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        sent = await callback.message.answer(
+            "Shikoyat turini tanlang:", reply_markup=_daily_report_complaint_type_kb()
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+    @dp.callback_query(F.data.startswith("csdr_staff_type:"))
+    async def daily_report_staff_type_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        type_key = callback.data.split(":", 1)[1]
+        if type_key not in shift_daily_report.KNOWN_COMPLAINT_TYPES:
+            await callback.answer()
+            return
+
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        employee_id = data.get("daily_report_complaint_employee_id")
+        if shift is None or employee_id is None:
+            await callback.answer()
+            return
+
+        if type_key == shift_daily_report.COMPLAINT_TYPE_OTHER:
+            await state.set_state(DailyReportStates.staff_complaint_note)
+            await callback.message.edit_reply_markup(reply_markup=None)
+            sent = await callback.message.answer("✍️ Qisqacha yozing:")
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+            await callback.answer()
+            return
+
+        shift_daily_report.save_staff_complaint(shift["id"], employee_id, type_key)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _enter_daily_report_step(callback.message, state, shift)
+
+    @dp.message(StateFilter(DailyReportStates.staff_complaint_note))
+    async def daily_report_staff_complaint_note(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        employee_id = data.get("daily_report_complaint_employee_id")
+        if shift is None or employee_id is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("❌ Bo'sh matn qabul qilinmaydi. Qisqacha yozing:")
+            return
+
+        shift_daily_report.save_staff_complaint(
+            shift["id"], employee_id, shift_daily_report.COMPLAINT_TYPE_OTHER, note=text
+        )
+        await state.set_state(None)
+        await _enter_daily_report_step(message, state, shift)
 
     @dp.message(StateFilter(CloseShiftStates.sales_photo), F.photo)
     async def closeshift_sales_photo(message: Message, state: FSMContext) -> None:

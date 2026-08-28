@@ -51,6 +51,25 @@ def get_open_items_for_branch_before(branch: str | None, before_date: str) -> li
     return [dict(row) for row in rows]
 
 
+def get_open_market_items_through(as_of_date: str) -> list[dict]:
+    """Bugun VA undan oldingi barcha ochiq ``market`` bozorlik
+    yozuvlari (filialdan qat'i nazar) — ta'minotchining ``/xarid``
+    ro'yxati uchun. Allaqachon "arrived" bo'lgan (eski tarix)
+    yozuvlar UMUMAN kirmaydi -- faqat ``status = 'open'``."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM shift_deficiency_items "
+            "WHERE category = 'market' AND status = 'open' AND source_date <= ? "
+            "ORDER BY id",
+            (as_of_date,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def mark_item_resolved(item_id: int, resolved_at: str) -> None:
     conn = get_connection()
     try:

@@ -12,6 +12,7 @@ KPI/bonus/AI/dashboard ATAYLAB YO'Q — hozircha faqat FAKT.
 
 from datetime import datetime, timezone
 
+import company_time
 from repositories import shift_deficiencies as repo
 from services import cash_shift
 
@@ -107,6 +108,34 @@ def get_next_step(shift_id: int) -> str:
 
 def is_flow_complete(shift_id: int) -> bool:
     return get_next_step(shift_id) == STEP_DONE
+
+
+def get_daily_market_shortage() -> list[dict]:
+    """Bugungi VA oldingi kunlardan qolgan ochiq ``market`` bozorlikni
+    (barcha filiallar) mahsulot+birlik bo'yicha jamlaydi. Allaqachon
+    "arrived" bo'lgan eski tarixiy mahsulotlar bu ro'yxatga UMUMAN
+    kirmaydi (qarang ``repositories.shift_deficiencies.
+    get_open_market_items_through`` — faqat ``status='open'``).
+
+    Har element: {"product_name", "unit", "total_quantity",
+    "by_branch": {branch: {"quantity": float, "item_ids": [int, ...]}}}.
+    """
+    items = repo.get_open_market_items_through(company_time.today().isoformat())
+
+    grouped: dict[tuple[str, str], dict] = {}
+    for item in items:
+        key = (item["product_name"], item["unit"])
+        bucket = grouped.setdefault(
+            key,
+            {"product_name": item["product_name"], "unit": item["unit"], "total_quantity": 0.0, "by_branch": {}},
+        )
+        bucket["total_quantity"] += item["quantity"]
+        branch = item.get("branch") or "-"
+        branch_bucket = bucket["by_branch"].setdefault(branch, {"quantity": 0.0, "item_ids": []})
+        branch_bucket["quantity"] += item["quantity"]
+        branch_bucket["item_ids"].append(item["id"])
+
+    return list(grouped.values())
 
 
 def get_supplier_stats(start_date: str, end_date: str) -> dict:

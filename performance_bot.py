@@ -21,12 +21,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from db import IntegrityError
+from repositories import supplier_purchases as supplier_purchases_repo
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized
 from services import driver_checks, employee_dashboard, market_observation, permissions, star_engine, supervisor_scoring
 from services import attendance as attendance_service
 from services import meal_plan as meal_plan_service
 from services import rules as rules_service
+from services import shift_deficiency
 
 _SKIP_TEXT = "➖ O'tkazib yuborish"
 
@@ -88,6 +90,31 @@ class DriverCheckStates(StatesGroup):
     exterior_photo = State()
     interior_photo = State()
     notes = State()
+
+
+def _format_qty(value: float) -> str:
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _format_money(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _supplier_summary_text(products: list[dict]) -> str:
+    if not products:
+        return "ℹ️ Bugun uchun ochiq bozorlik yo'q."
+
+    lines = ["🛒 Bugungi bozorlik", ""]
+    for product in products:
+        lines.append(f"{product['product_name']} — kerak: {_format_qty(product['total_quantity'])} {product['unit']}")
+        last_price = product.get("last_price")
+        if last_price is not None:
+            lines.append(f"Oxirgi xarid narxi: {_format_money(last_price)} so'm")
+        else:
+            lines.append("Oldingi narx yo'q")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def register(dp: Dispatcher) -> None:
@@ -623,3 +650,17 @@ def register(dp: Dispatcher) -> None:
             reminder = "\n\n🛠 Diqqat: moy almashtirish vaqti keldi."
 
         await message.answer("✅ Kunlik tekshiruv saqlandi." + reminder, reply_markup=ReplyKeyboardRemove())
+
+    # ---------------------------------------------------------------- /xarid --
+
+    @dp.message(Command("xarid"))
+    async def supplier_purchase_list(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        products = shift_deficiency.get_daily_market_shortage()
+        for product in products:
+            last = supplier_purchases_repo.get_price_history(product["product_name"], product["unit"])
+            product["last_price"] = last["unit_price"] if last else None
+
+        await message.answer(_supplier_summary_text(products))

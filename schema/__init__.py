@@ -32,6 +32,7 @@ from . import (
     saturn_group,
     shift_daily_report,
     shift_deficiencies,
+    supplier_purchases,
     suppliers,
     supervision,
     vehicles,
@@ -61,4 +62,5 @@ SCHEMA_STATEMENTS: list[str] = [
     one_on_one.SCHEMA,
     shift_deficiencies.SCHEMA,
     shift_daily_report.SCHEMA,
+    supplier_purchases.SCHEMA,
 ]

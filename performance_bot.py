@@ -18,7 +18,15 @@ from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 
 from db import IntegrityError
 from repositories import supplier_purchases as supplier_purchases_repo
@@ -28,7 +36,7 @@ from services import driver_checks, employee_dashboard, market_observation, perm
 from services import attendance as attendance_service
 from services import meal_plan as meal_plan_service
 from services import rules as rules_service
-from services import shift_deficiency
+from services import shift_deficiency, supplier_purchase
 
 _SKIP_TEXT = "➖ O'tkazib yuborish"
 
@@ -92,13 +100,65 @@ class DriverCheckStates(StatesGroup):
     notes = State()
 
 
+class SupplierPurchaseStates(StatesGroup):
+    quantity = State()
+    new_price = State()
+    price_flag_reason = State()
+    new_product_name = State()
+    new_product_quantity = State()
+    new_product_price = State()
+
+
 def _format_qty(value: float) -> str:
     text = f"{value:.2f}".rstrip("0").rstrip(".")
     return text or "0"
 
 
-def _format_money(value: int) -> str:
-    return f"{value:,}".replace(",", " ")
+def _format_money(value: float) -> str:
+    return f"{round(value):,}".replace(",", " ")
+
+
+def _parse_decimal(text: str) -> float | None:
+    cleaned = (text or "").strip().replace(",", ".")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_price(text: str) -> int | None:
+    cleaned = (text or "").strip().replace(" ", "").replace("'", "").replace(",", "")
+    if not cleaned.isdigit():
+        return None
+    return int(cleaned)
+
+
+def _supplier_products_kb(products: list[dict]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"{product['product_name']} — {_format_qty(product['total_quantity'])} {product['unit']}",
+            callback_data=f"sup_pick:{index}",
+        )]
+        for index, product in enumerate(products)
+    ]
+    rows.append([InlineKeyboardButton(text="➕ Mahsulot qo'shish", callback_data="sup_add_product")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _price_choice_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="♻️ O'zgarmagan", callback_data="sup_price_same"),
+        InlineKeyboardButton(text="✏️ Yangi narx", callback_data="sup_price_new"),
+    ]])
+
+
+def _unit_choice_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text=unit, callback_data=f"sup_new_unit:{unit}")
+            for unit in shift_deficiency.KNOWN_UNITS
+        ]]
+    )
 
 
 def _supplier_summary_text(products: list[dict]) -> str:
@@ -117,7 +177,7 @@ def _supplier_summary_text(products: list[dict]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def register(dp: Dispatcher) -> None:
+def register(dp: Dispatcher, openai_client) -> None:
 
     # ------------------------------------------------------- /score --
 
@@ -653,14 +713,261 @@ def register(dp: Dispatcher) -> None:
 
     # ---------------------------------------------------------------- /xarid --
 
-    @dp.message(Command("xarid"))
-    async def supplier_purchase_list(message: Message) -> None:
-        if not await permissions.ensure_permission(message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
-            return
-
+    def _load_products_with_price() -> list[dict]:
         products = shift_deficiency.get_daily_market_shortage()
         for product in products:
             last = supplier_purchases_repo.get_price_history(product["product_name"], product["unit"])
             product["last_price"] = last["unit_price"] if last else None
+        return products
 
-        await message.answer(_supplier_summary_text(products))
+    @dp.message(Command("xarid"))
+    async def supplier_purchase_list(message: Message, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        await state.clear()
+        products = _load_products_with_price()
+        await state.update_data(supplier_products=products, purchased_by=message.from_user.id, session_total=0.0)
+
+        await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
+
+    @dp.callback_query(F.data.startswith("sup_pick:"))
+    async def supplier_purchase_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        index = int(callback.data.split(":", 1)[1])
+        data = await state.get_data()
+        products = data.get("supplier_products") or []
+        if index < 0 or index >= len(products):
+            await callback.answer()
+            return
+
+        product = products[index]
+        await state.update_data(purchase_current=product)
+        await state.set_state(SupplierPurchaseStates.quantity)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer(
+            f"🛒 {product['product_name']}\nKerak: {_format_qty(product['total_quantity'])} {product['unit']}\n\n"
+            "Real olingan miqdorni kiriting (masalan 11.2):"
+        )
+        await callback.answer()
+
+    @dp.message(StateFilter(SupplierPurchaseStates.quantity))
+    async def supplier_purchase_quantity(message: Message, state: FSMContext) -> None:
+        quantity = _parse_decimal(message.text or "")
+        if quantity is None or quantity <= 0:
+            await message.answer("❌ Musbat son kiriting (masalan 11.2):")
+            return
+
+        data = await state.get_data()
+        product = data.get("purchase_current")
+        if product is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.update_data(purchase_quantity=quantity)
+        last_price = product.get("last_price")
+
+        if last_price is None:
+            await state.set_state(SupplierPurchaseStates.new_price)
+            await message.answer("Birlik narxini kiriting (so'm, masalan 12000):")
+            return
+
+        await state.set_state(None)
+        await message.answer(f"Oxirgi narx: {_format_money(last_price)} so'm", reply_markup=_price_choice_kb())
+
+    @dp.callback_query(F.data == "sup_price_same")
+    async def supplier_purchase_price_same(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        data = await state.get_data()
+        product = data.get("purchase_current")
+        last_price = product.get("last_price") if product else None
+        if product is None or last_price is None:
+            await callback.answer()
+            return
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _finish_price_step(callback.message, state, last_price)
+
+    @dp.callback_query(F.data == "sup_price_new")
+    async def supplier_purchase_price_new(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        await state.set_state(SupplierPurchaseStates.new_price)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Birlik narxini kiriting (so'm, masalan 12000):")
+        await callback.answer()
+
+    @dp.message(StateFilter(SupplierPurchaseStates.new_price))
+    async def supplier_purchase_new_price(message: Message, state: FSMContext) -> None:
+        price = _parse_price(message.text or "")
+        if price is None or price <= 0:
+            await message.answer("❌ Musbat butun son kiriting (so'm, masalan 12000):")
+            return
+
+        await state.set_state(None)
+        await _finish_price_step(message, state, price)
+
+    async def _finish_price_step(reply_target: Message, state: FSMContext, unit_price: int) -> None:
+        data = await state.get_data()
+        product = data.get("purchase_current")
+        quantity = data.get("purchase_quantity")
+        if product is None or quantity is None:
+            await state.clear()
+            await reply_target.answer("❌ Bekor qilindi.")
+            return
+
+        previous_price = product.get("last_price")
+        if supplier_purchase.should_check_price_increase(unit_price, previous_price):
+            spike = await supplier_purchase.check_price_spike(
+                openai_client, product["product_name"], previous_price, unit_price
+            )
+            if spike:
+                await state.update_data(purchase_unit_price=unit_price)
+                await state.set_state(SupplierPurchaseStates.price_flag_reason)
+                await reply_target.answer("⚠️ Bu mahsulot narxi odatdagidan ancha oshgan.\nSababi nima?")
+                return
+
+        await _save_purchase_and_continue(reply_target, state, unit_price, price_flagged=False, price_flag_reason=None)
+
+    @dp.message(StateFilter(SupplierPurchaseStates.price_flag_reason))
+    async def supplier_purchase_price_flag_reason(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("❌ Bo'sh matn qabul qilinmaydi. Qisqacha sababini yozing:")
+            return
+
+        data = await state.get_data()
+        unit_price = data.get("purchase_unit_price")
+        if unit_price is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        await _save_purchase_and_continue(message, state, unit_price, price_flagged=True, price_flag_reason=text)
+
+    async def _save_purchase_and_continue(
+        reply_target: Message, state: FSMContext, unit_price: int, *, price_flagged: bool, price_flag_reason: str | None,
+    ) -> None:
+        data = await state.get_data()
+        product = data["purchase_current"]
+        quantity = data["purchase_quantity"]
+        purchased_by = data["purchased_by"]
+
+        purchase_id = supplier_purchase.record_purchase(
+            product["product_name"], quantity, product["unit"], unit_price, purchased_by,
+            price_flagged=price_flagged, price_flag_reason=price_flag_reason,
+        )
+        if purchase_id is None:
+            await state.clear()
+            await reply_target.answer("❌ Xarid saqlanmadi. Qaytadan /xarid bilan urinib ko'ring.")
+            return
+
+        line_total = quantity * unit_price
+        session_total = (data.get("session_total") or 0.0) + line_total
+        await reply_target.answer(
+            f"✅ {product['product_name']} — {_format_qty(quantity)} {product['unit']} × "
+            f"{_format_money(unit_price)} = {_format_money(line_total)} so'm"
+        )
+
+        products = data.get("supplier_products") or []
+        remaining = [
+            p for p in products
+            if not (p["product_name"] == product["product_name"] and p["unit"] == product["unit"])
+        ]
+        await state.update_data(
+            supplier_products=remaining, purchase_current=None, purchase_quantity=None,
+            purchase_unit_price=None, session_total=session_total,
+        )
+        await state.set_state(None)
+
+        if remaining:
+            await reply_target.answer(_supplier_summary_text(remaining), reply_markup=_supplier_products_kb(remaining))
+            return
+
+        await reply_target.answer(f"💰 Umumiy bozorlik: {_format_money(session_total)} so'm")
+
+    @dp.callback_query(F.data == "sup_add_product")
+    async def supplier_purchase_add_product_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        data = await state.get_data()
+        if "purchased_by" not in data:
+            await state.update_data(purchased_by=callback.from_user.id, supplier_products=data.get("supplier_products") or [], session_total=data.get("session_total") or 0.0)
+
+        await state.set_state(SupplierPurchaseStates.new_product_name)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Mahsulot nomini kiriting:")
+        await callback.answer()
+
+    @dp.message(StateFilter(SupplierPurchaseStates.new_product_name))
+    async def supplier_purchase_add_product_name(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("❌ Mahsulot nomini kiriting:")
+            return
+
+        await state.update_data(new_product_name=text)
+        await state.set_state(SupplierPurchaseStates.new_product_quantity)
+        await message.answer("Real olingan miqdorni kiriting (masalan 5):")
+
+    @dp.message(StateFilter(SupplierPurchaseStates.new_product_quantity))
+    async def supplier_purchase_add_product_quantity(message: Message, state: FSMContext) -> None:
+        quantity = _parse_decimal(message.text or "")
+        if quantity is None or quantity <= 0:
+            await message.answer("❌ Musbat son kiriting:")
+            return
+
+        await state.update_data(new_product_quantity=quantity)
+        await state.set_state(None)
+        await message.answer("Birlikni tanlang:", reply_markup=_unit_choice_kb())
+
+    @dp.callback_query(F.data.startswith("sup_new_unit:"))
+    async def supplier_purchase_add_product_unit(callback: CallbackQuery, state: FSMContext) -> None:
+        unit = callback.data.split(":", 1)[1]
+        if unit not in shift_deficiency.KNOWN_UNITS:
+            await callback.answer()
+            return
+
+        await state.update_data(new_product_unit=unit)
+        await state.set_state(SupplierPurchaseStates.new_product_price)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Birlik narxini kiriting (so'm):")
+        await callback.answer()
+
+    @dp.message(StateFilter(SupplierPurchaseStates.new_product_price))
+    async def supplier_purchase_add_product_price(message: Message, state: FSMContext) -> None:
+        price = _parse_price(message.text or "")
+        if price is None or price <= 0:
+            await message.answer("❌ Musbat butun son kiriting (so'm):")
+            return
+
+        data = await state.get_data()
+        name = data.get("new_product_name")
+        quantity = data.get("new_product_quantity")
+        unit = data.get("new_product_unit")
+        purchased_by = data.get("purchased_by") or message.from_user.id
+
+        if not name or quantity is None or unit is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        last = supplier_purchases_repo.get_price_history(name, unit)
+        synthetic_product = {
+            "product_name": name, "unit": unit, "total_quantity": quantity, "by_branch": {},
+            "last_price": last["unit_price"] if last else None,
+        }
+        await state.update_data(
+            purchase_current=synthetic_product, purchase_quantity=quantity, purchased_by=purchased_by,
+        )
+        await state.set_state(None)
+        await _finish_price_step(message, state, price)

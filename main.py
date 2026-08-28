@@ -710,7 +710,7 @@ dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
 
 onboarding.register(dp)
 approval.register(dp)
-performance_bot.register(dp)
+performance_bot.register(dp, openai_client)
 cash_shift_bot.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)

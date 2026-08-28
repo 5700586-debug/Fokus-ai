@@ -122,7 +122,7 @@ async def test_xarid_accepts_real_quantity_above_requested_and_shows_total(bot_d
     sent = await send(main.dp, bot, 777, text="12000")
     combined = " ".join(t for t in texts(sent) if t)
     assert "105.7 kg × 12 000 = 1 268 400" in combined
-    assert "Umumiy bozorlik: 1 268 400" in combined
+    assert "Filiallarga taqsimlash" in combined  # taqsimot bosqichi navbatdagi (alohida test fayli)
 
 
 async def test_xarid_unchanged_price_button_reuses_last_price(bot_dp):
@@ -260,4 +260,4 @@ async def test_xarid_add_ad_hoc_product_not_in_original_list(bot_dp):
 
     combined = " ".join(t for t in texts(sent) if t)
     assert "Sham — 4 dona × 5 000 = 20 000" in combined
-    assert "Umumiy bozorlik: 20 000" in combined
+    assert "Filiallarga taqsimlash" in combined  # taqsimot bosqichi navbatdagi (alohida test fayli)

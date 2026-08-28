@@ -11,6 +11,7 @@ oddiy fallback).
 from openai import AsyncOpenAI
 
 import company_time
+from repositories import shift_deficiencies as deficiency_repo
 from repositories import supplier_purchases as repo
 from services import shift_deficiency
 
@@ -73,3 +74,48 @@ def record_purchase(
         name, quantity, unit, unit_price, purchased_by, company_time.today().isoformat(),
         price_flagged, price_flag_reason,
     )
+
+
+def save_allocations(purchase_id: int, allocations: dict[str, float]) -> None:
+    """``allocations`` — {branch: real_quantity}. Filial so'ragan
+    miqdordan REAL ko'p bo'lishi mumkin — bu yerda hech qanday
+    "so'ralgandan oshmasin" cheklovi yo'q (bot qatlamida faqat JAMI
+    xarid miqdoridan oshmasligi tekshiriladi). FIFO yo'q — ta'minotchi
+    o'zi real kiritgan qiymat aynan shu holicha yoziladi."""
+    for branch, quantity in allocations.items():
+        if quantity and quantity > 0:
+            repo.add_allocation(purchase_id, branch, quantity)
+
+
+def resolve_deficiency_items(item_ids: list[int]) -> None:
+    """Shu filial uchun taqsimot bajarilgan bozorlik item'larini
+    "keldi" deb yopadi — mavjud ``shift_deficiency`` naqshi bilan bir
+    xil (``repositories.shift_deficiencies.mark_item_resolved``)."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    for item_id in item_ids:
+        deficiency_repo.mark_item_resolved(item_id, now)
+
+
+def get_branch_report_for_date(purchase_date: str) -> dict:
+    """Har filial uchun pozitsiyalar + jami, va barcha filiallar
+    bo'yicha umumiy summa. ``branch_item_total = real_allocated_qty
+    × purchase_unit_price``."""
+    rows = repo.get_allocations_for_date(purchase_date)
+
+    by_branch: dict[str, dict] = {}
+    grand_total = 0.0
+    for row in rows:
+        item_total = row["quantity"] * row["unit_price"]
+        bucket = by_branch.setdefault(row["branch"], {"items": [], "total": 0.0})
+        bucket["items"].append(
+            {
+                "product_name": row["product_name"], "quantity": row["quantity"],
+                "unit": row["unit"], "unit_price": row["unit_price"], "item_total": item_total,
+            }
+        )
+        bucket["total"] += item_total
+        grand_total += item_total
+
+    return {"by_branch": by_branch, "grand_total": grand_total}

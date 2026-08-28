@@ -47,3 +47,38 @@ def get_price_history(product_name: str, unit: str) -> dict | None:
         conn.close()
 
     return dict(row) if row else None
+
+
+def add_allocation(purchase_id: int, branch: str, quantity: float) -> int:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO supplier_purchase_allocations (purchase_id, branch, quantity, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (purchase_id, branch, quantity, _now()),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_allocations_for_date(purchase_date: str) -> list[dict]:
+    """Shu sanadagi barcha xaridlarning filiallar bo'yicha taqsimoti —
+    filial hisobotini chiqarish uchun, xarid ma'lumotlari (mahsulot
+    nomi, birlik narxi) bilan birga."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT a.branch AS branch, a.quantity AS quantity, "
+            "p.product_name AS product_name, p.unit AS unit, p.unit_price AS unit_price "
+            "FROM supplier_purchase_allocations a "
+            "JOIN supplier_purchases p ON p.id = a.purchase_id "
+            "WHERE p.purchase_date = ? "
+            "ORDER BY a.branch, p.product_name",
+            (purchase_date,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]

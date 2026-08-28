@@ -28,6 +28,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
+from config import RECRUITING_BRANCH_NAMES
 from db import IntegrityError
 from repositories import supplier_purchases as supplier_purchases_repo
 from repositories import vehicles as vehicles_repo
@@ -107,6 +108,7 @@ class SupplierPurchaseStates(StatesGroup):
     new_product_name = State()
     new_product_quantity = State()
     new_product_price = State()
+    allocation_branch_quantity = State()
 
 
 def _format_qty(value: float) -> str:
@@ -159,6 +161,69 @@ def _unit_choice_kb() -> InlineKeyboardMarkup:
             for unit in shift_deficiency.KNOWN_UNITS
         ]]
     )
+
+
+def _allocation_branches_for(product: dict) -> dict[str, dict]:
+    """Taqsimot uchun filiallar ro'yxati: bozorlik ro'yxatidan
+    kelgan mahsulotda kim so'ragan bo'lsa o'sha filiallar (``by_branch``);
+    bozorda esiga tushib qo'shilgan (ad-hoc) mahsulotda hech kim
+    so'ramagan, shuning uchun mavjud filial ro'yxati (``RECRUITING_
+    BRANCH_NAMES`` — hardcode emas) "so'ralgan: 0" bilan ishlatiladi."""
+    by_branch = product.get("by_branch") or {}
+    if by_branch:
+        return by_branch
+    return {branch: {"quantity": 0.0, "item_ids": []} for branch in RECRUITING_BRANCH_NAMES}
+
+
+def _allocation_summary_text(
+    product_name: str, unit: str, purchased_qty: float, by_branch: dict, alloc_values: dict
+) -> str:
+    lines = [f"🏪 Filiallarga taqsimlash — {product_name} ({_format_qty(purchased_qty)} {unit} olindi)", ""]
+    for branch, info in by_branch.items():
+        current = alloc_values.get(branch, 0.0)
+        lines.append(
+            f"{branch} — so'ralgan: {_format_qty(info['quantity'])} {unit}, "
+            f"hozircha: {_format_qty(current)} {unit}"
+        )
+    remaining = purchased_qty - sum(alloc_values.values())
+    lines.append("")
+    lines.append(f"Qoldi: {_format_qty(remaining)} {unit}")
+    return "\n".join(lines)
+
+
+def _allocation_kb(branches: list[str], unit: str, alloc_values: dict, purchased_qty: float) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"{branch}: {_format_qty(alloc_values.get(branch, 0.0))} {unit}",
+            callback_data=f"sup_alloc_branch:{index}",
+        )]
+        for index, branch in enumerate(branches)
+    ]
+    remaining = purchased_qty - sum(alloc_values.values())
+    if abs(remaining) < 1e-9:
+        rows.append([InlineKeyboardButton(text="✅ Yakunlash", callback_data="sup_alloc_finish")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _branch_report_text(report: dict) -> str:
+    by_branch = report["by_branch"]
+    if not by_branch:
+        return "ℹ️ Bugun uchun filiallarga taqsimlangan xarid yo'q."
+
+    sections = []
+    for branch, bucket in by_branch.items():
+        lines = [f"🏢 {branch}", ""]
+        for item in bucket["items"]:
+            lines.append(
+                f"{item['product_name']} — {_format_qty(item['quantity'])} {item['unit']} × "
+                f"{_format_money(item['unit_price'])} = {_format_money(item['item_total'])} so'm"
+            )
+        lines.append("")
+        lines.append(f"💰 Jami: {_format_money(bucket['total'])} so'm")
+        sections.append("\n".join(lines))
+
+    sections.append(f"💰 Umumiy bozorlik: {_format_money(report['grand_total'])} so'm")
+    return "\n\n\n".join(sections)
 
 
 def _supplier_summary_text(products: list[dict]) -> str:
@@ -871,7 +936,6 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         line_total = quantity * unit_price
-        session_total = (data.get("session_total") or 0.0) + line_total
         await reply_target.answer(
             f"✅ {product['product_name']} — {_format_qty(quantity)} {product['unit']} × "
             f"{_format_money(unit_price)} = {_format_money(line_total)} so'm"
@@ -882,17 +946,123 @@ def register(dp: Dispatcher, openai_client) -> None:
             p for p in products
             if not (p["product_name"] == product["product_name"] and p["unit"] == product["unit"])
         ]
+        by_branch = _allocation_branches_for(product)
+        branch_names = list(by_branch.keys())
         await state.update_data(
             supplier_products=remaining, purchase_current=None, purchase_quantity=None,
-            purchase_unit_price=None, session_total=session_total,
+            purchase_unit_price=None,
+            alloc_purchase_id=purchase_id, alloc_product=product, alloc_branches=branch_names,
+            alloc_by_branch=by_branch, alloc_values={}, alloc_purchased_qty=quantity,
         )
         await state.set_state(None)
+        await reply_target.answer(
+            _allocation_summary_text(product["product_name"], product["unit"], quantity, by_branch, {}),
+            reply_markup=_allocation_kb(branch_names, product["unit"], {}, quantity),
+        )
 
-        if remaining:
-            await reply_target.answer(_supplier_summary_text(remaining), reply_markup=_supplier_products_kb(remaining))
+    @dp.callback_query(F.data.startswith("sup_alloc_branch:"))
+    async def supplier_purchase_alloc_branch_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
             return
 
-        await reply_target.answer(f"💰 Umumiy bozorlik: {_format_money(session_total)} so'm")
+        index = int(callback.data.split(":", 1)[1])
+        data = await state.get_data()
+        branches = data.get("alloc_branches") or []
+        product = data.get("alloc_product")
+        if index < 0 or index >= len(branches) or product is None:
+            await callback.answer()
+            return
+
+        branch = branches[index]
+        await state.update_data(alloc_current_branch=branch)
+        await state.set_state(SupplierPurchaseStates.allocation_branch_quantity)
+        await callback.answer()
+        await callback.message.answer(f"{branch} uchun real necha {product['unit']} berildi?")
+
+    @dp.message(StateFilter(SupplierPurchaseStates.allocation_branch_quantity))
+    async def supplier_purchase_alloc_quantity(message: Message, state: FSMContext) -> None:
+        quantity = _parse_decimal(message.text or "")
+        if quantity is None or quantity < 0:
+            await message.answer("❌ 0 yoki musbat son kiriting:")
+            return
+
+        data = await state.get_data()
+        branch = data.get("alloc_current_branch")
+        values = dict(data.get("alloc_values") or {})
+        purchased_qty = data.get("alloc_purchased_qty")
+        product = data.get("alloc_product")
+        by_branch = data.get("alloc_by_branch") or {}
+        branches = data.get("alloc_branches") or []
+        if branch is None or purchased_qty is None or product is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        other_total = sum(v for b, v in values.items() if b != branch)
+        if other_total + quantity > purchased_qty + 1e-9:
+            remaining = purchased_qty - other_total
+            await message.answer(
+                f"❌ Jami taqsimot {_format_qty(purchased_qty)} {product['unit']}dan oshib ketadi. "
+                f"Qoldi: {_format_qty(max(remaining, 0))} {product['unit']}."
+            )
+            return
+
+        values[branch] = quantity
+        await state.update_data(alloc_values=values, alloc_current_branch=None)
+        await state.set_state(None)
+
+        await message.answer(
+            _allocation_summary_text(product["product_name"], product["unit"], purchased_qty, by_branch, values),
+            reply_markup=_allocation_kb(branches, product["unit"], values, purchased_qty),
+        )
+
+    @dp.callback_query(F.data == "sup_alloc_finish")
+    async def supplier_purchase_alloc_finish(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+            return
+
+        data = await state.get_data()
+        purchase_id = data.get("alloc_purchase_id")
+        values = data.get("alloc_values") or {}
+        purchased_qty = data.get("alloc_purchased_qty")
+        product = data.get("alloc_product")
+        by_branch = data.get("alloc_by_branch") or {}
+        if purchase_id is None or purchased_qty is None or product is None:
+            await callback.answer()
+            return
+
+        remaining = purchased_qty - sum(values.values())
+        if abs(remaining) > 1e-9:
+            await callback.answer(f"Hali {_format_qty(remaining)} {product['unit']} taqsimlanmagan.", show_alert=True)
+            return
+
+        supplier_purchase.save_allocations(purchase_id, values)
+        for branch, quantity in values.items():
+            if quantity and quantity > 0:
+                item_ids = by_branch.get(branch, {}).get("item_ids") or []
+                if item_ids:
+                    supplier_purchase.resolve_deficiency_items(item_ids)
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("✅ Taqsimlandi.")
+        await callback.message.answer(f"✅ {product['product_name']} filiallarga taqsimlandi.")
+        await _finish_current_product_and_continue(callback.message, state)
+
+    async def _finish_current_product_and_continue(reply_target: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        products = data.get("supplier_products") or []
+        await state.update_data(
+            alloc_purchase_id=None, alloc_product=None, alloc_branches=None,
+            alloc_by_branch=None, alloc_values=None, alloc_purchased_qty=None,
+        )
+
+        if products:
+            await reply_target.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
+            return
+
+        await state.clear()
+        report = supplier_purchase.get_branch_report_for_date(company_time.today().isoformat())
+        await reply_target.answer(_branch_report_text(report))
 
     @dp.callback_query(F.data == "sup_add_product")
     async def supplier_purchase_add_product_start(callback: CallbackQuery, state: FSMContext) -> None:

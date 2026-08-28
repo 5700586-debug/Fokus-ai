@@ -62,10 +62,24 @@ async def _confirm_received_amount(main, bot, user_id: int, amount: str):
     return [m for m in sent if getattr(m, "text", None)]
 
 
+async def _clear_deficiency_gate(main, bot, user_id: int) -> None:
+    """Yangi kamchilik hisoboti gate'i (bozor/firma/kechagi kelmaganlar
+    — qarang ``cash_shift_bot.py``dagi ``DeficiencyStates``) endi
+    ``/closeshift``dan OLDIN turadi. Bu test fayli gate mavjud
+    bo'lishidan oldin yozilgan, shuning uchun bu yerda faqat 3
+    qadamning bozor/firma qismini "bo'sh" deb tezda o'tkazib yuboradi
+    (kechagi ro'yxati bo'sh bo'lgani uchun avtomatik o'tadi) — testning
+    o'zi sinayotgan smena-yopish oqimiga tegilmaydi.
+    """
+    await send_callback(main.dp, bot, user_id, data="csdef_none", target_chat_id=user_id)  # bozor yo'q
+    await send_callback(main.dp, bot, user_id, data="csdef_none", target_chat_id=user_id)  # firma yo'q
+
+
 async def _close_shift_happy_path(
     main, bot, user_id: int, cash_sales="100000", card_sales="0", other="0", actual="100000"
 ):
     await send(main.dp, bot, user_id, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, user_id)
     await send(main.dp, bot, user_id, photo_file_id="sales_photo")
     await send(main.dp, bot, user_id, photo_file_id="cash_photo")
     await send(main.dp, bot, user_id, text=cash_sales)
@@ -261,6 +275,7 @@ async def test_closeshift_confirm_skipped_when_already_pending_for_same_kassir(b
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -422,6 +437,7 @@ async def test_supervisor_recheck_message_has_no_raw_slash_command(bot_dp):
     for i in range(3):
         await send(main.dp, bot, 111, text="/closeshift")
         if i == 0:
+            await _clear_deficiency_gate(main, bot, 111)
             await send(main.dp, bot, 111, photo_file_id="sales_photo")
             await send(main.dp, bot, 111, photo_file_id="cash_photo")
         await send(main.dp, bot, 111, text="100000")

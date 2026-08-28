@@ -7,6 +7,8 @@ hali Null) — kassir savdo/xarajat/qoldiq raqamlarini har doim qo'lda
 kiritadi, rasmlar faqat hujjat sifatida ilova qilinadi.
 """
 
+import re
+
 import company_time
 from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
@@ -25,7 +27,7 @@ from aiogram.types import (
 from config import FOUNDER_ID
 from employees import get_profile
 from providers.file_storage import get_file_storage_provider
-from services import cash_expense, cash_shift, chat_cleanup, permissions
+from services import cash_expense, cash_shift, chat_cleanup, permissions, shift_deficiency
 
 _CLOSESHIFT_WORKFLOW = "cash_shift_close"
 
@@ -150,6 +152,12 @@ class ExpenseStates(StatesGroup):
     description = State()
 
 
+class DeficiencyStates(StatesGroup):
+    item_name = State()
+    item_amount = State()
+    yesterday_missing_numbers = State()
+
+
 def _parse_amount(text: str) -> int | None:
     cleaned = text.strip().replace(" ", "").replace("'", "").replace(",", "")
     if not cleaned.lstrip("-").isdigit():
@@ -272,6 +280,137 @@ async def _send_discrepancy_alert(
 
     for recipient_id in recipients:
         await message.bot.send_message(recipient_id, text, reply_markup=_discrepancy_supervisor_kb(shift["id"]))
+
+
+# --------------------------------------------------------- kamchilik hisoboti --
+
+_QUANTITY_UNIT_RE = re.compile(
+    r"^\s*(\d+(?:[.,]\d+)?)\s*(" + "|".join(shift_deficiency.KNOWN_UNITS) + r")\s*$", re.IGNORECASE
+)
+
+_DEFICIENCY_NONE_LABELS = {
+    shift_deficiency.CATEGORY_MARKET: "🚫 Bugun bozor kamchiligi yo'q",
+    shift_deficiency.CATEGORY_COMPANY: "🚫 Bugun firma zakazi yo'q",
+}
+
+
+def _parse_quantity_unit(text: str) -> tuple[float, str] | None:
+    match = _QUANTITY_UNIT_RE.match(text or "")
+    if not match:
+        return None
+
+    quantity = float(match.group(1).replace(",", "."))
+    if quantity <= 0:
+        return None
+    return quantity, match.group(2).lower()
+
+
+def _parse_number_list(text: str, max_number: int) -> list[int] | None:
+    cleaned = (text or "").strip()
+    if cleaned == "0":
+        return []
+
+    parts = [part.strip() for part in cleaned.replace(" ", ",").split(",") if part.strip()]
+    if not parts:
+        return None
+
+    numbers: list[int] = []
+    for part in parts:
+        if not part.isdigit():
+            return None
+        number = int(part)
+        if number < 1 or number > max_number:
+            return None
+        numbers.append(number)
+    return numbers
+
+
+def _deficiency_start_kb(category: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=_DEFICIENCY_NONE_LABELS[category], callback_data="csdef_none"),
+    ]])
+
+
+def _deficiency_more_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="➕ Yana qo'shish", callback_data="csdef_add_more"),
+        InlineKeyboardButton(text="✅ Tugatish", callback_data="csdef_done"),
+    ]])
+
+
+def _deficiency_yesterday_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha", callback_data="csdef_yesterday_confirm"),
+        InlineKeyboardButton(text="✏️ Qayta tanlash", callback_data="csdef_yesterday_retry"),
+    ]])
+
+
+async def _enter_close_shift_photo_flow(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    if shift.get("sales_report_photo_ref") and shift.get("cash_report_photo_ref"):
+        # Qayta urinish — rasmlar allaqachon yuborilgan, qayta so'ralmaydi.
+        await state.set_state(CloseShiftStates.cash_sales)
+        sent = await reply_target.answer(
+            "🔁 Qayta tekshiring. Bugungi naqd savdo summasini kiriting:",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        return
+
+    await state.set_state(CloseShiftStates.sales_photo)
+    sent = await reply_target.answer(
+        "📸 Kompyuterdagi kunlik savdo hisobotining rasmini yuboring:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+
+async def _enter_yesterday_review(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    items = shift_deficiency.get_yesterday_open_items(shift["id"])
+    if not items:
+        shift_deficiency.mark_yesterday_step_done(shift["id"])
+        await _enter_deficiency_step(reply_target, state, shift)
+        return
+
+    await state.update_data(
+        deficiency_yesterday_items=[{"id": item["id"], "product_name": item["product_name"]} for item in items]
+    )
+    await state.set_state(DeficiencyStates.yesterday_missing_numbers)
+    lines = [f"{index + 1} — {item['product_name']}" for index, item in enumerate(items)]
+    sent = await reply_target.answer(
+        "📋 Kechagi kelmagan mahsulotlar:\n\n" + "\n".join(lines) +
+        "\n\nFaqat hali kelmagan raqamlarni yozing (masalan: 1, 3). Hammasi kelgan bo'lsa, 0 yozing."
+    )
+    chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+
+async def _enter_deficiency_step(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    step = shift_deficiency.get_next_step(shift["id"])
+
+    if step == shift_deficiency.STEP_MARKET:
+        await state.update_data(deficiency_category=shift_deficiency.CATEGORY_MARKET)
+        await state.set_state(DeficiencyStates.item_name)
+        sent = await reply_target.answer(
+            "🛒 Bozor uchun: bugun bozor orqali olinadigan kamchilik mahsuloti bo'lsa, nomini yozing.",
+            reply_markup=_deficiency_start_kb(shift_deficiency.CATEGORY_MARKET),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        return
+
+    if step == shift_deficiency.STEP_COMPANY:
+        await state.update_data(deficiency_category=shift_deficiency.CATEGORY_COMPANY)
+        await state.set_state(DeficiencyStates.item_name)
+        sent = await reply_target.answer(
+            "🏢 Firmaga zakaz: firma/zavod orqali keladigan mahsulot bo'lsa, nomini yozing.",
+            reply_markup=_deficiency_start_kb(shift_deficiency.CATEGORY_COMPANY),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        return
+
+    if step == shift_deficiency.STEP_YESTERDAY:
+        await _enter_yesterday_review(reply_target, state, shift)
+        return
+
+    await _enter_close_shift_photo_flow(reply_target, state, shift)
 
 
 def register(dp: Dispatcher) -> None:
@@ -657,23 +796,129 @@ def register(dp: Dispatcher) -> None:
             return
 
         await state.update_data(shift_id=shift["id"])
+        await _enter_deficiency_step(message, state, shift)
 
-        if shift.get("sales_report_photo_ref") and shift.get("cash_report_photo_ref"):
-            # Qayta urinish — rasmlar allaqachon yuborilgan, qayta so'ralmaydi.
-            await state.set_state(CloseShiftStates.cash_sales)
-            sent = await message.answer(
-                "🔁 Qayta tekshiring. Bugungi naqd savdo summasini kiriting:",
-                reply_markup=ReplyKeyboardRemove(),
-            )
-            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+    # ------------------------------------------------ kamchilik hisoboti (V1) --
+
+    @dp.message(StateFilter(DeficiencyStates.item_name))
+    async def deficiency_item_name(message: Message, state: FSMContext) -> None:
+        name = (message.text or "").strip()
+        if not name:
+            await message.answer("❌ Mahsulot nomini yozing.")
             return
 
-        await state.set_state(CloseShiftStates.sales_photo)
-        sent = await message.answer(
-            "📸 Kompyuterdagi kunlik savdo hisobotining rasmini yuboring:",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await state.update_data(deficiency_item_name=name)
+        await state.set_state(DeficiencyStates.item_amount)
+        data = await state.get_data()
+        sent = await message.answer("Miqdorini kiriting (masalan: 10 kg). Birliklar: kg, dona, litr, quti.")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+
+    @dp.message(StateFilter(DeficiencyStates.item_amount))
+    async def deficiency_item_amount(message: Message, state: FSMContext) -> None:
+        parsed = _parse_quantity_unit(message.text or "")
+        if parsed is None:
+            await message.answer("❌ Masalan: 10 kg / 5 dona / 2 litr / 3 quti — shu formatda kiriting:")
+            return
+
+        quantity, unit = parsed
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        category = data.get("deficiency_category")
+        if shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        if category == shift_deficiency.CATEGORY_MARKET:
+            shift_deficiency.add_market_item(shift["id"], message.from_user.id, data["deficiency_item_name"], quantity, unit)
+        else:
+            shift_deficiency.add_company_item(shift["id"], message.from_user.id, data["deficiency_item_name"], quantity, unit)
+
+        await state.set_state(None)
+        sent = await message.answer("✅ Qo'shildi.", reply_markup=_deficiency_more_kb())
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+    @dp.callback_query(F.data == "csdef_add_more")
+    async def deficiency_add_more(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        if data.get("deficiency_category") not in shift_deficiency.KNOWN_CATEGORIES:
+            await callback.answer()
+            return
+
+        await state.set_state(DeficiencyStates.item_name)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        sent = await callback.message.answer("Mahsulot nomini yozing:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        await callback.answer()
+
+    @dp.callback_query(F.data.in_({"csdef_done", "csdef_none"}))
+    async def deficiency_step_done(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        category = data.get("deficiency_category")
+        if shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+            await callback.answer()
+            return
+
+        if category == shift_deficiency.CATEGORY_MARKET:
+            shift_deficiency.mark_market_step_done(shift["id"])
+        else:
+            shift_deficiency.mark_company_step_done(shift["id"])
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _enter_deficiency_step(callback.message, state, shift)
+
+    @dp.message(StateFilter(DeficiencyStates.yesterday_missing_numbers))
+    async def deficiency_yesterday_numbers(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        items = data.get("deficiency_yesterday_items") or []
+        numbers = _parse_number_list(message.text or "", len(items))
+        if numbers is None:
+            await message.answer(
+                "❌ Faqat ro'yxatdagi raqamlarni vergul bilan yozing (masalan: 1, 3), yoki hammasi kelgan bo'lsa 0:"
+            )
+            return
+
+        missing = [items[number - 1] for number in numbers]
+        names = ", ".join(item["product_name"] for item in missing) or "yo'q"
+        await state.update_data(deficiency_yesterday_missing_ids=[item["id"] for item in missing])
+        await state.set_state(None)
+        sent = await message.answer(
+            f"Kelmagan: {names}. To'g'rimi?", reply_markup=_deficiency_yesterday_confirm_kb()
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+
+    @dp.callback_query(F.data == "csdef_yesterday_retry")
+    async def deficiency_yesterday_retry(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        if not data.get("deficiency_yesterday_items"):
+            await callback.answer()
+            return
+
+        await state.set_state(DeficiencyStates.yesterday_missing_numbers)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        sent = await callback.message.answer(
+            "Faqat hali kelmagan raqamlarni qayta yozing (masalan: 1, 3), yoki hammasi kelgan bo'lsa 0:"
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        await callback.answer()
+
+    @dp.callback_query(F.data == "csdef_yesterday_confirm")
+    async def deficiency_yesterday_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        if shift is None:
+            await state.clear()
+            await callback.answer()
+            return
+
+        missing_ids = data.get("deficiency_yesterday_missing_ids") or []
+        shift_deficiency.confirm_yesterday_review(shift["id"], missing_ids)
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("✅ Qayd etildi.")
+        await _enter_deficiency_step(callback.message, state, shift)
 
     @dp.message(StateFilter(CloseShiftStates.sales_photo), F.photo)
     async def closeshift_sales_photo(message: Message, state: FSMContext) -> None:

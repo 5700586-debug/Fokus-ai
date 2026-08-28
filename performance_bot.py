@@ -107,7 +107,6 @@ class SupplierPurchaseStates(StatesGroup):
     price_flag_reason = State()
     new_product_name = State()
     new_product_quantity = State()
-    new_product_price = State()
     allocation_branch_quantity = State()
 
 
@@ -1107,30 +1106,19 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer()
             return
 
-        await state.update_data(new_product_unit=unit)
-        await state.set_state(SupplierPurchaseStates.new_product_price)
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("Birlik narxini kiriting (so'm):")
-        await callback.answer()
-
-    @dp.message(StateFilter(SupplierPurchaseStates.new_product_price))
-    async def supplier_purchase_add_product_price(message: Message, state: FSMContext) -> None:
-        price = _parse_price(message.text or "")
-        if price is None or price <= 0:
-            await message.answer("❌ Musbat butun son kiriting (so'm):")
-            return
-
         data = await state.get_data()
         name = data.get("new_product_name")
         quantity = data.get("new_product_quantity")
-        unit = data.get("new_product_unit")
-        purchased_by = data.get("purchased_by") or message.from_user.id
-
-        if not name or quantity is None or unit is None:
-            await state.clear()
-            await message.answer("❌ Bekor qilindi.")
+        purchased_by = data.get("purchased_by") or callback.from_user.id
+        if not name or quantity is None:
+            await callback.answer()
             return
 
+        # Bozorda esiga tushib qo'shilgan mahsulot ham, ro'yxatdan
+        # tanlangani bilan bir xil narx UX'ga ega bo'lsin: agar shu
+        # nom+birlik uchun oldingi xarid narxi bo'lsa, ♻️/✏️ tanlovi
+        # ko'rsatiladi (mavjud _finish_price_step/_price_choice_kb
+        # qayta ishlatiladi, alohida yo'l emas).
         last = supplier_purchases_repo.get_price_history(name, unit)
         synthetic_product = {
             "product_name": name, "unit": unit, "total_quantity": quantity, "by_branch": {},
@@ -1139,8 +1127,18 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(
             purchase_current=synthetic_product, purchase_quantity=quantity, purchased_by=purchased_by,
         )
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+
+        if synthetic_product["last_price"] is None:
+            await state.set_state(SupplierPurchaseStates.new_price)
+            await callback.message.answer("Birlik narxini kiriting (so'm):")
+            return
+
         await state.set_state(None)
-        await _finish_price_step(message, state, price)
+        await callback.message.answer(
+            f"Oxirgi narx: {_format_money(synthetic_product['last_price'])} so'm", reply_markup=_price_choice_kb()
+        )
 
     # --------------------------------------------------------------- /natijam --
 

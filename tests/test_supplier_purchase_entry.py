@@ -262,6 +262,22 @@ async def test_xarid_add_ad_hoc_product_not_in_original_list(bot_dp):
     assert "Sham — 4 dona × 5 000 = 20 000" in combined
 
 
+async def test_xarid_ad_hoc_product_reuses_price_history_if_previously_bought(bot_dp):
+    main, bot = bot_dp
+    _make_taminotchi(777)
+    supplier_purchases_repo.add_purchase("Sham", 2, "dona", 5000, 777, "2020-01-01", False, None)
+
+    await send(main.dp, bot, 777, text="/xarid")
+    await send_callback(main.dp, bot, 777, data="sup_add_product", target_chat_id=777)
+    await send(main.dp, bot, 777, text="Sham")
+    await send(main.dp, bot, 777, text="4")
+    sent = await send_callback(main.dp, bot, 777, data="sup_new_unit:dona", target_chat_id=777)
+    assert "Oxirgi narx: 5 000" in " ".join(t for t in texts(sent) if t)
+
+    sent = await send_callback(main.dp, bot, 777, data="sup_price_same", target_chat_id=777)
+    assert "4 dona × 5 000 = 20 000" in " ".join(t for t in texts(sent) if t)
+
+
 # ------------------------------------------------------------------ /natijam --
 
 

@@ -32,7 +32,11 @@ jobs:
           {
             echo "FOKUS AI vazifasi."
             echo
-            echo "Avval CLAUDE.md, .claude/rules.md, FOKUS_AI_STATE.md va docs/PROJECT_STATE.md ni o'q."
+            echo "Do not search the codebase."
+            echo "Modify only the specified file/function."
+            echo "No full-suite tests."
+            echo "If another file/change/test is required, STOP and report exactly:"
+            echo "[STOP sababi: ... | Kerakli fayl/ruxsat: ...]"
             echo "NATIVE WINDOWS EXECUTION = 0."
             echo "Barcha test/runtime faqat GitHub Actions ubuntu-latest yoki Render TEST'da."
             echo "Faqat feature/hr-conversational-interview branchida ishlagin."

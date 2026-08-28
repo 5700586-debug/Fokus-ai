@@ -1141,3 +1141,20 @@ def register(dp: Dispatcher, openai_client) -> None:
         )
         await state.set_state(None)
         await _finish_price_step(message, state, price)
+
+    # --------------------------------------------------------------- /natijam --
+
+    @dp.message(Command("natijam"))
+    async def supplier_results_handler(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_SUPPLIER_RESULTS):
+            return
+
+        today = company_time.today().isoformat()
+        stats = shift_deficiency.get_supplier_stats(today, today)
+        await message.answer(
+            "📊 Bugungi natijangiz\n\n"
+            f"Buyurtma: {stats['total']} ta\n"
+            f"Keltirildi: {stats['arrived']} ta\n"
+            f"Kelmadi: {stats['missing']} ta\n"
+            f"Bajarilish: {stats['completion_rate']}%"
+        )

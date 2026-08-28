@@ -396,6 +396,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
         "/grafiksorov — Grafik o'zgartirish so'rovlari",
         permissions.ACTION_MANAGE_DAILY_SCHEDULE,
     ),
+    ("nazoratchi", "/natijam — Ta'minotchi bugungi natijasi", permissions.ACTION_VIEW_SUPPLIER_RESULTS),
     ("kassir", "/openshift — Kassa smenasini ochish", permissions.ACTION_OPEN_CASH_SHIFT),
     ("kassir", "/closeshift — Kassa smenasini yopish", permissions.ACTION_CLOSE_CASH_SHIFT),
     ("kassir", "/expense — Kassa xarajatini kiritish", permissions.ACTION_LOG_CASH_EXPENSE),
@@ -412,6 +413,8 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("savdo_boshligi", "/mealplan — Ovqat rejasini kiritish", permissions.ACTION_ENTER_MEAL_PLAN),
     ("haydovchi", "/drivercheck — Kunlik mashina/servis tekshiruvi", permissions.ACTION_DRIVER_DAILY_CHECK),
     ("taminotchi", "/marketlog — Bozor kuzatuvi qo'shish", permissions.ACTION_LOG_MARKET_OBSERVATION),
+    ("taminotchi", "/xarid — Bugungi bozorlikni xarid qilish", permissions.ACTION_RECORD_SUPPLIER_PURCHASE),
+    ("taminotchi", "/natijam — Bugungi natijangiz", permissions.ACTION_VIEW_SUPPLIER_RESULTS),
     ("moliyachi", "/cashsummary — Kassa xulosasi", permissions.ACTION_VIEW_CASH_SUMMARY),
     ("moliyachi", "/inventorysummary — Ombor xulosasi", permissions.ACTION_VIEW_INVENTORY_SUMMARY),
 ]

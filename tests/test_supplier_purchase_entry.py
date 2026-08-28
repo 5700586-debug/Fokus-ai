@@ -260,4 +260,60 @@ async def test_xarid_add_ad_hoc_product_not_in_original_list(bot_dp):
 
     combined = " ".join(t for t in texts(sent) if t)
     assert "Sham — 4 dona × 5 000 = 20 000" in combined
+
+
+# ------------------------------------------------------------------ /natijam --
+
+
+def _make_nazoratchi(user_id: int) -> None:
+    from roles import set_role
+
+    set_role(user_id, "nazoratchi", set_by=FOUNDER_ID)
+
+
+def _make_plain_kassir(user_id: int) -> None:
+    from roles import set_role
+
+    set_role(user_id, "kassir", set_by=FOUNDER_ID)
+
+
+async def test_natijam_shows_market_only_stats_for_supplier(bot_dp):
+    main, bot = bot_dp
+    _make_taminotchi(777)
+    today = company_time.today().isoformat()
+    shift = _open_shift(1, "Filial-1", today)
+    id1 = shift_deficiency.add_market_item(shift["id"], 1, "Pomidor", 10, "kg")
+    shift_deficiency.add_market_item(shift["id"], 1, "Kartoshka", 5, "kg")
+    shift_deficiency.add_company_item(shift["id"], 1, "Un", 2, "quti")  # company hisobga kirmaydi
+
+    from repositories import shift_deficiencies as deficiency_repo
+
+    deficiency_repo.mark_item_resolved(id1, today + "T10:00:00+00:00")
+
+    sent = await send(main.dp, bot, 777, text="/natijam")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Buyurtma: 2 ta" in combined
+    assert "Keltirildi: 1 ta" in combined
+    assert "Kelmadi: 1 ta" in combined
+    assert "Bajarilish: 50.0%" in combined
+
+
+async def test_natijam_visible_to_nazoratchi_too(bot_dp):
+    main, bot = bot_dp
+    _make_nazoratchi(888)
+    today = company_time.today().isoformat()
+    shift = _open_shift(1, "Filial-1", today)
+    shift_deficiency.add_market_item(shift["id"], 1, "Pomidor", 10, "kg")
+
+    sent = await send(main.dp, bot, 888, text="/natijam")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Buyurtma: 1 ta" in combined
+
+
+async def test_natijam_denied_for_unrelated_role(bot_dp):
+    main, bot = bot_dp
+    _make_plain_kassir(999)
+
+    sent = await send(main.dp, bot, 999, text="/natijam")
+    assert "Buyurtma" not in " ".join(t for t in texts(sent) if t)
     assert "Filiallarga taqsimlash" in combined  # taqsimot bosqichi navbatdagi (alohida test fayli)

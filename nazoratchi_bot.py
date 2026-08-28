@@ -238,11 +238,16 @@ def _employee_label(profile: dict) -> str:
     return f"👤 {full_name}"
 
 
-def _employees_keyboard(branch: str) -> InlineKeyboardMarkup | None:
+def _employees_keyboard(branch: str, *, exclude_user_id: int | None = None) -> InlineKeyboardMarkup | None:
     """Filialdagi aktiv xodimlar — yonma-yon (2 tadan qatorda), o'qishga
     qulay tartibda (familiya/ism bo'yicha, ``list_approved_by_branch``
-    allaqachon shunday saralaydi)."""
+    allaqachon shunday saralaydi). ``exclude_user_id`` — so'rovchi
+    Nazoratchi/Founderning o'zi (agar shu filialda tasodifan approved
+    profil ham bo'lsa) baholanadigan oddiy xodim sifatida ro'yxatga
+    chiqmasin."""
     active_employees = employees.list_approved_by_branch(branch)
+    if exclude_user_id is not None:
+        active_employees = [profile for profile in active_employees if profile["user_id"] != exclude_user_id]
     if not active_employees:
         return None
 
@@ -852,12 +857,12 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Filial topilmadi.", show_alert=True)
             return
 
-        keyboard = _employees_keyboard(branch)
+        keyboard = _employees_keyboard(branch, exclude_user_id=callback.from_user.id)
         if keyboard is None:
             await callback.answer()
             if callback.message:
                 await callback.message.edit_text(
-                    f"🏬 {branch}\n\n👥 Aktiv xodimlar: Ma'lumot yo'q",
+                    f"🏬 {branch}\n\nHozircha bu filialda aktiv xodim mavjud emas.",
                     reply_markup=InlineKeyboardMarkup(
                         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filiallar", callback_data=_CB_BRANCHES)]]
                     ),

@@ -74,7 +74,7 @@ async def test_empty_branch_shows_no_data_placeholder(bot_dp):
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID)
 
     assert _BRANCH in sent[0].text
-    assert "Ma'lumot yo'q" in sent[0].text
+    assert "Hozircha bu filialda aktiv xodim mavjud emas." in sent[0].text
 
 
 async def test_branch_with_employee_shows_paired_employee_buttons(bot_dp):
@@ -89,6 +89,33 @@ async def test_branch_with_employee_shows_paired_employee_buttons(bot_dp):
     assert any("Valiyev" in btn.text for btn in employee_row)
     assert any(btn.callback_data == "nzr_emp:700002" for btn in employee_row)
     assert any(btn.callback_data == "nzr_branches" for row in rows for btn in row)
+
+
+async def test_nazoratchi_does_not_appear_as_gradeable_employee_in_own_branch(bot_dp):
+    """Agar Nazoratchining o'zida (tasodifan) shu filialda approved
+    ``employees`` profili bo'lsa ham, o'zini o'zi baholanadigan oddiy
+    xodim sifatida ko'rmasin — mavjud approved employee mantiqi
+    (``list_approved_by_branch``) o'zgarmaydi, faqat so'rovchining
+    o'z ID'si natijadan chiqarib tashlanadi."""
+    import employees
+
+    main, bot = bot_dp
+    _make_nazoratchi()
+    employees.submit_profile(
+        _NAZORATCHI_ID,
+        {
+            "familiya": "Nazoratchiyev", "ism": "Nazar", "otasining_ismi": "Nazarovich",
+            "branch": _BRANCH, "role_key": "nazoratchi", "contacts": [],
+        },
+    )
+    employees.approve_profile(_NAZORATCHI_ID, approved_by=FOUNDER_ID)
+    _make_kassir(700099)
+
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID)
+
+    rows = sent[0].reply_markup.inline_keyboard
+    assert not any(btn.callback_data == f"nzr_emp:{_NAZORATCHI_ID}" for row in rows for btn in row)
+    assert any(btn.callback_data == "nzr_emp:700099" for row in rows for btn in row)
 
 
 async def test_tapping_employee_shows_simple_card(bot_dp):

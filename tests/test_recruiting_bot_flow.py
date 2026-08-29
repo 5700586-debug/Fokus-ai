@@ -7,8 +7,9 @@ from datetime import date
 
 import pytest
 from aiogram.methods import SendMessage, SendPhoto
-from aiogram.types import Contact, Voice
+from aiogram.types import Contact, ReplyKeyboardRemove, Voice
 
+import recruiting_bot
 from config import FOUNDER_ID
 from repositories import recruiting as recruiting_repo
 from services import recruiting_voice
@@ -790,3 +791,111 @@ async def test_stale_branch_choice_is_rejected_and_current_buttons_reshown(bot_d
 
     application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
     assert application["preferred_branch"] is None
+
+
+# ------------------------------------------------- oddiy fakt step'lar (AI=0) --
+# Bu bo'lim ATAYLAB mavjud ``_answer_basics``/``_answer_fit_filter``
+# yordamchilaridan mustaqil, faqat ``_STEPS_B_C``/``_STEPS_D``dagi
+# HAQIQIY qadam kalitlariga mos xabarlar bilan yuradi (o'sha eski
+# yordamchilar boshqa, allaqachon ishlayotgan testlar uchun saqlanadi
+# — ularga tegilmagan).
+
+
+async def _reach_prev_employer_step(main, bot, candidate_id: int):
+    await send(main.dp, bot, candidate_id, text="Ali Valiyev")  # full_name
+    await send(main.dp, bot, candidate_id, text="12.10.2000")  # birth_date
+    await send(main.dp, bot, candidate_id, text="+998901234567")  # phone
+    await send(main.dp, bot, candidate_id, text="Toshkent")  # residence_area
+    await send_callback(
+        main.dp, bot, candidate_id, "rec_choice:preferred_branch:Chilonzor filiali", target_chat_id=candidate_id
+    )
+    await send(main.dp, bot, candidate_id, text="Bir hafta ichida")  # start_date
+    await send_callback(main.dp, bot, candidate_id, "rec_choice:shift_preference:kunduzgi", target_chat_id=candidate_id)
+    await send_callback(main.dp, bot, candidate_id, "rec_choice:holiday_available:yes", target_chat_id=candidate_id)
+    await send(main.dp, bot, candidate_id, text="3 million so'm")  # prev_salary
+    await send(main.dp, bot, candidate_id, text="4 million so'm")  # expected_salary
+    # "no" bo'lsa alohida qulaylik-so'rovi (follow-up) qadami ochiladi
+    # (qarang ``handle_choice_step_answer``dagi ``accommodation_needed``
+    # maxsus holati) -- shu yerda D bo'limiga to'g'ridan-to'g'ri o'tish
+    # kerak bo'lgani uchun "yes" ishlatiladi.
+    return await send_callback(
+        main.dp, bot, candidate_id, "rec_choice:accommodation_needed:yes", target_chat_id=candidate_id
+    )
+
+
+async def test_residence_area_answer_skips_ai_check_and_advances(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    call_count = 0
+
+    async def _count_off_topic_calls(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return False
+
+    # ``main.py``dagi global ``@dp.errors()`` handler har qanday
+    # istisnoni yutib yuboradi -- shuning uchun bu yerda "chaqirilsa
+    # xato beradi" o'rniga hisoblagich ishlatiladi (mavjud
+    # ``_fail_if_called``/``called`` naqshiga o'xshash).
+    monkeypatch.setattr(recruiting_bot.recruiting_followup, "is_off_topic", _count_off_topic_calls)
+
+    await _start_and_consent(main, bot, CANDIDATE_ID)
+    await _choose_kassir(main, bot, CANDIDATE_ID)
+    await send(main.dp, bot, CANDIDATE_ID, text="Ali Valiyev")  # full_name
+    await send(main.dp, bot, CANDIDATE_ID, text="12.10.2000")  # birth_date
+    await send(main.dp, bot, CANDIDATE_ID, text="+998901234567")  # phone
+
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="Qo'qonboy")  # residence_area
+
+    assert call_count == 0
+    application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
+    assert application["residence_area"] == "Qo'qonboy"
+    assert "Qaysi filialda ishlamoqchisiz?" in _last_text(sent)
+
+
+async def test_prev_employer_free_text_skips_ai_check_and_advances(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    call_count = 0
+
+    async def _count_off_topic_calls(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return False
+
+    monkeypatch.setattr(recruiting_bot.recruiting_followup, "is_off_topic", _count_off_topic_calls)
+
+    await _start_and_consent(main, bot, CANDIDATE_ID)
+    await _choose_kassir(main, bot, CANDIDATE_ID)
+    reach_sent = await _reach_prev_employer_step(main, bot, CANDIDATE_ID)
+    prompt_message = reach_sent[-1]
+    assert prompt_message.reply_markup.keyboard[0][0].text == "❌ Oldin ishlamaganman"
+
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="Correon do'koni, sotuvchi")
+
+    assert call_count == 0
+    application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
+    assert application["prev_employer_text"] == "Correon do'koni, sotuvchi"
+    assert "necha yil" in _last_text(sent).lower()
+
+
+async def test_prev_employer_no_experience_button_stores_canonical_value_and_clears_keyboard(bot_dp):
+    main, bot = bot_dp
+
+    await _start_and_consent(main, bot, CANDIDATE_ID)
+    await _choose_kassir(main, bot, CANDIDATE_ID)
+    await _reach_prev_employer_step(main, bot, CANDIDATE_ID)
+
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="❌ Oldin ishlamaganman")
+
+    application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
+    assert application["prev_employer_text"] == "yo'q"
+
+    next_prompt = sent[-1]
+    assert "necha yil" in (next_prompt.text or "").lower()
+    assert isinstance(next_prompt.reply_markup, ReplyKeyboardRemove)
+
+
+async def test_leave_reason_step_is_not_in_ai_free_bypass_list():
+    """Faqat listed AI-free step_key'lardan tashqarida hech narsa
+    o'zgarmagan -- ``leave_reason`` hozirgidek AI/off-topic
+    tekshiruvidan (va follow-up mantig'idan) o'tishda davom etadi."""
+    assert "leave_reason" not in recruiting_bot._AI_FREE_FACT_STEPS

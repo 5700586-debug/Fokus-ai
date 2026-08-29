@@ -225,7 +225,7 @@ _STEPS_B_C: list[dict] = [
 _STEPS_D: list[dict] = [
     {
         "key": "prev_employer", "kind": "text",
-        "prompt": "Oldingi ish joyingiz va lavozimingiz haqida yozing (bo'lmasa \"yo'q\" deb yozing):",
+        "prompt": "Oldingi ish joyingiz va lavozimingizni yozing:",
         "column": "prev_employer_text",
     },
     {"key": "experience_duration", "kind": "text", "prompt": "U yerda necha yil yoki oy ishlagansiz?", "column": "experience_duration_text"},
@@ -339,6 +339,16 @@ def _closing_text_for(full_name: str | None) -> str:
 def _phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Raqamni yuborish", request_contact=True)]],
+        resize_keyboard=True,
+    )
+
+
+_PREV_EMPLOYER_NO_EXPERIENCE_TEXT = "❌ Oldin ishlamaganman"
+
+
+def _prev_employer_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=_PREV_EMPLOYER_NO_EXPERIENCE_TEXT)]],
         resize_keyboard=True,
     )
 
@@ -556,6 +566,14 @@ async def _send_step_prompt(message: Message, state: FSMContext, step: dict) -> 
         await message.answer(step["prompt"], reply_markup=_choice_kb(step["key"], options))
         return
     await state.set_state(RecruitingStates.collecting_text)
+    if step["key"] == "prev_employer":
+        await message.answer(step["prompt"], reply_markup=_prev_employer_kb())
+        return
+    if step["key"] == "experience_duration":
+        # "prev_employer"dan keyingi qadam -- undagi "❌ Oldin
+        # ishlamaganman" doimiy tugmasi shu yerda almashtiriladi.
+        await message.answer(step["prompt"], reply_markup=ReplyKeyboardRemove())
+        return
     await message.answer(step["prompt"])
 
 
@@ -617,6 +635,19 @@ async def _check_fit_and_maybe_finish(message: Message, state: FSMContext, data:
 # ikkita himoya orqali javob beriladi (qarang services/recruiting_followup.py).
 # Suhbat holati/state machine O'ZGARMAYDI — faqat kutilayotgan savol
 # qayta ko'rsatiladi.
+
+
+# Oddiy fakt javoblari (ism, sana, telefon va h.k.) uchun AI/off-topic
+# tekshiruvi shart emas -- nomzod javobi qanday bo'lishidan qat'i nazar
+# darhol keyingi savolga o'tiladi (real Telegram sinovidan keyingi talab:
+# AI kutish tufayli anketa sekin ko'rinardi).
+_AI_FREE_FACT_STEPS = frozenset(
+    {
+        "full_name", "birth_date", "phone", "residence_area", "start_date",
+        "prev_salary", "expected_salary", "prev_employer", "experience_duration",
+        "job_stability",
+    }
+)
 
 
 async def _enforce_conversation_boundary(message: Message, pending_prompt: str, text: str) -> bool:
@@ -688,7 +719,11 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
         return
 
     pending_prompt = _pending_prompt_for(step_key)
-    if pending_prompt and await _enforce_conversation_boundary(message, pending_prompt, text):
+    if (
+        step_key not in _AI_FREE_FACT_STEPS
+        and pending_prompt
+        and await _enforce_conversation_boundary(message, pending_prompt, text)
+    ):
         return
 
     if step_key == "accommodation_text":
@@ -723,7 +758,10 @@ async def handle_text_step_answer(message: Message, state: FSMContext) -> None:
         await message.answer(step.get("error", "❌ Noto'g'ri format."))
         return
 
-    value = int(text) if step.get("to_int") else text
+    if step_key == "prev_employer" and text == _PREV_EMPLOYER_NO_EXPERIENCE_TEXT:
+        value = "yo'q"
+    else:
+        value = int(text) if step.get("to_int") else text
     recruiting_repo.update_application(data["application_id"], **{step["column"]: value})
     await _advance_after_step(message, state, data)
 

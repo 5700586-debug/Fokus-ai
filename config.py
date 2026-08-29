@@ -130,3 +130,14 @@ RECRUITING_MIN_AGE = int(os.getenv("RECRUITING_MIN_AGE") or "18")
 RECRUITING_BRANCH_NAMES = [
     name.strip() for name in (os.getenv("RECRUITING_BRANCH_NAMES") or "Filial-1,Filial-2").split(",") if name.strip()
 ]
+
+# Ish e'loni uchun filialning HAQIQIY manzili (Founder tomonidan
+# berilgan) — V1 uchun minimal, yangi DB jadvali YO'Q. Faqat
+# ``RECRUITING_BRANCH_NAMES``dagi nomlar bilan mos keladigan filiallar
+# uchun aniq manzil ko'rsatiladi; xaritada yo'q filial uchun ish
+# e'lonida faqat nom ko'rsatiladi (uydirma manzil YO'Q).
+RECRUITING_BRANCH_ADDRESSES: dict[str, str] = {
+    "Derizlik": "Alisher Navoiy ko'chasi, 76-B uy",
+    "Charhiy": "A.T. Xuqandiy mavzesi, 101-A uy",
+    "Navoiy": "Alisher Navoiy mavzesi, 74-A uy",
+}

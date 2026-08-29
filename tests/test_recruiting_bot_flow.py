@@ -55,7 +55,15 @@ async def _start_and_consent(main, bot, candidate_id: int) -> None:
 
 
 async def _choose_kassir(main, bot, candidate_id: int) -> None:
-    await send_callback(main.dp, bot, candidate_id, f"rec_vacancy:{_kassir_id()}", target_chat_id=candidate_id)
+    kassir_id = _kassir_id()
+    # ``preferred_branch`` endi FAQAT shu vakansiyaga ochiq filiallarni
+    # ko'rsatadi (qarang recruiting_bot.py::_branch_options_for_vacancy)
+    # -- test DB'da hech qanday recruiting_vacancy_branches yozuvi
+    # bo'lmagani uchun, boshqa testlar buzilmasin deb bu yerda bir
+    # marta (idempotent) minimal filial biriktiriladi.
+    if not recruiting_repo.list_vacancy_branches(kassir_id):
+        recruiting_repo.set_vacancy_branches(kassir_id, [{"branch_name": "Chilonzor filiali", "headcount": 1}])
+    await send_callback(main.dp, bot, candidate_id, f"rec_vacancy:{kassir_id}", target_chat_id=candidate_id)
 
 
 async def _answer_basics(main, bot, candidate_id: int, birth_year: str = "2000") -> None:
@@ -63,7 +71,9 @@ async def _answer_basics(main, bot, candidate_id: int, birth_year: str = "2000")
     await send(main.dp, bot, candidate_id, text=birth_year)  # birth_year
     await send(main.dp, bot, candidate_id, text="+998901234567")  # phone
     await send(main.dp, bot, candidate_id, text="Toshkent, Chilonzor")  # residence_area
-    await send(main.dp, bot, candidate_id, text="Chilonzor filiali")  # preferred_branch
+    await send_callback(
+        main.dp, bot, candidate_id, "rec_choice:preferred_branch:Chilonzor filiali", target_chat_id=candidate_id
+    )
     await send(main.dp, bot, candidate_id, text="Bir hafta ichida")  # start_date
 
 
@@ -574,3 +584,209 @@ async def test_application_completes_even_when_ai_client_is_unavailable(bot_dp, 
     # kerak — ``source`` maydoni faqat client mavjudligini bildiradi
     # (bu mavjud xatti-harakat), shuning uchun shablon matndan bilamiz.
     assert "mezon baholandi" in founder_messages[0].text
+
+
+# ------------------------------------------ Founder ishga e'lon berish (main.py) --
+
+
+def _extract_buttons(sent_message):
+    rows = getattr(sent_message.reply_markup, "inline_keyboard", None) or []
+    return [button for row in rows for button in row]
+
+
+async def test_founder_job_ad_single_branch_auto_assigns_full_headcount(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "RECRUITING_BRANCH_NAMES", ["Derizlik", "Charhiy", "Navoiy"])
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+
+    await send(main.dp, bot, FOUNDER_ID, text="📢 Ishga e'lon berish")
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{kassir['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:2", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:0", target_chat_id=FOUNDER_ID)  # Derizlik
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+    combined = " ".join(t for t in _texts_to(sent, FOUNDER_ID) if t)
+    assert "2 ta" in combined
+
+    # Founder hali "E'lonni tayyorlash" bosmagan -- DBga hech narsa
+    # yozilmagan bo'lishi kerak (faqat FSM ichida saqlanadi).
+    assert recruiting_repo.list_vacancy_branches(kassir["id"]) == []
+
+
+async def test_founder_job_ad_multi_branch_requires_matching_sum(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "RECRUITING_BRANCH_NAMES", ["Derizlik", "Charhiy", "Navoiy"])
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+
+    await send(main.dp, bot, FOUNDER_ID, text="📢 Ishga e'lon berish")
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{kassir['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:3", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:0", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:1", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+
+    # 1 + 1 = 2, jami 3ga teng emas -- rad etilishi va qaytadan
+    # so'ralishi kerak.
+    await send(main.dp, bot, FOUNDER_ID, text="1")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="1")
+    combined = " ".join(t for t in _texts_to(sent, FOUNDER_ID) if t)
+    assert "jami 3 ta bo'lishi kerak" in combined
+
+    # Qaytadan to'g'ri taqsimlansa (1 + 2 = 3) qabul qilinadi.
+    await send(main.dp, bot, FOUNDER_ID, text="1")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="2")
+    combined = " ".join(t for t in _texts_to(sent, FOUNDER_ID) if t)
+    assert "Yana lavozim qo'shasizmi?" in combined
+
+
+async def test_founder_job_ad_cannot_finish_branch_selection_with_zero_branches(bot_dp):
+    main, bot = bot_dp
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+
+    await send(main.dp, bot, FOUNDER_ID, text="📢 Ishga e'lon berish")
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{kassir['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:1", target_chat_id=FOUNDER_ID)
+
+    from aiogram.methods import AnswerCallbackQuery
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+    acks = [m for m in sent if isinstance(m, AnswerCallbackQuery)]
+    assert any("Kamida 1 ta filial" in (a.text or "") for a in acks)
+
+
+async def test_founder_job_ad_multiple_positions_and_final_text_shows_only_selected_branches(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "RECRUITING_BRANCH_NAMES", ["Derizlik", "Charhiy", "Navoiy"])
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    sotuvchi = recruiting_repo.get_vacancy_by_key("sotuvchi")
+
+    await send(main.dp, bot, FOUNDER_ID, text="📢 Ishga e'lon berish")
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{kassir['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:1", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:0", target_chat_id=FOUNDER_ID)  # Derizlik
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+    more_button = next(b for b in _extract_buttons(sent[-1]) if b.callback_data == "jobad_more")
+    assert more_button is not None
+
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_more", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{sotuvchi['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:1", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:1", target_chat_id=FOUNDER_ID)  # Charhiy
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, "jobad_finish", target_chat_id=FOUNDER_ID)
+    ad_text = _texts_to(sent, FOUNDER_ID)[-1]
+
+    assert "Kassir — 1 ta" in ad_text
+    assert "Sotuvchi — 1 ta" in ad_text
+    assert "Derizlik — Alisher Navoiy ko'chasi, 76-B uy" in ad_text
+    assert "Charhiy — A.T. Xuqandiy mavzesi, 101-A uy" in ad_text
+    assert "Navoiy" not in ad_text  # tanlanmagan filial e'londa chiqmaydi
+    assert ad_text.count("Derizlik") == 1  # takrorlanmaydi
+    assert "?start=apply" in ad_text
+    assert "BOT_TOKEN" not in ad_text
+
+    kassir_branches = {b["branch_name"]: b["headcount"] for b in recruiting_repo.list_vacancy_branches(kassir["id"])}
+    sotuvchi_branches = {b["branch_name"]: b["headcount"] for b in recruiting_repo.list_vacancy_branches(sotuvchi["id"])}
+    assert kassir_branches == {"Derizlik": 1}
+    assert sotuvchi_branches == {"Charhiy": 1}
+    assert recruiting_repo.get_vacancy(kassir["id"])["is_active"] == 1
+
+
+async def test_founder_job_ad_replaces_old_branch_assignment_not_merges(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "RECRUITING_BRANCH_NAMES", ["Derizlik", "Charhiy", "Navoiy"])
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Eski filial", "headcount": 9}])
+
+    await send(main.dp, bot, FOUNDER_ID, text="📢 Ishga e'lon berish")
+    await send_callback(main.dp, bot, FOUNDER_ID, f"jobad_vac:{kassir['id']}", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_hc:1", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch:0", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_branch_done", target_chat_id=FOUNDER_ID)
+    await send_callback(main.dp, bot, FOUNDER_ID, "jobad_finish", target_chat_id=FOUNDER_ID)
+
+    branches = recruiting_repo.list_vacancy_branches(kassir["id"])
+    assert [b["branch_name"] for b in branches] == ["Derizlik"]
+
+
+async def test_invite_flow_still_works_after_job_ad_feature_added(bot_dp):
+    """Eski `/invite` (onboarding) oqimi -- "👤 Xodim qo'shish" -- yangi
+    "📢 Ishga e'lon berish" tugmasi qo'shilgandan keyin ham
+    o'zgarmagan bo'lishi kerak."""
+    main, bot = bot_dp
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+    assert any("Kim bo'lib ishlaydi?" in t for t in _texts_to(sent, FOUNDER_ID))
+
+
+# ----------------------------------------- nomzod: vacancy<->branch filtri --
+
+
+async def test_apply_hides_active_vacancy_with_no_branches(bot_dp):
+    main, bot = bot_dp
+    # Standart holatda "kassir"/"sotuvchi" aktiv, lekin hech qanday
+    # filialga biriktirilmagan -- nomzodga umuman ko'rinmasligi kerak.
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="/apply")
+    assert any("Hozircha faol vakansiya mavjud emas" in t for t in _texts_to(sent, CANDIDATE_ID))
+
+
+async def test_apply_shows_vacancy_once_it_has_at_least_one_branch(bot_dp):
+    main, bot = bot_dp
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Derizlik", "headcount": 1}])
+
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="/apply")
+    combined = " ".join(t for t in _texts_to(sent, CANDIDATE_ID) if t)
+    assert "Boshlaymizmi" in combined
+
+
+async def test_candidate_sees_only_branches_open_for_chosen_vacancy(bot_dp):
+    main, bot = bot_dp
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    sotuvchi = recruiting_repo.get_vacancy_by_key("sotuvchi")
+    recruiting_repo.set_vacancy_branches(
+        kassir["id"], [{"branch_name": "Derizlik", "headcount": 1}, {"branch_name": "Navoiy", "headcount": 2}]
+    )
+    recruiting_repo.set_vacancy_branches(sotuvchi["id"], [{"branch_name": "Charhiy", "headcount": 1}])
+
+    await _start_and_consent(main, bot, CANDIDATE_ID)
+    sent = await send_callback(
+        main.dp, bot, CANDIDATE_ID, f"rec_vacancy:{kassir['id']}", target_chat_id=CANDIDATE_ID
+    )
+    await send(main.dp, bot, CANDIDATE_ID, text="Ali Valiyev")
+    await send(main.dp, bot, CANDIDATE_ID, text="2000")
+    await send(main.dp, bot, CANDIDATE_ID, text="+998901234567")
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="Toshkent")
+
+    buttons = _extract_buttons(sent[-1])
+    button_texts = {b.text for b in buttons}
+    assert button_texts == {"Derizlik", "Navoiy"}
+    assert "Charhiy" not in button_texts  # boshqa vakansiya (sotuvchi)ning filiali
+
+
+async def test_stale_branch_choice_is_rejected_and_current_buttons_reshown(bot_dp):
+    main, bot = bot_dp
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Derizlik", "headcount": 1}])
+
+    await _start_and_consent(main, bot, CANDIDATE_ID)
+    await send_callback(main.dp, bot, CANDIDATE_ID, f"rec_vacancy:{kassir['id']}", target_chat_id=CANDIDATE_ID)
+    await send(main.dp, bot, CANDIDATE_ID, text="Ali Valiyev")
+    await send(main.dp, bot, CANDIDATE_ID, text="2000")
+    await send(main.dp, bot, CANDIDATE_ID, text="+998901234567")
+    await send(main.dp, bot, CANDIDATE_ID, text="Toshkent")
+
+    # Nomzod ekranida "Derizlik" turgan paytda Founder filialni
+    # "Navoiy"ga almashtirib qo'yadi -- eski tanlov endi haqiqiy emas.
+    recruiting_repo.clear_vacancy_branches(kassir["id"])
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Navoiy", "headcount": 1}])
+
+    sent = await send_callback(
+        main.dp, bot, CANDIDATE_ID, "rec_choice:preferred_branch:Derizlik", target_chat_id=CANDIDATE_ID
+    )
+    buttons = _extract_buttons(sent[-1])
+    assert {b.text for b in buttons} == {"Navoiy"}
+
+    application = recruiting_repo.get_in_progress_application(CANDIDATE_ID)
+    assert application["preferred_branch"] is None

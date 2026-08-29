@@ -55,7 +55,8 @@ import performance_bot  # noqa: E402
 import recruiting_bot  # noqa: E402
 import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
-from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES  # noqa: E402
+from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_ADDRESSES, RECRUITING_BRANCH_NAMES  # noqa: E402
+from repositories import recruiting as recruiting_repo  # noqa: E402
 from services import messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
@@ -485,6 +486,7 @@ def _visible_commands_for_role(role_key: str, category_key: str) -> list[str]:
 
 _FOUNDER_MENU_LABELS = [
     "👤 Xodim qo'shish",
+    "📢 Ishga e'lon berish",
     "👥 Xodimlar",
     "🏬 Do'konlar",
     "💰 Smenalarni ko'rish",
@@ -840,6 +842,336 @@ async def _finish_invite_creation(message: Message, role_key: str, branch: str |
     await message.answer(
         f"✅ Link tayyor\n{link}", reply_markup=build_menu(message.from_user.id)
     )
+
+
+# ------------------------------------------------------- ishga e'lon berish --
+# Bu oqim "hali nomzod qidiryapmiz" bosqichi — "👤 Xodim qo'shish"
+# (odam ALLAQACHON tanlangan, onboarding) dan ATAYLAB mustaqil.
+# Faqat mavjud recruiting_vacancies'dan foydalanadi, yangi lavozim
+# o'ylab topmaydi; filial<->headcount ``recruiting_vacancy_branches``ga
+# yoziladi (qarang repositories/recruiting.py).
+
+
+class JobAdStates(StatesGroup):
+    choosing_vacancy = State()
+    choosing_headcount = State()
+    entering_custom_headcount = State()
+    choosing_branches = State()
+    entering_branch_headcount = State()
+
+
+_JOB_AD_HEADCOUNT_QUICK = (1, 2, 3, 4, 5)
+_JOB_AD_OTHER_TEXT = "➕ Boshqa"
+_JOB_AD_ALL_BRANCHES_TEXT = "🌐 Barcha filiallar"
+_JOB_AD_DONE_TEXT = "✅ Tanlovni tugatish"
+_JOB_AD_ADD_MORE_TEXT = "➕ Yana lavozim qo'shish"
+_JOB_AD_FINISH_TEXT = "✅ E'lonni tayyorlash"
+
+_JOB_AD_POSITION_EMOJI = {"kassir": "💳", "sotuvchi": "🛒"}
+
+_JOB_AD_COMPANY_NAME = "Saturn"  # mavjud _CONSENT_TEXT'dagi bilan bir xil (recruiting_bot.py)
+_JOB_AD_SALARY_TEXT = "1 800 000 – 3 500 000 so'm"
+_JOB_AD_AGE_TEXT = "18–45 yosh | Ayol va erkaklar"
+_JOB_AD_SHIFT_TEXT = "08:00–18:00 yoki 14:00–01:00"
+_JOB_AD_PHONE_TEXT = "+998 94 740 04 74"
+
+
+def _job_ad_vacancy_kb(vacancies: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=v["title"], callback_data=f"jobad_vac:{v['id']}")] for v in vacancies]
+    )
+
+
+def _job_ad_headcount_kb() -> InlineKeyboardMarkup:
+    buttons = [InlineKeyboardButton(text=str(n), callback_data=f"jobad_hc:{n}") for n in _JOB_AD_HEADCOUNT_QUICK]
+    rows = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
+    rows.append([InlineKeyboardButton(text=_JOB_AD_OTHER_TEXT, callback_data="jobad_hc_other")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _job_ad_branches_kb(selected: set[str]) -> InlineKeyboardMarkup:
+    rows = []
+    for index, name in enumerate(RECRUITING_BRANCH_NAMES):
+        mark = "✅" if name in selected else "⬜"
+        rows.append([InlineKeyboardButton(text=f"{mark} {name}", callback_data=f"jobad_branch:{index}")])
+    rows.append([InlineKeyboardButton(text=_JOB_AD_ALL_BRANCHES_TEXT, callback_data="jobad_branch_all")])
+    rows.append([InlineKeyboardButton(text=_JOB_AD_DONE_TEXT, callback_data="jobad_branch_done")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _job_ad_next_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=_JOB_AD_ADD_MORE_TEXT, callback_data="jobad_more")],
+            [InlineKeyboardButton(text=_JOB_AD_FINISH_TEXT, callback_data="jobad_finish")],
+        ]
+    )
+
+
+def _job_ad_build_text(positions: list[dict], bot_username: str) -> str:
+    total = sum(sum(p["branches"].values()) for p in positions)
+    position_lines = [
+        f"{_JOB_AD_POSITION_EMOJI.get(p['position_key'], '👤')} {p['title']} — {sum(p['branches'].values())} ta"
+        for p in positions
+    ]
+
+    all_branches: list[str] = []
+    for p in positions:
+        for branch in p["branches"]:
+            if branch not in all_branches:
+                all_branches.append(branch)
+
+    location_lines = [
+        f"{branch} — {RECRUITING_BRANCH_ADDRESSES[branch]}" if branch in RECRUITING_BRANCH_ADDRESSES else branch
+        for branch in all_branches
+    ]
+
+    return (
+        "📢 ISHGA TAKLIF QILAMIZ!\n\n"
+        f"🏪 {_JOB_AD_COMPANY_NAME}\n\n"
+        f"Bo'sh ish o'rinlari — {total} ta:\n\n"
+        + "\n".join(position_lines) + "\n\n"
+        f"💰 Oylik: {_JOB_AD_SALARY_TEXT}\n"
+        "Tajribali xodim bilan yuqoriroq kelishiladi.\n\n"
+        f"👥 {_JOB_AD_AGE_TEXT}\n\n"
+        f"⏰ Smena:\n{_JOB_AD_SHIFT_TEXT}\n\n"
+        "📍 Ish joylari:\n"
+        + "\n".join(location_lines) + "\n\n"
+        "✅ Intizomli, halol va o'sishga tayyor insonlarni kutamiz.\n\n"
+        "👇 Ishga kirish uchun ariza qoldiring:\n"
+        f"https://t.me/{bot_username}?start=apply\n\n"
+        f"☎️ {_JOB_AD_PHONE_TEXT}\n\n"
+        "Barqaror ish. Kuchli jamoa. O'sish imkoniyati."
+    )
+
+
+async def _job_ad_ask_branches(reply_target: Message, state: FSMContext, headcount: int) -> None:
+    await state.update_data(current_total_headcount=headcount, current_selected_branches=[])
+    await state.set_state(JobAdStates.choosing_branches)
+    await reply_target.answer("Qaysi filial(lar)ga xodim kerak?", reply_markup=_job_ad_branches_kb(set()))
+
+
+async def _job_ad_finish_position(reply_target: Message, state: FSMContext, position: dict) -> None:
+    data = await state.get_data()
+    positions = list(data.get("job_ad_positions") or [])
+    positions.append(position)
+
+    await state.update_data(
+        job_ad_positions=positions,
+        current_vacancy_id=None, current_vacancy_title=None, current_vacancy_key=None,
+        current_total_headcount=None, current_selected_branches=None,
+        current_distribute_queue=None, current_distribute_index=None, current_branch_headcounts=None,
+    )
+    await state.set_state(None)
+
+    branch_summary = ", ".join(f"{branch} — {count} ta" for branch, count in position["branches"].items())
+    await reply_target.answer(
+        f"✅ {position['title']}: {branch_summary}\n\nYana lavozim qo'shasizmi?",
+        reply_markup=_job_ad_next_kb(),
+    )
+
+
+@dp.message(F.text == "📢 Ishga e'lon berish")
+async def founder_job_ad_start(message: Message, state: FSMContext) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    vacancies = recruiting_repo.list_vacancies(active_only=True)
+    if not vacancies:
+        await message.answer(
+            "Hozircha faol vakansiya mavjud emas.", reply_markup=build_menu(message.from_user.id)
+        )
+        return
+
+    await state.set_state(JobAdStates.choosing_vacancy)
+    await state.update_data(job_ad_positions=[])
+    await message.answer("Qaysi lavozimga xodim kerak?", reply_markup=_job_ad_vacancy_kb(vacancies))
+
+
+@dp.callback_query(F.data.startswith("jobad_vac:"), StateFilter(JobAdStates.choosing_vacancy))
+async def job_ad_vacancy_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    vacancy_id = int(callback.data.split(":", 1)[1])
+    vacancy = recruiting_repo.get_vacancy(vacancy_id)
+    if vacancy is None or not vacancy["is_active"]:
+        await callback.answer("Bu lavozim endi mavjud emas.", show_alert=True)
+        return
+
+    data = await state.get_data()
+    already_added = {p["vacancy_id"] for p in (data.get("job_ad_positions") or [])}
+    if vacancy_id in already_added:
+        await callback.answer("Bu lavozim shu e'longa allaqachon qo'shilgan.", show_alert=True)
+        return
+
+    await state.update_data(
+        current_vacancy_id=vacancy_id, current_vacancy_title=vacancy["title"],
+        current_vacancy_key=vacancy["position_key"],
+    )
+    await state.set_state(JobAdStates.choosing_headcount)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await callback.message.answer("Nechta xodim kerak?", reply_markup=_job_ad_headcount_kb())
+
+
+@dp.callback_query(F.data.startswith("jobad_hc:"), StateFilter(JobAdStates.choosing_headcount))
+async def job_ad_headcount_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    headcount = int(callback.data.split(":", 1)[1])
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await _job_ad_ask_branches(callback.message, state, headcount)
+
+
+@dp.callback_query(F.data == "jobad_hc_other", StateFilter(JobAdStates.choosing_headcount))
+async def job_ad_headcount_other(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(JobAdStates.entering_custom_headcount)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await callback.message.answer("Nechta xodim kerak? Musbat butun son kiriting:")
+
+
+@dp.message(StateFilter(JobAdStates.entering_custom_headcount))
+async def job_ad_headcount_custom(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer("❌ Musbat butun son kiriting:")
+        return
+
+    await _job_ad_ask_branches(message, state, int(text))
+
+
+@dp.callback_query(F.data.startswith("jobad_branch:"), StateFilter(JobAdStates.choosing_branches))
+async def job_ad_branch_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    index = int(callback.data.split(":", 1)[1])
+    if index < 0 or index >= len(RECRUITING_BRANCH_NAMES):
+        await callback.answer()
+        return
+
+    branch = RECRUITING_BRANCH_NAMES[index]
+    data = await state.get_data()
+    selected = set(data.get("current_selected_branches") or [])
+    if branch in selected:
+        selected.discard(branch)
+    else:
+        selected.add(branch)
+
+    await state.update_data(current_selected_branches=list(selected))
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=_job_ad_branches_kb(selected))
+
+
+@dp.callback_query(F.data == "jobad_branch_all", StateFilter(JobAdStates.choosing_branches))
+async def job_ad_branch_select_all(callback: CallbackQuery, state: FSMContext) -> None:
+    selected = set(RECRUITING_BRANCH_NAMES)
+    await state.update_data(current_selected_branches=list(selected))
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=_job_ad_branches_kb(selected))
+
+
+@dp.callback_query(F.data == "jobad_branch_done", StateFilter(JobAdStates.choosing_branches))
+async def job_ad_branch_done(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    selected = list(data.get("current_selected_branches") or [])
+    if not selected:
+        await callback.answer("Kamida 1 ta filial tanlang.", show_alert=True)
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+
+    total = data["current_total_headcount"]
+    position = {
+        "vacancy_id": data["current_vacancy_id"], "title": data["current_vacancy_title"],
+        "position_key": data["current_vacancy_key"],
+    }
+
+    if len(selected) == 1:
+        position["branches"] = {selected[0]: total}
+        await _job_ad_finish_position(callback.message, state, position)
+        return
+
+    await state.update_data(
+        current_distribute_queue=selected, current_distribute_index=0, current_branch_headcounts={},
+    )
+    await state.set_state(JobAdStates.entering_branch_headcount)
+    await callback.message.answer(f"Jami {data['current_vacancy_title']} — {total} ta\n\n{selected[0]} uchun nechta?")
+
+
+@dp.message(StateFilter(JobAdStates.entering_branch_headcount))
+async def job_ad_branch_headcount(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer("❌ Musbat butun son kiriting:")
+        return
+
+    data = await state.get_data()
+    queue = data.get("current_distribute_queue") or []
+    index = data.get("current_distribute_index", 0)
+    counts = dict(data.get("current_branch_headcounts") or {})
+
+    if index >= len(queue):
+        await state.clear()
+        await message.answer("❌ Xatolik yuz berdi. Qaytadan boshlang.", reply_markup=build_menu(message.from_user.id))
+        return
+
+    counts[queue[index]] = int(text)
+    index += 1
+
+    if index < len(queue):
+        await state.update_data(current_branch_headcounts=counts, current_distribute_index=index)
+        await message.answer(f"{queue[index]} uchun nechta?")
+        return
+
+    total = data["current_total_headcount"]
+    if sum(counts.values()) != total:
+        await state.update_data(current_branch_headcounts={}, current_distribute_index=0)
+        await message.answer(
+            f"❌ Filiallarga taqsimlangan son jami {total} ta bo'lishi kerak.\n\n"
+            f"Qaytadan: {queue[0]} uchun nechta?"
+        )
+        return
+
+    position = {
+        "vacancy_id": data["current_vacancy_id"], "title": data["current_vacancy_title"],
+        "position_key": data["current_vacancy_key"], "branches": counts,
+    }
+    await _job_ad_finish_position(message, state, position)
+
+
+@dp.callback_query(F.data == "jobad_more")
+async def job_ad_add_more(callback: CallbackQuery, state: FSMContext) -> None:
+    vacancies = recruiting_repo.list_vacancies(active_only=True)
+    if not vacancies:
+        await callback.answer("Hozircha faol vakansiya mavjud emas.", show_alert=True)
+        return
+
+    await state.set_state(JobAdStates.choosing_vacancy)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+    await callback.message.answer("Qaysi lavozimga xodim kerak?", reply_markup=_job_ad_vacancy_kb(vacancies))
+
+
+@dp.callback_query(F.data == "jobad_finish")
+async def job_ad_finish(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    positions = data.get("job_ad_positions") or []
+    if not positions:
+        await callback.answer()
+        return
+
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer()
+
+    for position in positions:
+        recruiting_repo.clear_vacancy_branches(position["vacancy_id"])
+        branches_payload = [
+            {"branch_name": branch, "headcount": count} for branch, count in position["branches"].items()
+        ]
+        recruiting_repo.set_vacancy_branches(position["vacancy_id"], branches_payload)
+        recruiting_repo.set_vacancy_active(position["vacancy_id"], True)
+
+    await state.clear()
+    me = await callback.bot.get_me()
+    ad_text = _job_ad_build_text(positions, me.username)
+    await callback.message.answer(ad_text, reply_markup=build_menu(callback.from_user.id))
 
 
 @dp.message(F.text == "👤 Xodim qo'shish")

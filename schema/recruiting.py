@@ -32,6 +32,21 @@ CREATE TABLE IF NOT EXISTS recruiting_vacancies (
     updated_at TEXT
 );
 
+-- Vakansiya QAYSI filial(lar)ga ochiqligi va har biriga nechta xodim
+-- kerakligi -- ``recruiting_vacancies.is_active`` (lavozim umuman
+-- faolmi) dan ATAYLAB alohida jadval. Founder yangi e'lon
+-- tasdiqlaganda avval shu vacancy uchun eski qatorlar tozalanadi,
+-- keyin yangilari yoziladi (qarang repositories/recruiting.py::
+-- clear_vacancy_branches/set_vacancy_branches).
+CREATE TABLE IF NOT EXISTS recruiting_vacancy_branches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vacancy_id INTEGER NOT NULL,
+    branch_name TEXT NOT NULL,
+    headcount INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(vacancy_id, branch_name)
+);
+
 CREATE TABLE IF NOT EXISTS recruiting_applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_telegram_id INTEGER NOT NULL,

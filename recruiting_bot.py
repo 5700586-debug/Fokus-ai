@@ -367,6 +367,26 @@ def _choice_kb(step_key: str, options: list[tuple[str, str]]) -> InlineKeyboardM
     )
 
 
+def _branch_options_for_vacancy(vacancy_id: int | None) -> list[tuple[str, str]]:
+    """``preferred_branch`` qadami uchun -- FAQAT shu vakansiya
+    Founder tomonidan ochilgan filiallar (``recruiting_vacancy_
+    branches``), ``RECRUITING_BRANCH_NAMES``dagi HAMMA filial emas."""
+    if vacancy_id is None:
+        return []
+    return [(row["branch_name"], row["branch_name"]) for row in recruiting_repo.list_vacancy_branches(vacancy_id)]
+
+
+def _vacancies_open_for_candidates() -> list[dict]:
+    """Nomzodga FAQAT ``is_active=1`` VA kamida bitta filialga ochiq
+    vakansiyalar ko'rsatiladi -- Founderning yangi e'lon oqimi esa
+    (filial hali tayinlanmagan bo'lsa ham) barcha aktiv vakansiyalarni
+    ko'rishi kerak, shuning uchun bu filtr FAQAT shu yerda (nomzod
+    tomonida) qo'llaniladi, ``recruiting_repo.list_vacancies`` o'zi
+    o'zgartirilmaydi."""
+    vacancies = recruiting_repo.list_vacancies(active_only=True)
+    return [v for v in vacancies if recruiting_repo.list_vacancy_branches(v["id"])]
+
+
 def _math_keyboard(application_id: int, math_q: recruiting_questions.MathQuestion) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -388,7 +408,7 @@ async def cmd_apply(message: Message, state: FSMContext) -> None:
         await _resume_application(message, state, existing)
         return
 
-    vacancies = recruiting_repo.list_vacancies(active_only=True)
+    vacancies = _vacancies_open_for_candidates()
     if not vacancies:
         await message.answer(_NO_VACANCY_TEXT)
         return
@@ -402,7 +422,7 @@ async def handle_consent(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
 
-    vacancies = recruiting_repo.list_vacancies(active_only=True)
+    vacancies = _vacancies_open_for_candidates()
     if not vacancies:
         await state.clear()
         await callback.answer()
@@ -529,7 +549,11 @@ async def _send_step_prompt(message: Message, state: FSMContext, step: dict) -> 
         return
     if step["kind"] == "choice":
         await state.set_state(RecruitingStates.collecting_choice)
-        await message.answer(step["prompt"], reply_markup=_choice_kb(step["key"], step["options"]))
+        options = step["options"]
+        if step["key"] == "preferred_branch":
+            data = await state.get_data()
+            options = _branch_options_for_vacancy(data.get("vacancy_id"))
+        await message.answer(step["prompt"], reply_markup=_choice_kb(step["key"], options))
         return
     await state.set_state(RecruitingStates.collecting_text)
     await message.answer(step["prompt"])
@@ -758,6 +782,18 @@ async def handle_choice_step_answer(callback: CallbackQuery, state: FSMContext) 
         return
 
     raw_value = parts[2]
+
+    if step_key == "preferred_branch":
+        current_options = _branch_options_for_vacancy(data.get("vacancy_id"))
+        if raw_value not in {value for value, _ in current_options}:
+            # Eskirgan tanlov (masalan Founder shu orada filiallarni
+            # o'zgartirdi) -- yozilmaydi, joriy to'g'ri tugmalar bilan
+            # qayta ko'rsatiladi.
+            await callback.answer("Bu tanlov endi mavjud emas.", show_alert=True)
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=_choice_kb(step_key, current_options))
+            return
+
     value_map = step.get("value_map") or {}
     stored_value = value_map.get(raw_value, raw_value)
 

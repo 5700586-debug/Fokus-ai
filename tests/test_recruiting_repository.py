@@ -5,6 +5,69 @@ from repositories import recruiting as recruiting_repo
 from services import recruiting_privacy
 
 
+# ------------------------------------------------- vakansiya <-> filial (branch) --
+
+
+def test_set_vacancy_branches_saves_multiple_branches_with_headcount():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    ok = recruiting_repo.set_vacancy_branches(
+        kassir["id"], [{"branch_name": "Filial A", "headcount": 1}, {"branch_name": "Filial C", "headcount": 2}]
+    )
+    assert ok is True
+
+    branches = recruiting_repo.list_vacancy_branches(kassir["id"])
+    by_name = {b["branch_name"]: b["headcount"] for b in branches}
+    assert by_name == {"Filial A": 1, "Filial C": 2}
+
+
+def test_set_vacancy_branches_rejects_unknown_vacancy():
+    assert recruiting_repo.set_vacancy_branches(999999, [{"branch_name": "Filial A", "headcount": 1}]) is False
+
+
+def test_set_vacancy_branches_rejects_non_positive_headcount():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    assert recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Filial A", "headcount": 0}]) is False
+    assert recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Filial A", "headcount": -1}]) is False
+    assert recruiting_repo.list_vacancy_branches(kassir["id"]) == []
+
+
+def test_set_vacancy_branches_rejects_empty_branch_name():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    assert recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "  ", "headcount": 1}]) is False
+
+
+def test_set_vacancy_branches_rejects_duplicate_branch_in_same_call():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    ok = recruiting_repo.set_vacancy_branches(
+        kassir["id"], [{"branch_name": "Filial A", "headcount": 1}, {"branch_name": "Filial A", "headcount": 2}]
+    )
+    assert ok is False
+    assert recruiting_repo.list_vacancy_branches(kassir["id"]) == []
+
+
+def test_clear_vacancy_branches_then_set_replaces_old_assignment():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Filial A", "headcount": 5}])
+
+    recruiting_repo.clear_vacancy_branches(kassir["id"])
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Filial B", "headcount": 3}])
+
+    branches = recruiting_repo.list_vacancy_branches(kassir["id"])
+    assert len(branches) == 1
+    assert branches[0]["branch_name"] == "Filial B"
+    assert branches[0]["headcount"] == 3
+
+
+def test_vacancy_branches_are_independent_per_vacancy():
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    sotuvchi = recruiting_repo.get_vacancy_by_key("sotuvchi")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Filial A", "headcount": 1}])
+    recruiting_repo.set_vacancy_branches(sotuvchi["id"], [{"branch_name": "Filial B", "headcount": 2}])
+
+    assert [b["branch_name"] for b in recruiting_repo.list_vacancy_branches(kassir["id"])] == ["Filial A"]
+    assert [b["branch_name"] for b in recruiting_repo.list_vacancy_branches(sotuvchi["id"])] == ["Filial B"]
+
+
 def test_schema_seeds_two_default_active_vacancies():
     vacancies = recruiting_repo.list_vacancies(active_only=True)
     keys = {v["position_key"] for v in vacancies}

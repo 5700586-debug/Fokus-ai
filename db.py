@@ -83,6 +83,9 @@ def _redact_dsn(url: str) -> str:
 _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("employees", "prior_employer_reference_consent", "INTEGER"),
     ("employees", "prior_employer_contact", "TEXT"),
+    ("employees", "night_shift_availability", "TEXT"),
+    ("employees", "teamwork_agreement", "INTEGER"),
+    ("employees", "authority_cooperation_agreement", "INTEGER"),
     ("recruiting_vacancies", "required_shift", "TEXT"),
     ("recruiting_vacancies", "requires_weekends", "INTEGER NOT NULL DEFAULT 0"),
     ("recruiting_applications", "birth_year", "INTEGER"),

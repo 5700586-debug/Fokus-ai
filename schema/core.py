@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS employees (
     rejected_at TEXT,
     rejected_by INTEGER,
     prior_employer_reference_consent INTEGER,
-    prior_employer_contact TEXT
+    prior_employer_contact TEXT,
+    night_shift_availability TEXT,
+    teamwork_agreement INTEGER,
+    authority_cooperation_agreement INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS employee_contacts (

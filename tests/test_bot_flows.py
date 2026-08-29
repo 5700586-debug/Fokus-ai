@@ -49,6 +49,9 @@ async def _complete_onboarding(main, bot, user_id: int, token: str, familiya: st
     await send(main.dp, bot, user_id, text="Chilonzor MFY, 12-uy")
     await send(main.dp, bot, user_id, text="01.08.2026")
     await send(main.dp, bot, user_id, text="09:00-18:00")
+    await send(main.dp, bot, user_id, text="🔄 Ba'zan ishlay olaman")
+    await send(main.dp, bot, user_id, text="✅ Ha, roziman")
+    await send(main.dp, bot, user_id, text="✅ Ha, roziman")
     await send(main.dp, bot, user_id, text="1–2 yil")
     await send(main.dp, bot, user_id, text="Yaxshi jamoa bor")
     await send(main.dp, bot, user_id, text="➖ O'tkazib yuborish")
@@ -431,7 +434,7 @@ async def test_full_onboarding_to_approval_flow(bot_dp):
     assert "shahar" in sent[-1].text.lower() or "tuman" in sent[-1].text.lower()
 
     sent = await send(main.dp, bot, new_user_id, text="Toshkent")
-    assert "mahalla" in sent[-1].text.lower()
+    assert "manzil" in sent[-1].text.lower()
 
     sent = await send(main.dp, bot, new_user_id, text="Chilonzor MFY, 12-uy")
     assert "sana" in sent[-1].text.lower()
@@ -440,6 +443,15 @@ async def test_full_onboarding_to_approval_flow(bot_dp):
     assert "grafig" in sent[-1].text.lower()
 
     sent = await send(main.dp, bot, new_user_id, text="09:00-18:00")
+    assert "Tungi smenada ishlay olasizmi?" in sent[-1].text
+
+    sent = await send(main.dp, bot, new_user_id, text="🔄 Ba'zan ishlay olaman")
+    assert "jamoaga yordam" in sent[-1].text.lower()
+
+    sent = await send(main.dp, bot, new_user_id, text="✅ Ha, roziman")
+    assert "topshiriq bersa" in sent[-1].text.lower()
+
+    sent = await send(main.dp, bot, new_user_id, text="✅ Ha, roziman")
     assert "muddat" in sent[-1].text.lower()
 
     sent = await send(main.dp, bot, new_user_id, text="1–2 yil")
@@ -665,3 +677,122 @@ async def test_rejected_applicant_can_be_reinvited_and_resubmit(bot_dp):
     assert profile["status"] == "submitted"
     assert profile["familiya"] == "Familiyev2"
     assert len(profile["contacts"]) == 2
+
+
+def _keyboard_texts(message) -> list[str]:
+    return [btn.text for row in message.reply_markup.keyboard for btn in row]
+
+
+async def test_onboarding_new_agreements_and_night_shift(bot_dp):
+    """Manzil misoli neytral, tungi smena savoli ham preset, ham qo'lda
+    kiritilgan grafikdan keyin chiqadi, ikki kelishuv 1/0 sifatida
+    saqlanadi va "Yo'q" javobi anketani avtomatik rad etmaydi."""
+    main, bot = bot_dp
+
+    import invites
+    from employees import get_profile
+
+    async def _fill_until_address_prompt(user_id: int, token: str):
+        await send(main.dp, bot, user_id, text=f"/start {token}")
+        for answer in (
+            "Familiyev", "Ism", "Ota", "01.05.1995", "Erkak", "+998901234567",
+            "Kontakt Bir", "+998901111111", "Aka",
+            "Kontakt Ikki", "+998902222222", "Opa",
+            "Turmush qurmagan",
+        ):
+            await send(main.dp, bot, user_id, text=answer)
+        return await send(main.dp, bot, user_id, text="Toshkent")
+
+    async def _finish_after_planned_duration(user_id: int):
+        await send(main.dp, bot, user_id, text="1–2 yil")
+        await send(main.dp, bot, user_id, text="Yaxshi jamoa bor")
+        await send(main.dp, bot, user_id, text="➖ O'tkazib yuborish")
+        await send(main.dp, bot, user_id, text="Yo'q")
+        await send(main.dp, bot, user_id, text="Kontakt Bir")
+        await send(main.dp, bot, user_id, photo_file_id="photo_abc")
+        return await send(main.dp, bot, user_id, text="➖ O'tkazib yuborish")
+
+    # --- 1) Qo'lda kiritiladigan grafik yo'li ---
+    manual_id = 60050
+    manual_token = invites.create_invite("kassir", "Filial-1", FOUNDER_ID)
+
+    sent = await _fill_until_address_prompt(manual_id, manual_token)
+    address_prompt = sent[-1].text
+    assert "Muhsiniy" not in address_prompt
+    assert "74-uy" not in address_prompt
+    assert "23-xonadon" not in address_prompt
+    assert "Uy manzilingizni kiriting." in address_prompt
+    assert "Alisher Navoiy ko‘chasi, 15-uy" in address_prompt
+
+    await send(main.dp, bot, manual_id, text="Chilonzor MFY, 12-uy")
+    sent = await send(main.dp, bot, manual_id, text="01.08.2026")
+    assert sent[-1].text == "Asosiy (odatdagi) ish grafigingizni kiriting. Masalan: 09:00–18:00"
+
+    sent = await send(main.dp, bot, manual_id, text="09:00-18:00")
+    assert sent[-1].text == "Tungi smenada ishlay olasizmi?"
+    assert _keyboard_texts(sent[-1]) == [
+        "✅ Ha, doim ishlay olaman",
+        "🔄 Ba'zan ishlay olaman",
+        "❌ Yo'q, faqat kunduzgi smena",
+    ]
+
+    sent = await send(main.dp, bot, manual_id, text="❌ Yo'q, faqat kunduzgi smena")
+    assert "bu mening ishim emas" in sent[-1].text
+    assert _keyboard_texts(sent[-1]) == ["✅ Ha, roziman", "❌ Yo'q, rozimasman"]
+
+    sent = await send(main.dp, bot, manual_id, text="❌ Yo'q, rozimasman")
+    assert "sen menga xo'jayin emassan" in sent[-1].text
+    assert _keyboard_texts(sent[-1]) == ["✅ Ha, roziman", "❌ Yo'q, rozimasman"]
+
+    # "Yo'q" avtomatik rad qilmaydi — anketa keyingi savol bilan davom etadi.
+    sent = await send(main.dp, bot, manual_id, text="❌ Yo'q, rozimasman")
+    assert "muddat" in sent[-1].text.lower()
+
+    sent = await _finish_after_planned_duration(manual_id)
+    summary = sent[-1].text
+    assert "🌙 Tungi smena: Yo'q, faqat kunduzgi smena" in summary
+    assert "🤝 Jamoaga yordam: Yo'q" in summary
+    assert "🧭 Rahbar/ustoz topshirig'i: Yo'q" in summary
+
+    await send(main.dp, bot, manual_id, text="✅ Ma'lumotlar to'g'ri")
+    profile = get_profile(manual_id)
+    assert profile["status"] == "submitted"
+    assert profile["night_shift_availability"] == "day_only"
+    assert profile["teamwork_agreement"] == 0
+    assert profile["authority_cooperation_agreement"] == 0
+
+    # --- 2) Preset (invite'dagi) grafik yo'li ---
+    preset_id = 60051
+    preset_token = invites.create_invite(
+        "sotuvchi", "Filial-1", FOUNDER_ID, work_schedule="10:00-19:00"
+    )
+
+    await _fill_until_address_prompt(preset_id, preset_token)
+    await send(main.dp, bot, preset_id, text="Chilonzor MFY, 12-uy")
+
+    sent = await send(main.dp, bot, preset_id, text="01.08.2026")
+    assert sent[-1].text == "Tungi smenada ishlay olasizmi?"
+
+    sent = await send(main.dp, bot, preset_id, text="✅ Ha, doim ishlay olaman")
+    assert "bu mening ishim emas" in sent[-1].text
+
+    sent = await send(main.dp, bot, preset_id, text="✅ Ha, roziman")
+    assert "sen menga xo'jayin emassan" in sent[-1].text
+
+    sent = await send(main.dp, bot, preset_id, text="✅ Ha, roziman")
+    assert "muddat" in sent[-1].text.lower()
+
+    sent = await _finish_after_planned_duration(preset_id)
+    summary = sent[-1].text
+    assert "🕒 Ish grafigi: 10:00-19:00" in summary
+    assert "🌙 Tungi smena: Ha, doim ishlay olaman" in summary
+    assert "🤝 Jamoaga yordam: Ha" in summary
+    assert "🧭 Rahbar/ustoz topshirig'i: Ha" in summary
+
+    await send(main.dp, bot, preset_id, text="✅ Ma'lumotlar to'g'ri")
+    profile = get_profile(preset_id)
+    assert profile["status"] == "submitted"
+    assert profile["work_schedule"] == "10:00-19:00"
+    assert profile["night_shift_availability"] == "always"
+    assert profile["teamwork_agreement"] == 1
+    assert profile["authority_cooperation_agreement"] == 1

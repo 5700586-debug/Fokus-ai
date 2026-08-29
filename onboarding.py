@@ -69,6 +69,9 @@ class OnboardingStates(StatesGroup):
     address_mahalla_uy = State()
     hire_date = State()
     work_schedule = State()
+    night_shift = State()
+    teamwork_agreement = State()
+    authority_agreement = State()
     planned_duration = State()
     motivation = State()
     prior_experience = State()
@@ -95,6 +98,37 @@ _PLANNED_DURATION_KB = _kb(
     ["3–6 oy", "6–12 oy"], ["1–2 yil", "2 yildan ko'p"], ["Aniq bilmayman"]
 )
 _SUMMARY_KB = _kb([_CONFIRM_TEXT], [_EDIT_TEXT])
+
+_WORK_SCHEDULE_PROMPT = "Asosiy (odatdagi) ish grafigingizni kiriting. Masalan: 09:00–18:00"
+
+_NIGHT_SHIFT_PROMPT = "Tungi smenada ishlay olasizmi?"
+_NIGHT_SHIFT_OPTIONS = {
+    "✅ Ha, doim ishlay olaman": "always",
+    "🔄 Ba'zan ishlay olaman": "sometimes",
+    "❌ Yo'q, faqat kunduzgi smena": "day_only",
+}
+_NIGHT_SHIFT_LABELS = {
+    "always": "Ha, doim ishlay olaman",
+    "sometimes": "Ba'zan ishlay olaman",
+    "day_only": "Yo'q, faqat kunduzgi smena",
+}
+_NIGHT_SHIFT_KB = _kb(*[[text] for text in _NIGHT_SHIFT_OPTIONS])
+
+_AGREE_YES_TEXT = "✅ Ha, roziman"
+_AGREE_NO_TEXT = "❌ Yo'q, rozimasman"
+_AGREEMENT_VALUES = {_AGREE_YES_TEXT: 1, _AGREE_NO_TEXT: 0}
+_AGREEMENT_KB = _kb([_AGREE_YES_TEXT], [_AGREE_NO_TEXT])
+
+_TEAMWORK_PROMPT = (
+    "Bizda ‘bu mening ishim emas’ degan gap qabul qilinmaydi. Zarurat bo'lsa, "
+    "o'z vazifangizdan tashqari jamoaga yordam berishga rozimisiz?"
+)
+_AUTHORITY_PROMPT = (
+    "Bizda yosh emas, vazifa va mas'uliyat muhim. Sizdan yoshroq bo'lsa ham, "
+    "vakolati bor rahbar yoki sizga ish o'rgatayotgan xodim topshiriq bersa, "
+    "‘sen menga xo'jayin emassan’ demasdan bajarishga rozimisiz? Teng lavozimdagi "
+    "sherigingiz ish yuzasidan yordam so'rasa, hamkorlik qilishingiz shart."
+)
 
 _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 
@@ -146,6 +180,17 @@ async def start_onboarding_from_invite(message: Message, state: FSMContext, toke
         "daqiqa vaqt oladi.\n\nFamiliyangizni kiriting:",
         reply_markup=ReplyKeyboardRemove(),
     )
+
+
+async def _prompt_night_shift(message: Message, state: FSMContext) -> None:
+    await state.set_state(OnboardingStates.night_shift)
+    await message.answer(_NIGHT_SHIFT_PROMPT, reply_markup=_NIGHT_SHIFT_KB)
+
+
+def _agreement_label(value) -> str:
+    if value is None:
+        return "-"
+    return "Ha" if value else "Yo'q"
 
 
 async def _prompt_emergency_contact(message: Message, state: FSMContext) -> None:
@@ -209,6 +254,9 @@ def _build_summary(data: dict) -> str:
         f"💼 Lavozim: {role_name(data.get('role_key'))}",
         f"📅 Ish boshlagan sana: {data.get('hire_date')}",
         f"🕒 Ish grafigi: {data.get('work_schedule')}",
+        f"🌙 Tungi smena: {_NIGHT_SHIFT_LABELS.get(data.get('night_shift_availability'), '-')}",
+        f"🤝 Jamoaga yordam: {_agreement_label(data.get('teamwork_agreement'))}",
+        f"🧭 Rahbar/ustoz topshirig'i: {_agreement_label(data.get('authority_cooperation_agreement'))}",
         f"⏳ Rejalashtirilgan muddat: {data.get('planned_duration')}",
         f"💬 Nega bu kompaniya: {data.get('motivation')}",
         f"📋 Oldingi tajriba: {data.get('prior_experience') or '-'}",
@@ -381,8 +429,7 @@ def register(dp: Dispatcher) -> None:
         await state.update_data(tuman=text)
         await state.set_state(OnboardingStates.address_mahalla_uy)
         await message.answer(
-            "Mahallangiz va uy manzilingizni yozing.\nMasalan:\nMuhsiniy MFY, 74-uy\n"
-            "yoki kvartira bo'lsa:\n34-uy, 23-xonadon"
+            "Uy manzilingizni kiriting.\nMasalan: Alisher Navoiy ko‘chasi, 15-uy."
         )
 
     @dp.message(StateFilter(OnboardingStates.address_mahalla_uy))
@@ -411,24 +458,60 @@ def register(dp: Dispatcher) -> None:
         preset_schedule = data.get("preset_work_schedule")
         if preset_schedule:
             await state.update_data(work_schedule=preset_schedule)
-            await state.set_state(OnboardingStates.planned_duration)
-            await message.answer(
-                "Kompaniyada qancha muddat ishlashni rejalashtiryapsiz?",
-                reply_markup=_PLANNED_DURATION_KB,
-            )
+            await _prompt_night_shift(message, state)
             return
 
         await state.set_state(OnboardingStates.work_schedule)
-        await message.answer("Ish grafigingizni kiriting. Masalan: 09:00–18:00")
+        await message.answer(_WORK_SCHEDULE_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.work_schedule))
     async def handle_work_schedule(message: Message, state: FSMContext) -> None:
         text = (message.text or "").strip()
         if not text:
-            await message.answer("❌ Ish grafigini kiriting. Masalan: 09:00–18:00")
+            await message.answer(f"❌ {_WORK_SCHEDULE_PROMPT}")
             return
 
         await state.update_data(work_schedule=text)
+        await _prompt_night_shift(message, state)
+
+    @dp.message(StateFilter(OnboardingStates.night_shift))
+    async def handle_night_shift(message: Message, state: FSMContext) -> None:
+        value = _NIGHT_SHIFT_OPTIONS.get((message.text or "").strip())
+        if value is None:
+            await message.answer(
+                "Iltimos, tugmalardan birini tanlang.", reply_markup=_NIGHT_SHIFT_KB
+            )
+            return
+
+        await state.update_data(night_shift_availability=value)
+        await state.set_state(OnboardingStates.teamwork_agreement)
+        await message.answer(_TEAMWORK_PROMPT, reply_markup=_AGREEMENT_KB)
+
+    @dp.message(StateFilter(OnboardingStates.teamwork_agreement))
+    async def handle_teamwork_agreement(message: Message, state: FSMContext) -> None:
+        value = _AGREEMENT_VALUES.get((message.text or "").strip())
+        if value is None:
+            await message.answer(
+                "Iltimos, tugmalardan birini tanlang.", reply_markup=_AGREEMENT_KB
+            )
+            return
+
+        # "Yo'q" javobi anketani rad etmaydi — faqat saqlanadi va Founder
+        # yakuniy qarorni o'zi qabul qiladi.
+        await state.update_data(teamwork_agreement=value)
+        await state.set_state(OnboardingStates.authority_agreement)
+        await message.answer(_AUTHORITY_PROMPT, reply_markup=_AGREEMENT_KB)
+
+    @dp.message(StateFilter(OnboardingStates.authority_agreement))
+    async def handle_authority_agreement(message: Message, state: FSMContext) -> None:
+        value = _AGREEMENT_VALUES.get((message.text or "").strip())
+        if value is None:
+            await message.answer(
+                "Iltimos, tugmalardan birini tanlang.", reply_markup=_AGREEMENT_KB
+            )
+            return
+
+        await state.update_data(authority_cooperation_agreement=value)
         await state.set_state(OnboardingStates.planned_duration)
         await message.answer(
             "Kompaniyada qancha muddat ishlashni rejalashtiryapsiz?",

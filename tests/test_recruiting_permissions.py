@@ -104,6 +104,28 @@ async def test_founder_can_decide_on_application(bot_dp):
     assert application["status"] == "reviewed"
 
 
+async def test_reject_works_on_first_click_for_a_fresh_application(bot_dp):
+    """Bug tekshiruvi: hali hech qanday qaror qabul qilinmagan, toza
+    ``awaiting_review`` holatidagi arizada "❌ Rad etish" birinchi
+    bosishda muvaffaqiyatli ishlashi kerak (mavjud
+    ``_handle_founder_decision``/``set_founder_decision_if`` oqimi
+    orqali, "interview" bilan bir xil mexanizm)."""
+    main, bot = bot_dp
+    application_id = _create_awaiting_review_application(600004)
+
+    from aiogram.methods import AnswerCallbackQuery
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_reject:{application_id}", target_chat_id=FOUNDER_ID)
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision"] == "rejected"
+    assert application["status"] == "reviewed"
+
+    acks = [m for m in sent if isinstance(m, AnswerCallbackQuery)]
+    assert any("Rad etildi" in (a.text or "") for a in acks)
+    assert not any("topilmadi" in (a.text or "").lower() for a in acks)
+
+
 # --------------------------------------------------------- idempotentlik --
 
 

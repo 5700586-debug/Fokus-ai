@@ -899,3 +899,23 @@ async def test_leave_reason_step_is_not_in_ai_free_bypass_list():
     o'zgarmagan -- ``leave_reason`` hozirgidek AI/off-topic
     tekshiruvidan (va follow-up mantig'idan) o'tishda davom etadi."""
     assert "leave_reason" not in recruiting_bot._AI_FREE_FACT_STEPS
+
+
+# ------------------------------------------------ headcount != application cap --
+
+
+async def test_headcount_does_not_cap_candidate_applications(bot_dp):
+    """Bug: vakansiyaning ``headcount``i (Founder rejalashtirgan xodim
+    soni) ariza/application limiti EMAS -- headcountdan ko'p ariza
+    mavjud bo'lsa ham, vakansiya yangi nomzodlarga ko'rinishda va
+    ``/apply`` oqimiga ochiq bo'lib qolishi kerak."""
+    main, bot = bot_dp
+    kassir = recruiting_repo.get_vacancy_by_key("kassir")
+    recruiting_repo.set_vacancy_branches(kassir["id"], [{"branch_name": "Chilonzor filiali", "headcount": 1}])
+
+    for i in range(5):
+        recruiting_repo.create_application(700000 + i, kassir["id"], "2099-01-01T00:00:00+00:00")
+
+    sent = await send(main.dp, bot, CANDIDATE_ID, text="/apply")
+    combined = " ".join(t for t in _texts_to(sent, CANDIDATE_ID) if t)
+    assert "Boshlaymizmi" in combined

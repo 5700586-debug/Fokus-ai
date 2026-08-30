@@ -120,6 +120,10 @@ ACTION_COMPARE_SUPPLIERS = "compare_suppliers"
 ACTION_RECRUITING_REVIEW = "recruiting_review"
 ACTION_MANAGE_VACANCIES = "manage_vacancies"
 
+# main.py — "🚨 Bugungi muammolar" (Founder-only, read-only grafik
+# muammolari ko'rinishi).
+ACTION_VIEW_FOUNDER_TODAY_PROBLEMS = "view_founder_today_problems"
+
 # Founder-only amallar (masalan /setrule, /processmonth, /invite) shu
 # ro'yxatga kiritilmaydi — ularga faqat Founder ruxsatli (pastdagi
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol

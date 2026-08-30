@@ -93,7 +93,8 @@ async def test_start_shows_founder_category_for_founder(bot_dp):
     buttons = {btn.text for row in sent[0].reply_markup.keyboard for btn in row}
 
     assert buttons == {
-        "👤 Xodim qo'shish", "👥 Xodimlar", "🏬 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
+        "👤 Xodim qo'shish", "📢 Ishga e'lon berish", "👥 Xodimlar", "🏬 Do'konlar",
+        "💰 Smenalarni ko'rish", "🚨 Bugungi muammolar", "⚙️ Sozlamalar",
     }
 
 

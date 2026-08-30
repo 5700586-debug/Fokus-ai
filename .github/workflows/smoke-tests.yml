@@ -213,6 +213,7 @@ jobs:
           tests/test_supplier_purchase_listing.py
           tests/test_supplier_purchase_entry.py
           tests/test_supplier_purchase_allocation.py
+          tests/test_founder_today_problems.py
           | tee smoke_output.log
 
       - name: Post smoke diagnostics as a commit comment on failure

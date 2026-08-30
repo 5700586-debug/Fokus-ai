@@ -57,7 +57,7 @@ import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_ADDRESSES, RECRUITING_BRANCH_NAMES  # noqa: E402
 from repositories import recruiting as recruiting_repo  # noqa: E402
-from services import messages, permissions  # noqa: E402
+from services import founder_today_problems, messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -490,6 +490,7 @@ _FOUNDER_MENU_LABELS = [
     "👥 Xodimlar",
     "🏬 Do'konlar",
     "💰 Smenalarni ko'rish",
+    "🚨 Bugungi muammolar",
     "⚙️ Sozlamalar",
 ]
 
@@ -1303,6 +1304,38 @@ async def founder_employee_card_callback(callback: CallbackQuery) -> None:
 
     await callback.message.answer(card)
     await callback.answer()
+
+
+def _today_problems_section_text(title: str, section: dict) -> list[str]:
+    lines = [f"{title}: {section['total']} ta"]
+    if not section["items"]:
+        lines.append("Ma'lumot yo'q.")
+        return lines
+
+    for item in section["items"]:
+        lines.append(f"• {item['full_name']} — {item['branch']} — {item['date']}")
+
+    remaining = section["total"] - len(section["items"])
+    if remaining > 0:
+        lines.append(f"...va yana {remaining} ta")
+    return lines
+
+
+def _founder_today_problems_text(summary: dict) -> str:
+    lines = ["🚨 Bugungi muammolar", ""]
+    lines.extend(_today_problems_section_text("🟡 Bugungi grafigi kiritilmagan faol xodimlar", summary["missing_schedule"]))
+    lines.append("")
+    lines.extend(_today_problems_section_text("⏳ Kutilayotgan grafik o'zgartirish so'rovlari", summary["pending_requests"]))
+    return "\n".join(lines)
+
+
+@dp.message(F.text == "🚨 Bugungi muammolar")
+async def founder_today_problems_handler(message: Message) -> None:
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_FOUNDER_TODAY_PROBLEMS):
+        return
+
+    summary = founder_today_problems.build_today_problems_summary()
+    await message.answer(_founder_today_problems_text(summary))
 
 
 _BRANCH_BACK_TEXT = "⬅️ Orqaga"

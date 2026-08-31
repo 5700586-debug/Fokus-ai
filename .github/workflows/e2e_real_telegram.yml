@@ -61,7 +61,9 @@ jobs:
           E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
           E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
-        run: python -m e2e.run_e2e | tee e2e_output.log
+        run: |
+          set -o pipefail
+          python -m e2e.run_e2e | tee e2e_output.log
 
       # Ikkinchi ssenariy -- RECRUITING tugma oqimi (qarang
       # e2e/run_recruiting_e2e.py). SHU job ichida, oldingi step
@@ -76,7 +78,9 @@ jobs:
           E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
           E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
-        run: python -m e2e.run_recruiting_e2e | tee e2e_recruiting_output.log
+        run: |
+          set -o pipefail
+          python -m e2e.run_recruiting_e2e | tee e2e_recruiting_output.log
 
       # Uchinchi ssenariy -- NAZORATCHI tugma oqimi (qarang
       # e2e/run_nazoratchi_e2e.py). Xuddi shu job ichida, avvalgi ikki
@@ -89,7 +93,9 @@ jobs:
           E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
           E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
-        run: python -m e2e.run_nazoratchi_e2e | tee e2e_nazoratchi_output.log
+        run: |
+          set -o pipefail
+          python -m e2e.run_nazoratchi_e2e | tee e2e_nazoratchi_output.log
 
       # To'rtinchi ssenariy -- KASSIR KUNLIK HISOBOT (Daily Report V1)
       # oqimi (qarang e2e/run_cashshift_e2e.py). Xuddi shu job ichida,
@@ -102,7 +108,9 @@ jobs:
           E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
           E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
-        run: python -m e2e.run_cashshift_e2e | tee e2e_cashshift_output.log
+        run: |
+          set -o pipefail
+          python -m e2e.run_cashshift_e2e | tee e2e_cashshift_output.log
 
       # Beshinchi ssenariy -- TA'MINOTCHI XARID oqimi (qarang
       # e2e/run_supplier_e2e.py). Xuddi shu job ichida, avvalgi to'rt
@@ -115,7 +123,9 @@ jobs:
           E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
           E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
           E2E_TEST_BOT_USERNAME: ${{ secrets.E2E_TEST_BOT_USERNAME }}
-        run: python -m e2e.run_supplier_e2e | tee e2e_supplier_output.log
+        run: |
+          set -o pipefail
+          python -m e2e.run_supplier_e2e | tee e2e_supplier_output.log
 
       # Xom job log'ga tashqi tomondan autentifikatsiyasiz kirish
       # imkonsizligi tasdiqlangani uchun (GitHub REST/HTML orqali

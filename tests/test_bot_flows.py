@@ -74,7 +74,7 @@ async def test_founder_start_greets_founder(bot_dp):
     )
 
 
-async def test_founder_start_shows_new_greeting_and_five_menu_buttons(bot_dp):
+async def test_founder_start_shows_new_greeting_and_seven_menu_buttons(bot_dp):
     main, bot = bot_dp
 
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
@@ -88,7 +88,13 @@ async def test_founder_start_shows_new_greeting_and_five_menu_buttons(bot_dp):
 
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
     assert buttons == [
-        "👤 Xodim qo'shish", "👥 Xodimlar", "🏬 Do'konlar", "💰 Smenalarni ko'rish", "⚙️ Sozlamalar",
+        "👤 Xodim qo'shish",
+        "📢 Ishga e'lon berish",
+        "👥 Xodimlar",
+        "🏬 Do'konlar",
+        "💰 Smenalarni ko'rish",
+        "🚨 Bugungi muammolar",
+        "⚙️ Sozlamalar",
     ]
 
 

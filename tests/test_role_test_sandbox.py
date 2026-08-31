@@ -193,3 +193,42 @@ async def test_slash_command_while_picking_role_safely_escapes(bot_dp, monkeypat
 
     assert "Assalomu alaykum, Muhammadiy" in sent[0].text
     assert "rollardan birini tanlang" not in sent[0].text
+
+
+_EXPECTED_SHARED_PREVIEW_ROWS = [
+    ["⭐ Yulduzlarim", "💰 Oyligim"],
+    ["📅 Grafik so'rovi", "🏆 Bugungi o'rnim"],
+    ["🏅 Oylik reyting", "📋 Nizomlar"],
+    ["⚠️ E'tiroz bildirish", "🔙 Orqaga"],
+    ["⬅️ Testdan chiqish"],
+]
+
+
+async def test_preview_shared_category_uses_paired_friendly_buttons(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="⭐ Mening natijalarim")
+    rows = [[btn.text for btn in row] for row in sent[0].reply_markup.keyboard]
+
+    assert rows == _EXPECTED_SHARED_PREVIEW_ROWS
+    assert not any("/" in btn for row in rows for btn in row)
+
+
+async def test_friendly_shared_button_is_blocked_inside_preview(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    monkeypatch.setattr(main, "ENVIRONMENT", "test")
+
+    await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+    await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    await send(main.dp, bot, FOUNDER_ID, text="⭐ Mening natijalarim")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="⭐ Yulduzlarim")
+
+    assert "bazaga yozilmadi" in sent[0].text
+    assert "Joriy yulduzlar" not in sent[0].text
+    rows = [[btn.text for btn in row] for row in sent[0].reply_markup.keyboard]
+    assert rows == _EXPECTED_SHARED_PREVIEW_ROWS

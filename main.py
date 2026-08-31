@@ -346,14 +346,16 @@ async def ensure_authorized(message: Message) -> bool:
 # ``ensure_any_permission()`` bilan qayta tekshiradi, shuning uchun eski
 # tugma/callback/deep-link/qo'lda yozilgan buyruq orqali kirishga
 # urinish ham backendda rad etiladi.
+# Tartib EKRAN tartibi bilan bir xil (2 ustunli juftlash shu ro'yxat
+# bo'yicha hisoblanadi) — qarang ``_SHARED_BUTTON_LABELS``.
 _SHARED_COMMANDS = [
     "/mystars — Mening yulduzlarim",
     "/mymaosh — Mening oylik/bonus holatim",
-    "/apellyatsiya — Ball ayirishga e'tiroz bildirish",
     "/grafik — 📅 Grafikni o'zgartirish (so'rov)",
     "/bugungiporga — Bugungi reyting",
     "/oylikturnir — Oylik reyting",
     "/listnizom — Korxona nizomlari",
+    "/apellyatsiya — Ball ayirishga e'tiroz bildirish",
 ]
 
 _CATEGORY_LABELS: dict[str, str] = {
@@ -592,12 +594,26 @@ _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
     "/grafiksorov": "📅 Grafik so'rovlari",
 }
 
+# "⭐ Mening natijalarim" (umumiy) bo'limi uchun sodda tugma matnlari —
+# kassir/nazoratchi bilan bir xil pattern: buyruq o'zgarmaydi, faqat
+# tugmada ko'rinadigan matn almashadi.
+_SHARED_BUTTON_LABELS: dict[str, str] = {
+    "/mystars": "⭐ Yulduzlarim",
+    "/mymaosh": "💰 Oyligim",
+    "/grafik": "📅 Grafik so'rovi",
+    "/bugungiporga": "🏆 Bugungi o'rnim",
+    "/oylikturnir": "🏅 Oylik reyting",
+    "/listnizom": "📋 Nizomlar",
+    "/apellyatsiya": "⚠️ E'tiroz bildirish",
+}
+
 
 def build_category_menu(
     commands: list[str],
     *,
     button_labels: dict[str, str] | None = None,
     pair_buttons: bool = False,
+    pair_back: bool = False,
 ) -> ReplyKeyboardMarkup:
     button_texts = [
         (button_labels or {}).get(_bare_command(command), _bare_command(command))
@@ -607,7 +623,13 @@ def build_category_menu(
         rows = _paired_keyboard_rows(button_texts)
     else:
         rows = [[KeyboardButton(text=text)] for text in button_texts]
-    rows.append([KeyboardButton(text=BACK_TEXT)])
+    # ``pair_back`` faqat toq sonli tugmali juftlangan bo'limda (hozir —
+    # umumiy "natijalarim") oxirgi yolg'iz tugmani "🔙 Orqaga" bilan bir
+    # qatorga qo'yadi; boshqa hamma joyda xulq o'zgarmaydi.
+    if pair_back and rows and len(rows[-1]) == 1:
+        rows[-1].append(KeyboardButton(text=BACK_TEXT))
+    else:
+        rows.append([KeyboardButton(text=BACK_TEXT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
 
@@ -638,7 +660,7 @@ def _preview_category_keyboard(role_key: str, category_key: str) -> ReplyKeyboar
     qo'shadi."""
     if category_key == "__shared__":
         commands = _SHARED_COMMANDS
-        button_labels, pair_buttons = None, False
+        button_labels, pair_buttons, pair_back = _SHARED_BUTTON_LABELS, True, True
     else:
         commands = _visible_commands_for_role(role_key, category_key)
         is_kassir = category_key == "kassir"
@@ -650,8 +672,14 @@ def _preview_category_keyboard(role_key: str, category_key: str) -> ReplyKeyboar
         else:
             button_labels = None
         pair_buttons = is_kassir or is_nazoratchi
+        pair_back = False
 
-    category_kb = build_category_menu(commands, button_labels=button_labels, pair_buttons=pair_buttons)
+    category_kb = build_category_menu(
+        commands,
+        button_labels=button_labels,
+        pair_buttons=pair_buttons,
+        pair_back=pair_back,
+    )
     rows = list(category_kb.keyboard) + [[KeyboardButton(text=_PREVIEW_EXIT_TEXT)]]
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
@@ -676,6 +704,7 @@ _STALE_LABEL_TO_COMMAND.update({label: _bare_command(label) for label in _SHARED
 # stale (eski keshlangan) yorliqlar bilan bir xil mexanizm.
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _KASSIR_BUTTON_LABELS.items()})
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _NAZORATCHI_BUTTON_LABELS.items()})
+_STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _SHARED_BUTTON_LABELS.items()})
 
 
 class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
@@ -1557,29 +1586,43 @@ async def category_menu_handler(message: Message) -> None:
         )
         return
 
+    is_shared = category_key is None
     is_kassir = category_key == "kassir"
     is_nazoratchi = category_key == "nazoratchi"
-    if is_kassir:
+    if is_shared:
+        button_labels = _SHARED_BUTTON_LABELS
+    elif is_kassir:
         button_labels = _KASSIR_BUTTON_LABELS
     elif is_nazoratchi:
         button_labels = _NAZORATCHI_BUTTON_LABELS
     else:
         button_labels = None
-    if button_labels:
-        # Xom "/buyruq — izoh" matni tugmalar allaqachon sodda bo'lgan
-        # bo'limlarda (kassir/nazoratchi) matn tanasida ham ko'rinmasin —
-        # tugma yozuvi bilan bir xil, izohsiz.
-        display_lines = [button_labels.get(_bare_command(c), _bare_command(c)) for c in commands]
+
+    if is_shared:
+        # Tugmalarning o'zi allaqachon tushunarli (emojili) — xabar
+        # tanasida buyruqlar ro'yxatini takrorlash shart emas.
+        body = f"{message.text}\nKerakli bo'limni tanlang:"
     else:
-        display_lines = commands
-    command_list = "\n".join(display_lines)
+        if button_labels:
+            # Xom "/buyruq — izoh" matni tugmalar allaqachon sodda bo'lgan
+            # bo'limlarda (kassir/nazoratchi) matn tanasida ham ko'rinmasin —
+            # tugma yozuvi bilan bir xil, izohsiz.
+            display_lines = [button_labels.get(_bare_command(c), _bare_command(c)) for c in commands]
+        else:
+            display_lines = commands
+        command_list = "\n".join(display_lines)
+        body = (
+            f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
+            "qo'shimcha ma'lumot so'raydi):"
+        )
+
     await message.answer(
-        f"{message.text}\n{command_list}\n\nKerakli buyruqni tanlang (ba'zilari "
-        "qo'shimcha ma'lumot so'raydi):",
+        body,
         reply_markup=build_category_menu(
             commands,
             button_labels=button_labels,
-            pair_buttons=is_kassir or is_nazoratchi,
+            pair_buttons=is_shared or is_kassir or is_nazoratchi,
+            pair_back=is_shared,
         ),
     )
 

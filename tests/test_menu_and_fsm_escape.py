@@ -137,7 +137,7 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
 
     assert [btn.text for btn in rows[0]] == ["🏬 Filiallar", "📋 Xodimni baholash"]
     assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "⭐ Oylik ball qo'yish"]
-    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari"]
+    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari", "/natijam"]
     assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
 
 
@@ -246,15 +246,60 @@ async def test_category_menu_buttons_contain_no_description_text(bot_dp):
     assert not any("—" in b for b in buttons)
 
 
-async def test_shared_category_buttons_contain_no_description_text(bot_dp):
+_EXPECTED_SHARED_ROWS = [
+    ["⭐ Yulduzlarim", "💰 Oyligim"],
+    ["📅 Grafik so'rovi", "🏆 Bugungi o'rnim"],
+    ["🏅 Oylik reyting", "📋 Nizomlar"],
+    ["⚠️ E'tiroz bildirish", "🔙 Orqaga"],
+]
+
+
+async def test_shared_category_shows_paired_friendly_buttons(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="⭐ Mening natijalarim")
+    rows = [[btn.text for btn in row] for row in sent[0].reply_markup.keyboard]
+
+    assert rows == _EXPECTED_SHARED_ROWS
+
+
+async def test_shared_category_hides_raw_slash_commands(bot_dp):
     main, bot = bot_dp
     _set_role(111, "kassir")
 
     sent = await send(main.dp, bot, 111, text="⭐ Mening natijalarim")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
 
-    assert "/mystars" in buttons
-    assert not any("—" in b for b in buttons)
+    assert sent[0].text == "⭐ Mening natijalarim\nKerakli bo'limni tanlang:"
+    assert "/" not in sent[0].text
+    assert not any("/" in b or "—" in b for b in buttons)
+
+
+def test_shared_button_labels_map_back_to_their_real_commands():
+    import main
+
+    assert main._SHARED_BUTTON_LABELS == {
+        "/mystars": "⭐ Yulduzlarim",
+        "/mymaosh": "💰 Oyligim",
+        "/grafik": "📅 Grafik so'rovi",
+        "/bugungiporga": "🏆 Bugungi o'rnim",
+        "/oylikturnir": "🏅 Oylik reyting",
+        "/listnizom": "📋 Nizomlar",
+        "/apellyatsiya": "⚠️ E'tiroz bildirish",
+    }
+    for bare, friendly in main._SHARED_BUTTON_LABELS.items():
+        assert main._STALE_LABEL_TO_COMMAND[friendly] == bare
+
+
+async def test_friendly_shared_button_press_runs_the_real_command(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+
+    await send(main.dp, bot, 111, text="⭐ Mening natijalarim")
+    sent = await send(main.dp, bot, 111, text="⭐ Yulduzlarim")
+
+    assert "Joriy yulduzlar" in sent[0].text
 
 
 async def test_founder_category_buttons_contain_no_description_text(bot_dp):

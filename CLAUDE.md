@@ -1,5 +1,6 @@
 @.claude/rules.md
 @docs/FOKUS_MEMORY.md
+@docs/IS_MODE.md
 @docs/NEXT_STEP.md
 @docs/PROJECT_STATE.md
 @docs/IDEAS.md
@@ -7,6 +8,7 @@
 # Ish tartibi
 
 - Yangi sessiyada avval `docs/FOKUS_MEMORY.md` qoidalariga amal qil.
+- `I/S` yoki `Iqtisodchi Sodiq rejimi` deyilsa `docs/IS_MODE.md` darhol yoqiladi va barcha keyingi ishda ustuvor bo'ladi.
 - `FOKUS AI, davom et.` deyilsa `docs/NEXT_STEP.md` + `docs/PROJECT_STATE.md` + real Git/GitHub holatidan oxirgi nuqtani tikla; boshidan boshlama va foydalanuvchidan eski ma'lumotni qayta so'rama.
 - `G'oya:` yoki `G'oyani saqla:` deyilsa g'oyani `docs/IDEAS.md`ga yo'qolmaydigan qilib qo'sh; kodni avtomatik boshlama.
 - `Oxirgi qadamni saqla:` deyilsa `docs/NEXT_STEP.md`ni real checkpoint bilan yangila.

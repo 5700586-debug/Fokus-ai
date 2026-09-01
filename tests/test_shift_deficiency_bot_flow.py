@@ -35,6 +35,14 @@ async def _open_shift(main, bot, user_id: int, opening_balance: str = "0") -> No
     await send(main.dp, bot, user_id, text=opening_balance)
 
 
+async def _finish_daily_report(main, bot, user_id: int):
+    """Deficiency gate'dan keyin ataylab qo'shilgan Daily Report qadamini
+    (prixod -> narx -> xodim shikoyati) yopadi."""
+    await send_callback(main.dp, bot, user_id, data="csdr_prixod:0", target_chat_id=user_id)
+    await send_callback(main.dp, bot, user_id, data="csdr_price:0", target_chat_id=user_id)
+    return await send_callback(main.dp, bot, user_id, data="csdr_staff_no", target_chat_id=user_id)
+
+
 def _seed_market_item(employee_id: int, branch: str, shift_date: str, product_name: str) -> dict:
     shift = cash_shifts_repo.open_shift(employee_id, branch, shift_date, opening_balance=0, tolerance=20000)
     shift_deficiency.add_market_item(shift["id"], employee_id, product_name, 1, "kg")
@@ -74,8 +82,12 @@ async def test_full_gate_with_no_prior_items_reaches_photo_prompt(bot_dp):
     await send_callback(main.dp, bot, 111, data="csdef_none", target_chat_id=111)  # bozor yo'q
     sent = await send_callback(main.dp, bot, 111, data="csdef_none", target_chat_id=111)  # firma yo'q
 
+    # kechagi ro'yxat bo'sh -> avtomatik o'tdi va navbatdagi Daily Report boshlandi
     combined = " ".join(t for t in texts(sent) if t)
-    assert "rasmini yuboring" in combined  # kechagi ro'yxat bo'sh -> avtomatik o'tdi
+    assert "prixodi chiqmagan" in combined
+
+    sent = await _finish_daily_report(main, bot, 111)
+    assert "rasmini yuboring" in " ".join(t for t in texts(sent) if t)
 
 
 async def test_add_market_item_then_finish_moves_to_company_step(bot_dp):
@@ -153,7 +165,7 @@ async def test_yesterday_review_confirm_keeps_still_missing_open(bot_dp):
 
     sent = await send_callback(main.dp, bot, 111, data="csdef_yesterday_confirm", target_chat_id=111)
     combined = " ".join(t for t in texts(sent) if t)
-    assert "rasmini yuboring" in combined
+    assert "prixodi chiqmagan" in combined  # gate yopildi -> Daily Report boshlandi
 
     shift = cash_shifts_repo.get_open_shift(111, company_time.today().isoformat())
     assert shift_deficiency.is_flow_complete(shift["id"]) is True
@@ -166,6 +178,7 @@ async def test_full_closeshift_still_succeeds_after_clearing_deficiency_gate(bot
     await send(main.dp, bot, 111, text="/closeshift")
     await send_callback(main.dp, bot, 111, data="csdef_none", target_chat_id=111)
     await send_callback(main.dp, bot, 111, data="csdef_none", target_chat_id=111)
+    await _finish_daily_report(main, bot, 111)
 
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")

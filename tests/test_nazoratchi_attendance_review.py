@@ -6,12 +6,22 @@ ball QO'LLANMAYDI — bu fayl faqat tugma/oqim ishlashini tekshiradi."""
 from datetime import timedelta
 
 import pytest
+from aiogram.methods import EditMessageText, SendMessage
 
 import company_time
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
+
+
+def _screen(sent, index: int = 0):
+    """Callback handlerlar ba'zi oqimlarda avval `callback.answer()` toast
+    qaytaradi, shuning uchun ekran xabarini turi bo'yicha topamiz."""
+    screens = [m for m in sent if isinstance(m, (SendMessage, EditMessageText))]
+    assert len(screens) > index, f"ekran xabari topilmadi: {sent!r}"
+    return screens[index]
+
 
 _BRANCH = RECRUITING_BRANCH_NAMES[0]
 _NAZORATCHI_ID = 830001
@@ -101,7 +111,7 @@ async def test_unjustified_reason_updates_card(bot_dp):
         main.dp, bot, _NAZORATCHI_ID, data="nzr_attreason:830014:unjustified", target_chat_id=_NAZORATCHI_ID
     )
 
-    assert "Sababsiz" in sent[0].text
+    assert "Sababsiz" in _screen(sent).text
 
 
 async def test_manager_permission_sends_founder_a_request_with_ha_yoq_buttons(bot_dp):
@@ -136,7 +146,9 @@ async def test_founder_approving_manager_permission_updates_status(bot_dp):
         main.dp, bot, FOUNDER_ID, data="nzr_attmgr:830016:yes", target_chat_id=FOUNDER_ID
     )
 
-    assert "tasdiqlandi" in sent[0].text.lower()
+    assert any(
+        "tasdiqlandi" in (getattr(m, "text", None) or "").lower() for m in sent
+    )
 
     from services import attendance as attendance_service
 

@@ -87,7 +87,7 @@ async def test_allocation_branch_can_receive_more_than_requested(bot_dp):
     assert "Filial-1 uchun real necha kg berildi?" in " ".join(t for t in texts(sent) if t)
 
     sent = await send(main.dp, bot, 777, text="11.2")  # so'ralgan (10) dan ko'p
-    assert "Filial-1: 11.2 kg" in " ".join(t for t in texts(sent) if t)
+    assert "Filial-1 — so'ralgan: 10 kg, hozircha: 11.2 kg" in " ".join(t for t in texts(sent) if t)
 
 
 async def test_allocation_total_cannot_exceed_purchased_quantity(bot_dp):
@@ -106,7 +106,7 @@ async def test_allocation_total_cannot_exceed_purchased_quantity(bot_dp):
 
     await send_callback(main.dp, bot, 777, data="sup_alloc_branch:0", target_chat_id=777)
     sent = await send(main.dp, bot, 777, text="35")
-    assert "Filial-1: 35 kg" in " ".join(t for t in texts(sent) if t)
+    assert "Filial-1 — so'ralgan: 20 kg, hozircha: 35 kg" in " ".join(t for t in texts(sent) if t)
 
     await send_callback(main.dp, bot, 777, data="sup_alloc_branch:1", target_chat_id=777)
     sent = await send(main.dp, bot, 777, text="10")  # 35 + 10 = 45 > 40 -- rad etiladi

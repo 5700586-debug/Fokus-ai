@@ -4,11 +4,20 @@ xodimlar -> xodim kartasi (``nazoratchi_bot.py``)."""
 from types import SimpleNamespace
 
 import pytest
+from aiogram.methods import EditMessageText, SendMessage
 
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
+
+
+def _screen(sent, index: int = 0):
+    """Callback handlerlar ba'zi oqimlarda avval `callback.answer()` toast
+    qaytaradi, shuning uchun ekran xabarini turi bo'yicha topamiz."""
+    screens = [m for m in sent if isinstance(m, (SendMessage, EditMessageText))]
+    assert len(screens) > index, f"ekran xabari topilmadi: {sent!r}"
+    return screens[index]
 
 _BRANCH = RECRUITING_BRANCH_NAMES[0]
 _NAZORATCHI_ID = 555001
@@ -73,8 +82,9 @@ async def test_empty_branch_shows_no_data_placeholder(bot_dp):
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID)
 
-    assert _BRANCH in sent[0].text
-    assert "Hozircha bu filialda aktiv xodim mavjud emas." in sent[0].text
+    screen = _screen(sent)
+    assert _BRANCH in screen.text
+    assert "Hozircha bu filialda aktiv xodim mavjud emas." in screen.text
 
 
 async def test_branch_with_employee_shows_paired_employee_buttons(bot_dp):
@@ -236,8 +246,9 @@ async def test_confirming_time_bonus_updates_card_and_hides_button(bot_dp):
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_timebonus:700011", target_chat_id=_NAZORATCHI_ID)
 
-    assert "✅ berildi" in sent[0].text
-    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    screen = _screen(sent)
+    assert "✅ berildi" in screen.text
+    buttons = [btn.callback_data for row in screen.reply_markup.inline_keyboard for btn in row]
     assert "nzr_timebonus:700011" not in buttons
 
 
@@ -280,7 +291,7 @@ async def test_picking_a_grade_updates_the_card(bot_dp):
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700014:alo", target_chat_id=_NAZORATCHI_ID)
 
-    assert "3 (A'lo)" in sent[0].text
+    assert "3 (A'lo)" in _screen(sent).text
 
 
 async def test_regrading_same_day_does_not_double_count_bonus(bot_dp):
@@ -304,7 +315,7 @@ async def test_grading_zero_is_allowed_and_shown_as_bajarilmagan(bot_dp):
         main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700016:bajarilmagan", target_chat_id=_NAZORATCHI_ID
     )
 
-    assert "0 (Bajarilmagan)" in sent[0].text
+    assert "0 (Bajarilmagan)" in _screen(sent).text
 
 
 async def test_existing_baholash_flow_still_only_offers_three_grades(bot_dp):
@@ -509,7 +520,11 @@ async def test_penalty_other_no_ai_match_falls_back_to_founder_directly(bot_dp, 
     sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Mutlaqo aloqasi yo'q holat")
 
     assert discipline_service.get_salary(700028)["bonus_bank"] == 0
-    assert "tasdiqlangan nizom bandiga mos kelmagani" in sent[0].text
+    assert any(
+        "tasdiqlangan nizom bandiga mos kelmagani" in (getattr(m, "text", None) or "")
+        for m in sent
+        if getattr(m, "chat_id", None) == _NAZORATCHI_ID
+    )
     founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
     assert founder_texts
 
@@ -679,15 +694,24 @@ async def test_e2exodim_is_idempotent(bot_dp, monkeypatch):
 
 
 async def test_bootstrapped_founder_employee_shows_up_in_filiallar_flow(bot_dp, monkeypatch):
-    """Butun maqsad — Nazoratchi oqimida ANIQ shu akkaunt (Founder)
-    xodim sifatida tanlanadigan bo'lishi kerak."""
+    """Butun maqsad — ``/e2exodim`` yaratgan akkaunt Nazoratchi oqimida
+    haqiqiy, tanlanadigan xodim bo'lishi kerak. Ro'yxatni Nazoratchi
+    ochadi, chunki so'rovchining O'ZI ro'yxatdan chiqarib tashlanadi
+    (o'zini o'zi baholay olmaslik qoidasi, yuqoridagi testga qarang)."""
     main, bot = bot_dp
     import nazoratchi_bot
 
     monkeypatch.setattr(nazoratchi_bot, "ENVIRONMENT", "test")
+    _make_nazoratchi()
     await send(main.dp, bot, FOUNDER_ID, text="/e2exodim")
 
-    sent = await send_callback(main.dp, bot, FOUNDER_ID, data="nzr_branch:0", target_chat_id=FOUNDER_ID)
+    sent = await send_callback(
+        main.dp, bot, _NAZORATCHI_ID, data="nzr_branch:0", target_chat_id=_NAZORATCHI_ID
+    )
 
-    buttons = {btn.text: btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
+    buttons = {
+        btn.text: btn.callback_data
+        for row in _screen(sent).reply_markup.inline_keyboard
+        for btn in row
+    }
     assert any(f"nzr_emp:{FOUNDER_ID}" == data for data in buttons.values())

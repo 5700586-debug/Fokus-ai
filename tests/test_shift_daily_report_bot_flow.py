@@ -28,6 +28,15 @@ def _make_kassir(user_id: int, branch: str = "Filial-1") -> None:
     )
 
 
+def _approve_kassir(user_id: int) -> None:
+    """Xodim ustidan shikoyat ro'yxati faqat APPROVED xodimlarni ko'rsatadi
+    (``list_approved_by_branch``), shuning uchun testda ham real aktiv
+    xodim kerak."""
+    import employees
+
+    employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+
+
 async def _open_shift(main, bot, user_id: int, opening_balance: str = "0") -> None:
     await send(main.dp, bot, user_id, text="/openshift")
     await send(main.dp, bot, user_id, text=opening_balance)
@@ -164,6 +173,7 @@ async def test_staff_complaint_none_completes_gate_and_reaches_photo_prompt(bot_
 async def test_staff_complaint_yes_employee_and_known_type_completes_gate(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
+    _approve_kassir(111)
     await _open_shift(main, bot, 111)
     await send(main.dp, bot, 111, text="/closeshift")
     await _clear_deficiency_gate(main, bot, 111)
@@ -197,6 +207,7 @@ async def test_staff_complaint_yes_employee_and_known_type_completes_gate(bot_dp
 async def test_staff_complaint_other_type_requires_free_text_note(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
+    _approve_kassir(111)
     await _open_shift(main, bot, 111)
     await send(main.dp, bot, 111, text="/closeshift")
     await _clear_deficiency_gate(main, bot, 111)

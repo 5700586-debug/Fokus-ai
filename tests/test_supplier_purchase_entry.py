@@ -332,4 +332,3 @@ async def test_natijam_denied_for_unrelated_role(bot_dp):
 
     sent = await send(main.dp, bot, 999, text="/natijam")
     assert "Buyurtma" not in " ".join(t for t in texts(sent) if t)
-    assert "Filiallarga taqsimlash" in combined  # taqsimot bosqichi navbatdagi (alohida test fayli)

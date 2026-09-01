@@ -26,7 +26,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import employees
 from config import COMPANY_TIMEZONE, FOUNDER_ID
 from roles import is_authorized, list_users
-from services import discipline, discipline_ai, permissions
+from services import chat_cleanup, discipline, discipline_ai, permissions, rule_learning
 from services import rules as rules_service
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,120 @@ def _decision_keyboard(penalty_id: int) -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+# ------------------------------------------------- nizom o'qish auditi (UI) --
+
+_RULE_LEARNING_WORKFLOW = "rule_learning"
+_RULE_LEARNING_ALL_DONE = "✅ Barcha nizomlarni o'rganib bo'ldingiz."
+_RULE_LEARNING_DAILY_DONE = (
+    f"✅ Bugungi {rule_learning.DAILY_LIMIT} ta nizom tugadi. Ertaga davom etamiz."
+)
+
+
+def _rule_learning_key(employee_id: int, rule_number: int) -> str:
+    return f"{employee_id}:{rule_number}"
+
+
+def _rule_learning_text(progress: dict) -> str:
+    return (
+        f"📖 {progress['rule_number']}-nizom: {progress['title_snapshot']}\n\n"
+        f"{progress['content_snapshot']}"
+    )
+
+
+def _rule_learning_read_keyboard(progress_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ O'qidim", callback_data=f"rl:read:{progress_id}"),
+                InlineKeyboardButton(
+                    text="📖 Hali o'qiyapman", callback_data=f"rl:reading:{progress_id}"
+                ),
+            ]
+        ]
+    )
+
+
+def _rule_learning_understand_keyboard(progress_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tushundim", callback_data=f"rl:ok:{progress_id}"),
+                InlineKeyboardButton(text="❓ Tushunmadim", callback_data=f"rl:nu:{progress_id}"),
+            ]
+        ]
+    )
+
+
+def _rule_learning_reread_keyboard(progress_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📖 Qayta o'qiyman", callback_data=f"rl:reread:{progress_id}"
+                ),
+                InlineKeyboardButton(text="✅ Tushundim", callback_data=f"rl:ok:{progress_id}"),
+            ]
+        ]
+    )
+
+
+async def _send_rule_learning_card(bot, employee_id: int, progress: dict) -> None:
+    sent = await bot.send_message(
+        employee_id,
+        _rule_learning_text(progress),
+        reply_markup=_rule_learning_read_keyboard(progress["id"]),
+    )
+    rule_learning.mark_sent(progress["id"])
+    chat_cleanup.track(
+        _RULE_LEARNING_WORKFLOW, _rule_learning_key(employee_id, progress["rule_number"]), sent
+    )
+
+
+async def _send_next_rule_or_status(bot, employee_id: int) -> bool:
+    """``False`` — ko'rsatadigan band ham, aytadigan holat ham yo'q
+    (masalan aktiv nizom umuman kiritilmagan)."""
+    progress = rule_learning.get_current_rule(employee_id)
+    if progress is not None:
+        await _send_rule_learning_card(bot, employee_id, progress)
+        return True
+
+    # ``get_current_rule`` aynan shu chaqiruvda auditni yakunlagan bo'lishi
+    # mumkin, shuning uchun enrollment qayta o'qiladi.
+    enrollment = rule_learning.get_enrollment(employee_id)
+    if enrollment is not None and enrollment.get("finished_at"):
+        await bot.send_message(employee_id, _RULE_LEARNING_ALL_DONE)
+        return True
+
+    if rule_learning.completed_today(employee_id) >= rule_learning.DAILY_LIMIT:
+        await bot.send_message(employee_id, _RULE_LEARNING_DAILY_DONE)
+        return True
+
+    return False
+
+
+async def start_or_resume_rule_learning(bot, employee_id: int) -> bool:
+    """Yakunlanmagan nizom o'qish auditi bo'lsa xodimga keyingi BITTA
+    bandni (yoki bugungi limit xabarini) yuboradi. ``False`` — audit yo'q,
+    yakunlangan yoki ko'rsatadigan band yo'q; chaqiruvchi o'z odatiy
+    oqimini davom ettiraveradi."""
+    enrollment = rule_learning.get_enrollment(employee_id)
+    if enrollment is None or enrollment.get("finished_at"):
+        return False
+
+    return await _send_next_rule_or_status(bot, employee_id)
+
+
+def _rule_learning_owned_progress(callback: CallbackQuery) -> dict | None:
+    if not callback.from_user:
+        return None
+
+    progress = rule_learning.get_progress(int(callback.data.split(":")[2]))
+    if progress is None or progress["employee_id"] != callback.from_user.id:
+        return None
+
+    return progress
 
 
 class PenaltyStates(StatesGroup):
@@ -412,6 +526,9 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
 
+        if await start_or_resume_rule_learning(message.bot, message.from_user.id):
+            return
+
         rules = discipline.list_rules()
         if not rules:
             await message.answer("Hali nizomlar kiritilmagan.")
@@ -419,6 +536,76 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         lines = [f"{rule['rule_number']}. {rule['title']} — {rule['content']}" for rule in rules]
         await message.answer("📖 Korxona nizomlari:\n\n" + "\n".join(lines))
+
+    @dp.callback_query(F.data.startswith("rl:reading:"))
+    async def rule_learning_still_reading(callback: CallbackQuery) -> None:
+        await callback.answer("Yaxshi, o'qib bo'lgach \"✅ O'qidim\" tugmasini bosing.")
+
+    @dp.callback_query(F.data.startswith("rl:read:"))
+    async def rule_learning_read(callback: CallbackQuery) -> None:
+        progress = _rule_learning_owned_progress(callback)
+        if progress is None:
+            await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+            return
+
+        rule_learning.confirm_read(progress["id"])
+        await callback.message.edit_text(
+            _rule_learning_text(progress),
+            reply_markup=_rule_learning_understand_keyboard(progress["id"]),
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("rl:nu:"))
+    async def rule_learning_not_understood(callback: CallbackQuery) -> None:
+        progress = _rule_learning_owned_progress(callback)
+        if progress is None:
+            await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+            return
+
+        rule_learning.report_not_understood(progress["id"])
+        await callback.message.edit_text(
+            _rule_learning_text(progress),
+            reply_markup=_rule_learning_reread_keyboard(progress["id"]),
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("rl:reread:"))
+    async def rule_learning_reread(callback: CallbackQuery) -> None:
+        progress = _rule_learning_owned_progress(callback)
+        if progress is None:
+            await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+            return
+
+        await callback.message.edit_text(
+            _rule_learning_text(progress),
+            reply_markup=_rule_learning_understand_keyboard(progress["id"]),
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("rl:ok:"))
+    async def rule_learning_understood(callback: CallbackQuery) -> None:
+        progress = _rule_learning_owned_progress(callback)
+        if progress is None:
+            await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+            return
+
+        employee_id = progress["employee_id"]
+        if not rule_learning.confirm_understood(employee_id, progress["id"]):
+            await callback.answer()
+            return
+
+        await callback.answer()
+
+        try:
+            await chat_cleanup.cleanup(
+                callback.bot,
+                _RULE_LEARNING_WORKFLOW,
+                _rule_learning_key(employee_id, progress["rule_number"]),
+            )
+        except Exception as error:  # noqa: BLE001
+            logger.error("Nizom xabarlarini tozalab bo'lmadi: %r", error)
+
+        await _send_next_rule_or_status(callback.bot, employee_id)
 
     @dp.message(Command("setsalary"))
     async def set_salary_handler(message: Message) -> None:

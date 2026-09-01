@@ -24,9 +24,21 @@ python -m pytest -q tests/test_menu_and_fsm_escape.py tests/test_role_test_sandb
 
 Funksional kodga tegilmadi. Full test, Smoke va E2E ishlatilmadi. GitHub Actions run masalasi endi bloklovchi emas — targeted test lokal Linux muhitida PASS.
 
+## Production launch preflight (2026-09-01) — GATE PASS, DEPLOY BAJARILMADI
+
+Release candidate: `39a0c9a`.
+
+- A) `39a0c9a` mavjud — OK.
+- B) `origin/main` = `8f492e2` — kutilgan holat, o'zgarmagan.
+- C) `8f492e2` `39a0c9a`ning ancestor'i — divergence yo'q.
+- D) `config.py:21` — `ENVIRONMENT` unset bo'lsa `production`; `main.py:79` production'da `BOT_TOKEN`, `db.py:39-41` production'da `DATABASE_URL` o'qiydi. `TEST_BOT_TOKEN`/`TEST_DATABASE_URL` faqat `ENVIRONMENT=test`da.
+- E/F/G) Render CLI yo'q, `RENDER_API_KEY` yo'q — **STOP: Render production sozlamalarini tekshirish uchun access yo'q**. Orphan worker holati ham shu sababdan tekshirilmadi (va YOQILMADI).
+- Release gate: `.github/workflows/smoke-tests.yml` to'plami ubuntu Linux'da BIR MARTA ishlatildi — **88 passed, 0 failed** (53.45s). Full suite ishlatilmadi.
+- 3-QADAM BAJARILMADI: runner guard `main`/production yozuvini taqiqlaydi. `main` va Render production'ga TEGILMADI, guard tahrirlanmadi.
+
 ## KEYINGI BITTA QADAM
 
-Founder `content/daily_greetings/morning.jpg` va `night.jpg` fayllarini qo'ygach, `fokus-ai-test` servisiga branch HEAD'ni deploy qilib, daily-greetings oqimini test botda tekshirish. Bungacha yangi feature boshlanmaydi.
+Founder Render access berishi (yoki `main`ga merge + production deployni o'zi bajarishi) kerak — `39a0c9a` gate'lari PASS, faqat yozuv ruxsati yetishmayapti. Bungacha yangi feature boshlanmaydi.
 
 ## Keyingi qadam bajarilgach
 

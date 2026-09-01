@@ -81,7 +81,11 @@ def _translate_statement(sql: str) -> tuple[str, bool]:
 
 
 def _split_script(script: str) -> list[str]:
-    return [part.strip() for part in script.split(";") if part.strip()]
+    # Komment ichidagi `;` SQL bayonotini bo'lmasligi kerak. Avval
+    # kommentlarni olib tashlaymiz, keyin real bayonotlarni ajratamiz.
+    without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", "\n", script)
+    without_comments = re.sub(r"/\*.*?\*/", "", without_line_comments, flags=re.DOTALL)
+    return [part.strip() for part in without_comments.split(";") if part.strip()]
 
 
 def _has_executable_sql(sql: str) -> bool:

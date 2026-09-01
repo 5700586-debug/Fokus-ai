@@ -592,7 +592,44 @@ _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
     "/kunniyop": "✅ Kunni yopish",
     "/score": "⭐ Oylik ball qo'yish",
     "/grafiksorov": "📅 Grafik so'rovlari",
+    "/natijam": "🏆 Bugungi natija",
 }
+
+# Qolgan bo'limlar (Asoschi, ombor, haydovchi, ta'minotchi, moliyachi)
+# uchun xuddi shu pattern — tugmada xom "/buyruq" ko'rinmasin.
+_OTHER_BUTTON_LABELS: dict[str, str] = {
+    "/invite": "👤 Taklif havolasi",
+    "/setrole": "🎭 Rol berish",
+    "/removeuser": "🚫 Foydalanuvchini o'chirish",
+    "/listusers": "👥 Foydalanuvchilar",
+    "/profile": "🪪 Xodim anketasi",
+    "/addnizom": "📜 Nizom qo'shish",
+    "/setnizombahosi": "⚖️ Nizom bahosi",
+    "/setsalary": "💵 Oylik belgilash",
+    "/maosh": "💰 Xodim maoshi",
+    "/setrule": "🛠 Qoidani sozlash",
+    "/listrules": "📄 Qoidalar",
+    "/processmonth": "📊 Oylik hisob",
+    "/addvehicle": "🚗 Mashina qo'shish",
+    "/vazifabiriktir": "📌 Vazifa berish",
+    "/vazifabekor": "❎ Vazifani olib tashlash",
+    "/invsnapshot": "📦 Ombor hisoboti",
+    "/inventorysummary": "📈 Ombor xulosasi",
+    "/mealplan": "🍽 Ovqat rejasi",
+    "/drivercheck": "🚚 Mashina tekshiruvi",
+    "/marketlog": "📝 Bozor kuzatuvi",
+    "/xarid": "🛒 Bozorlik xaridi",
+    "/natijam": "🏆 Bugungi natija",
+    "/cashsummary": "💵 Kassa xulosasi",
+}
+
+
+def _category_button_labels(category_key: str) -> dict[str, str]:
+    if category_key == "kassir":
+        return _KASSIR_BUTTON_LABELS
+    if category_key == "nazoratchi":
+        return _NAZORATCHI_BUTTON_LABELS
+    return _OTHER_BUTTON_LABELS
 
 # "⭐ Mening natijalarim" (umumiy) bo'limi uchun sodda tugma matnlari —
 # kassir/nazoratchi bilan bir xil pattern: buyruq o'zgarmaydi, faqat
@@ -604,7 +641,13 @@ _SHARED_BUTTON_LABELS: dict[str, str] = {
     "/bugungiporga": "🏆 Bugungi o'rnim",
     "/oylikturnir": "🏅 Oylik reyting",
     "/listnizom": "📋 Nizomlar",
-    "/apellyatsiya": "⚠️ E'tiroz bildirish",
+    "/apellyatsiya": "🙋 E'tirozim bor",
+}
+
+# Foydalanuvchi qurilmasida keshlanib qolgan ESKI friendly yorliqlar —
+# bosilsa hamon o'z buyrug'iga olib borsin.
+_LEGACY_BUTTON_LABELS: dict[str, str] = {
+    "⚠️ E'tiroz bildirish": "/apellyatsiya",
 }
 
 
@@ -663,15 +706,8 @@ def _preview_category_keyboard(role_key: str, category_key: str) -> ReplyKeyboar
         button_labels, pair_buttons, pair_back = _SHARED_BUTTON_LABELS, True, True
     else:
         commands = _visible_commands_for_role(role_key, category_key)
-        is_kassir = category_key == "kassir"
-        is_nazoratchi = category_key == "nazoratchi"
-        if is_kassir:
-            button_labels = _KASSIR_BUTTON_LABELS
-        elif is_nazoratchi:
-            button_labels = _NAZORATCHI_BUTTON_LABELS
-        else:
-            button_labels = None
-        pair_buttons = is_kassir or is_nazoratchi
+        button_labels = _category_button_labels(category_key)
+        pair_buttons = True
         pair_back = False
 
     category_kb = build_category_menu(
@@ -705,6 +741,8 @@ _STALE_LABEL_TO_COMMAND.update({label: _bare_command(label) for label in _SHARED
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _KASSIR_BUTTON_LABELS.items()})
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _NAZORATCHI_BUTTON_LABELS.items()})
 _STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _SHARED_BUTTON_LABELS.items()})
+_STALE_LABEL_TO_COMMAND.update({friendly: bare for bare, friendly in _OTHER_BUTTON_LABELS.items()})
+_STALE_LABEL_TO_COMMAND.update(_LEGACY_BUTTON_LABELS)
 
 
 class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
@@ -1587,16 +1625,7 @@ async def category_menu_handler(message: Message) -> None:
         return
 
     is_shared = category_key is None
-    is_kassir = category_key == "kassir"
-    is_nazoratchi = category_key == "nazoratchi"
-    if is_shared:
-        button_labels = _SHARED_BUTTON_LABELS
-    elif is_kassir:
-        button_labels = _KASSIR_BUTTON_LABELS
-    elif is_nazoratchi:
-        button_labels = _NAZORATCHI_BUTTON_LABELS
-    else:
-        button_labels = None
+    button_labels = _SHARED_BUTTON_LABELS if is_shared else _category_button_labels(category_key)
 
     if is_shared:
         # Tugmalarning o'zi allaqachon tushunarli (emojili) — xabar
@@ -1621,7 +1650,7 @@ async def category_menu_handler(message: Message) -> None:
         reply_markup=build_category_menu(
             commands,
             button_labels=button_labels,
-            pair_buttons=is_shared or is_kassir or is_nazoratchi,
+            pair_buttons=True,
             pair_back=is_shared,
         ),
     )

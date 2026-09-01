@@ -199,7 +199,7 @@ _EXPECTED_SHARED_PREVIEW_ROWS = [
     ["⭐ Yulduzlarim", "💰 Oyligim"],
     ["📅 Grafik so'rovi", "🏆 Bugungi o'rnim"],
     ["🏅 Oylik reyting", "📋 Nizomlar"],
-    ["⚠️ E'tiroz bildirish", "🔙 Orqaga"],
+    ["🙋 E'tirozim bor", "🔙 Orqaga"],
     ["⬅️ Testdan chiqish"],
 ]
 

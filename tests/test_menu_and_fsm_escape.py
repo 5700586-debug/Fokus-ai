@@ -137,7 +137,7 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
 
     assert [btn.text for btn in rows[0]] == ["🏬 Filiallar", "📋 Xodimni baholash"]
     assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "⭐ Oylik ball qo'yish"]
-    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari", "/natijam"]
+    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari", "🏆 Bugungi natija"]
     assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
 
 
@@ -250,7 +250,7 @@ _EXPECTED_SHARED_ROWS = [
     ["⭐ Yulduzlarim", "💰 Oyligim"],
     ["📅 Grafik so'rovi", "🏆 Bugungi o'rnim"],
     ["🏅 Oylik reyting", "📋 Nizomlar"],
-    ["⚠️ E'tiroz bildirish", "🔙 Orqaga"],
+    ["🙋 E'tirozim bor", "🔙 Orqaga"],
 ]
 
 
@@ -286,7 +286,7 @@ def test_shared_button_labels_map_back_to_their_real_commands():
         "/bugungiporga": "🏆 Bugungi o'rnim",
         "/oylikturnir": "🏅 Oylik reyting",
         "/listnizom": "📋 Nizomlar",
-        "/apellyatsiya": "⚠️ E'tiroz bildirish",
+        "/apellyatsiya": "🙋 E'tirozim bor",
     }
     for bare, friendly in main._SHARED_BUTTON_LABELS.items():
         assert main._STALE_LABEL_TO_COMMAND[friendly] == bare
@@ -308,11 +308,11 @@ async def test_founder_category_buttons_contain_no_description_text(bot_dp):
     sent = await send(main.dp, bot, FOUNDER_ID, text="👑 Asoschi")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
 
-    assert "/invite" in buttons
-    assert "/setrole" in buttons
-    assert "/removeuser" in buttons
-    assert "/listusers" in buttons
-    assert not any("—" in b for b in buttons)
+    assert "👤 Taklif havolasi" in buttons
+    assert "🎭 Rol berish" in buttons
+    assert "🚫 Foydalanuvchini o'chirish" in buttons
+    assert "👥 Foydalanuvchilar" in buttons
+    assert not any("—" in b or b.startswith("/") for b in buttons)
 
 
 async def test_invite_button_press_does_not_report_invalid_role_key(bot_dp):
@@ -359,8 +359,12 @@ async def test_every_role_category_buttons_are_description_free(bot_dp, role_key
 
     assert len(buttons) > 1  # kamida bitta buyruq + "Orqaga"
     assert not any("—" in b for b in buttons)
-    friendly_labels = set(main._KASSIR_BUTTON_LABELS.values()) | set(main._NAZORATCHI_BUTTON_LABELS.values())
-    assert all(b == "🔙 Orqaga" or b.startswith("/") or b in friendly_labels for b in buttons)
+    friendly_labels = (
+        set(main._KASSIR_BUTTON_LABELS.values())
+        | set(main._NAZORATCHI_BUTTON_LABELS.values())
+        | set(main._OTHER_BUTTON_LABELS.values())
+    )
+    assert all(b == "🔙 Orqaga" or b in friendly_labels for b in buttons)
 
 
 # ------------------------- eski (Telegram'da keshlangan) izohli tugma --

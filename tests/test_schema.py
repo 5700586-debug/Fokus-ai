@@ -28,6 +28,8 @@ EXPECTED_TABLES = {
     "inventory_variance_reviews",
     "calibration_sessions",
     "calibration_questions",
+    "rule_learning_enrollments",
+    "rule_learning_progress",
 }
 
 

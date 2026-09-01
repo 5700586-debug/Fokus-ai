@@ -1,20 +1,38 @@
-"""Moslashuvchan qo'shimcha savol (adaptive follow-up).
+"""Moslashuvchan qo'shimcha savol (adaptive follow-up) — "jonli suhbat"
+hissi uchun asosiy mexanizm.
 
-Nomzod javobi xavfli (masalan kassa/login xavfsizligini buzadigan),
-noaniq yoki o'zaro zid ko'rinsa, BITTA aniqlashtiruvchi savol so'raladi.
+Nomzod javobi noaniq, mavzudan tashqari, ikki xil talqin qilinadigan
+yoki (ma'lum savol turlari uchun) xavfli ko'rinsa, BITTA qisqa,
+oddiy/xalqchil tilda aniqlashtiruvchi savol so'raladi. Real Telegram
+sinovida aniqlangan muammolar:
+
+- Imloviy xato/sheva/og'zaki yozuvni AI aniqlashtirmadi — shu sabab
+  quyidagi AI ko'rsatmasida buni ANIQ talab qilamiz (imlo emas, MA'NO
+  muhim).
+- Qo'shimcha savollar "protsedura", "protokol" kabi og'ir so'zlar bilan
+  chiqdi — AI ko'rsatmasida bunday so'zlar ANIQ taqiqlangan, deterministik
+  qoidalar ham shu uslubda yozilgan.
+
 Avval AI (mavjud bo'lsa) so'raladi — u faqat qisqa JSON qaytaradi,
 qat'iy tekshiriladi. AI ishlamasa yoki noto'g'ri/uzun natija bersa,
-oldindan yozilgan deterministik qoidalarga o'tiladi. Suhbat davomida
+oldindan yozilgan deterministik qoidalarga o'tiladi (``recruiting_redflags``
+va umumiy "noaniq javob" tekshiruvi). Suhbat davomida BITTA javobga
 maksimal necha marta so'ralishi (``config.RECRUITING_MAX_FOLLOW_UPS``)
-chaqiruvchi kod (``recruiting_bot.py``) tomonidan nazorat qilinadi —
-bu modul faqat "shu javobga qo'shimcha savol kerakmi va qanday" degan
+chaqiruvchi kod (``recruiting_bot.py``) tomonidan nazorat qilinadi — bu
+modul faqat "shu javobga qo'shimcha savol kerakmi va qanday" degan
 savolga javob beradi.
-"""
+
+AI HECH QACHON nomzod o'rniga ma'no o'ylab topmaydi: ishonchi past
+bo'lsa (noaniq holat), AI ``null`` qaytarishga o'rgatilgan — bunda
+deterministik qoida ishlaydi yoki (mos kelmasa) javob "noaniq" deb
+belgilanadi, chaqiruvchi kod inson ko'rib chiqishini talab qiladi."""
 
 import json
 import logging
 
 from openai import AsyncOpenAI
+
+from services import recruiting_redflags
 
 logger = logging.getLogger(__name__)
 
@@ -22,35 +40,89 @@ _MODEL = "gpt-5-mini"
 _MIN_LEN = 5
 _MAX_LEN = 200
 
-# (javobda qidiriladigan kalit so'zlar, mos aniqlashtiruvchi savol).
-# Birinchi mos kelgan qoida ishlatiladi.
-_DETERMINISTIC_RULES: list[tuple[tuple[str, ...], str]] = [
-    (
-        ("kassamni beraman", "kassani beraman", "loginimni beraman", "login beraman",
-         "parolimni beraman", "parolni beraman", "hisobimni beraman", "kirish ma'lumotlarimni beraman"),
-        "U foydalanganidan keyin kassada kamomad chiqsa, javobgarlik kimda bo'ladi?",
-    ),
-    (
-        ("bilmayman", "hech narsa qilmayman", "e'tibor bermayman", "ahamiyat bermayman", "farqi yo'q"),
-        "Bu vaziyatda aniq qanday harakat qilishingizni tasavvur qiling — birinchi qadamingiz nima bo'lardi?",
-    ),
-    (
-        ("uni ayblayman", "u aybdor", "mening aybim emas", "boshqasining aybi"),
-        "Vaziyatni tuzatish uchun o'zingiz qanday qadam qo'yasiz?",
-    ),
-]
+def _redflag_checker_for(question_key: str | None):
+    from services import recruiting_questions as rq
+
+    if question_key is None:
+        return None
+    if question_key in rq.EXPIRED_PRODUCT_QUESTION_KEYS:
+        return recruiting_redflags.check_expired_product
+    if question_key in rq.SHORTAGE_QUESTION_KEYS:
+        return recruiting_redflags.check_shortage_response
+    if question_key in rq.CREDENTIAL_SHARING_QUESTION_KEYS:
+        return recruiting_redflags.check_credential_sharing
+    if question_key in rq.CUSTOMER_CONFLICT_QUESTION_KEYS:
+        return recruiting_redflags.check_customer_conflict
+    if question_key in rq.THEFT_QUESTION_KEYS:
+        return recruiting_redflags.check_theft_witness
+    return None
+
+
+# Oddiy, mavzudan qat'i nazar "javob aslida hech narsa aytmayapti" holatlari
+# — imlo emas, MAZMUN yo'qligi (masalan bitta so'z, umuman aloqasiz javob).
+_GENERIC_VAGUE_PHRASES = (
+    "bilmayman", "bilmadim", "nima desam", "nima deyman", "aytolmayman",
+    "farqi yo'q", "har xil", "shunchaki", "hech narsa", "yo'q gap",
+)
 
 
 def _normalize(text: str) -> str:
     return text.strip().lower().replace("‘", "'").replace("’", "'")
 
 
-def deterministic_follow_up(answer_text: str) -> str | None:
+def _looks_too_short_to_be_an_answer(text: str) -> bool:
+    """Juda qisqa (1-2 so'z, sanoq/undov) javoblar — ochiq savolga
+    "ha"/"yo'q"/"xa" kabi javob amalda hech narsa bildirmaydi."""
+    words = text.split()
+    if len(words) > 2:
+        return False
+    return _normalize(text) in {"ha", "yo'q", "yoq", "xa", "yaxshi", "bilmayman", "-", "?"}
+
+
+def deterministic_follow_up(answer_text: str, question_key: str | None = None) -> str | None:
+    """Savolga xos (agar ``question_key`` berilsa) yoki umumiy qoidalar
+    bo'yicha aniqlashtiruvchi savol matni, yoki javob aniq/xavfsiz bo'lsa
+    ``None``."""
     lowered = _normalize(answer_text)
-    for keywords, question in _DETERMINISTIC_RULES:
-        if any(keyword in lowered for keyword in keywords):
-            return question
+    if not lowered:
+        return "Kechirasiz, javobingizni ko'rmadim — birroz batafsilroq yozib bera olasizmi?"
+
+    # Real Telegram sinovidan keyingi tuzatuv: pozitsiya aniq bo'lsa
+    # (RED — salbiy bo'lsa ham, yoki GREEN — xavfsiz), qayta-qayta
+    # so'ralmaydi. Follow-up FAQAT javob chindan ham ikkilanuvchan
+    # (UNCLEAR) bo'lganda so'raladi — signal (RED/GREEN) baholashda
+    # (``recruiting_scoring.py``) ishlatiladi, suhbatda "to'g'rilash"
+    # uchun emas.
+    checker = _redflag_checker_for(question_key)
+    if checker is not None:
+        status = checker(answer_text)
+        if status == recruiting_redflags.UNCLEAR:
+            return _redflag_clarifying_question(question_key)
+        return None
+
+    # Umumiy (savol turiga bog'liq bo'lmagan) noaniqlik tekshiruvi —
+    # bu MA'NOSIZ/juda qisqa javoblar uchun, aniq (garchi salbiy
+    # bo'lsa ham) pozitsiya uchun EMAS.
+    if _looks_too_short_to_be_an_answer(answer_text) or any(p in lowered for p in _GENERIC_VAGUE_PHRASES):
+        return "Tushunmadim — bu holatda aniq nima qilgan bo'lardingiz, birrov aytib bera olasizmi?"
+
     return None
+
+
+def _redflag_clarifying_question(question_key: str | None) -> str:
+    from services import recruiting_questions as rq
+
+    if question_key in rq.EXPIRED_PRODUCT_QUESTION_KEYS:
+        return "Aniqlashtiray — muddati o'tgan mahsulotni sotib yuborasizmi, yoki uni javondan olib tashlaysizmi?"
+    if question_key in rq.SHORTAGE_QUESTION_KEYS:
+        return "Tushunmadim — kassada pul kam chiqsa, buni birinchi kimga aytasiz?"
+    if question_key in rq.CREDENTIAL_SHARING_QUESTION_KEYS:
+        return "Aniqlik uchun so'rayman — login yoki kassangizni hech kimga bermaysiz, to'g'rimi?"
+    if question_key in rq.CUSTOMER_CONFLICT_QUESTION_KEYS:
+        return "Xaridor sizni haqorat qilsa ham, xotirjam yo'l tutasizmi?"
+    if question_key in rq.THEFT_QUESTION_KEYS:
+        return "Tushunmadim — buni ko'rib qolsangiz, rahbarga aytasizmi?"
+    return "Tushunmadim, birrov aniqroq aytib bera olasizmi?"
 
 
 def _parse_json(raw: str) -> dict | None:
@@ -71,15 +143,41 @@ async def _ai_follow_up(client: AsyncOpenAI, question_text: str, answer_text: st
         response = await client.responses.create(
             model=_MODEL,
             instructions=(
-                "Sen ishga qabul suhbatini kuzatuvchi yordamchisan. Faqat berilgan JAVOB "
-                "xavfli (masalan xavfsizlik yoki kassa qoidasini buzadigan), noaniq yoki "
-                "o'zaro zid bo'lsa, BITTA qisqa (10-25 so'z) aniqlashtiruvchi savol taklif "
-                "qil. Javob normal/qoniqarli bo'lsa, follow_up qiymatini null qil. "
-                "Nomzodni ayblama, haqorat qilma, unga o'rgatib qo'yma, shaxsiy yoki "
-                "himoyalangan xususiyat (din, millat, oilaviy holat va h.k.) haqida hech "
-                "qachon so'rama. Yangi mavzu o'ylab topma — faqat shu javobga aniqlik "
-                "kiritishga oid savol ber. Faqat quyidagi JSON formatida javob qaytar, "
-                'boshqa hech narsa yozma: {"follow_up": "savol matni yoki null"}'
+                "Sen ishga qabul suhbatini olib boruvchi, iliq va sabrli HR "
+                "yordamchisan. Nomzod javobida IMLOVIY XATO, SHEVA yoki OG'ZAKI "
+                "yozuv bo'lishi mumkin — buning uchun JAZOLAMA, faqat MA'NOSINI "
+                "tushunishga harakat qil. Javobning POZITSIYASI (fikri qanday "
+                "ekani) tushunarli bo'lsa — hatto javob zaif, salbiy yoki xavfli "
+                "ko'rinsa ham — follow_up qiymatini null qil va o'tkazib yubor. "
+                "Follow-up FAQAT javob chindan ham ikki xil talqin qilinadigan "
+                "yoki tushunib bo'lmaydigan bo'lgandagina so'raladi — nomzodning "
+                "fikri allaqachon aniq bo'lsa, buni 'to'g'irlash' yoki qayta "
+                "tasdiqlash uchun ISHLATILMAYDI.\n\n"
+                "Faqat quyidagi holatlarda BITTA qisqa, oddiy va xalqchil tilda "
+                "aniqlashtiruvchi savol taklif qil:\n"
+                "- javob noaniq yoki ikki xil talqin qilinadi (pozitsiyasi "
+                "aniqlanmaydi);\n"
+                "- javob savolga aloqasi yo'q yoki mavzudan qochadi.\n\n"
+                "QAT'IY TAQIQ: savolda 'protsedura', 'protokol', 'eskalatsiya', "
+                "'rasmiylashtirish' kabi rasmiy/og'ir so'zlarni ISHLATMA — oddiy "
+                "kundalik so'zlashuv tilida yoz (masalan 'kimga aytasiz' emas "
+                "'rasmiylashtirasizmi' kabi emas). Nomzodni ayblama, haqorat "
+                "qilma, unga o'rgatib qo'yma, shaxsiy yoki himoyalangan xususiyat "
+                "(din, millat, oilaviy holat va h.k.) haqida hech qachon so'rama. "
+                "Nomzodni 'to'g'ri' yoki kutilgan javobga yetaklovchi ishora "
+                "berma — vazifang uning haqiqiy fikrini bilish, kerakli javobni "
+                "olish emas. Yangi mavzu o'ylab topma — faqat shu javobga "
+                "aniqlik kiritishga oid savol ber.\n\n"
+                "AGAR ISHONCHING PAST bo'lsa (javob chindan ham tushunarsiz "
+                "ekanini aniq bila olmasang), baribir eng xavfsiz yo'l — oddiy "
+                "aniqlashtiruvchi savol taklif qilish, LEKIN nomzod o'rniga hech "
+                "qachon ma'no o'ylab topma yoki uning fikrini taxmin qilib yozma.\n\n"
+                "MUHIM: noaniq yoki g'alati eshitiladigan gapni (masalan tanadagi "
+                "biror a'zo tilga olingan idioma yoki sheva iborasi) DARHOL "
+                "tahdid/agressiya deb talqin qilma — bunday holatda ham faqat "
+                "yumshoq aniqlashtiruvchi savol ber, hech qachon ayblama.\n\n"
+                "Faqat quyidagi JSON formatida javob qaytar, boshqa hech narsa "
+                'yozma: {"follow_up": "savol matni yoki null"}'
             ),
             input=f"Savol: {question_text}\nNomzod javobi: {answer_text}",
         )
@@ -92,20 +190,150 @@ async def _ai_follow_up(client: AsyncOpenAI, question_text: str, answer_text: st
         follow_up = follow_up.strip()
         if not (_MIN_LEN <= len(follow_up) <= _MAX_LEN):
             return None
+        lowered = follow_up.lower()
+        if any(word in lowered for word in ("protsedura", "protokol", "eskalatsiya", "rasmiylashtir")):
+            return None
         return follow_up
     except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
         logger.warning("OpenAI xatosi (recruiting follow-up): %r", error)
         return None
 
 
+async def detect_humor(client: AsyncOpenAI | None, question_text: str, answer_text: str) -> bool:
+    """Nomzod savolga bezarar hazil bilan javob berganini aniqlaydi —
+    faqat AI orqali (kalit so'z bilan "hazilmi yo'qmi" ishonchli
+    aniqlab bo'lmaydi). AI mavjud bo'lmasa yoki xato bersa HAR DOIM
+    ``False`` — noaniq holatda "hazil" deb taxmin qilinmaydi, oddiy
+    aniqlashtiruvchi yo'lga tushiladi (xavfsizroq)."""
+    if client is None:
+        return False
+    try:
+        response = await client.responses.create(
+            model=_MODEL,
+            instructions=(
+                "Sen ishga qabul suhbatidagi HR yordamchisan. Nomzod javobi "
+                "savolga aloqasi yo'q, lekin ANIQ bezarar hazil/kulgili gap "
+                "ekanligini aniqla. Agar javob jiddiy mavzuga tegishli bo'lsa "
+                "(masalan tahdid, zo'ravonlik, o'g'irlik, sudlanganlik, "
+                "kamomad, xavfsizlik va h.k.) — bu HECH QACHON hazil deb "
+                "belgilanmasin, hatto kulgili ohangda yozilgan bo'lsa ham. "
+                "Ishonching past bo'lsa yoki hazil ekanligi shubhali bo'lsa, "
+                "hazil DEB BELGILAMA (false qaytar). Faqat quyidagi JSON "
+                'formatida javob qaytar, boshqa hech narsa yozma: '
+                '{"is_joke": true yoki false}'
+            ),
+            input=f"Savol: {question_text}\nNomzod javobi: {answer_text}",
+        )
+        data = _parse_json(response.output_text or "")
+        if data is None:
+            return False
+        return data.get("is_joke") is True
+    except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
+        logger.warning("OpenAI xatosi (recruiting humor detect): %r", error)
+        return False
+
+
 async def decide_follow_up(
-    client: AsyncOpenAI | None, question_text: str, answer_text: str
+    client: AsyncOpenAI | None, question_text: str, answer_text: str, question_key: str | None = None
 ) -> str | None:
     """``None`` — qo'shimcha savol kerak emas. Aks holda — bitta
-    aniqlashtiruvchi savol matni."""
+    aniqlashtiruvchi savol matni. ``question_key`` berilsa, kritik
+    (red-flag) kategoriyalar bo'yicha maxsus tekshiruv ham ishlaydi."""
     if client is not None:
         ai_result = await _ai_follow_up(client, question_text, answer_text)
         if ai_result:
             return ai_result
 
-    return deterministic_follow_up(answer_text)
+    return deterministic_follow_up(answer_text, question_key)
+
+
+# --------------------------------------------------- suhbat chegaralari --
+# Bot FAQAT ishga qabul suhbati doirasida ishlashi kerak (vakansiya, ish
+# shartlari, nomzod javoblari). Bu bo'lim ikkita mustaqil himoya qatlamini
+# ta'minlaydi:
+#
+# 1. ``is_security_probe`` — DETERMINISTIK, AI'ga bog'liq emas (hech
+#    qachon "ishlamay qolmasligi" kerak bo'lgan eng muhim himoya):
+#    source code, system prompt, API kalit/token/.env, DB, ichki
+#    arxitektura yoki "oldingi ko'rsatmalarni unut" kabi prompt-injection
+#    urinishlarini kalit so'z bo'yicha aniqlaydi.
+# 2. ``is_off_topic`` — AI orqali (faqat AI mavjud bo'lsa; aks holda
+#    ``False`` — noaniq holatda nomzodni bezovta qilmaslik xavfsizroq),
+#    nomzod javob o'rniga botga umuman aloqasiz savol/gap yozganini
+#    aniqlaydi (masalan ob-havo, shaxsiy suhbat va h.k.).
+#
+# Ikkalasi ham ANIQLANGANDA suhbat holati/state machine O'ZGARMAYDI —
+# faqat qisqa javob berilib, xuddi shu kutilayotgan savol qayta
+# ko'rsatiladi (qarang recruiting_bot.py dagi chaqiruv nuqtalari).
+
+SECURITY_REFUSAL_TEXT = (
+    "Ichki tizim va xavfsizlik ma'lumotlari maxfiy. Men faqat ishga qabul "
+    "jarayoni bo'yicha yordam bera olaman."
+)
+OFF_TOPIC_REDIRECT_TEXT = "Men faqat ishga qabul suhbati bo'yicha yordam beraman 🙂 Davom etamiz."
+
+_SECURITY_KEYWORDS = (
+    # kod / arxitektura
+    "system prompt", "system instruksiya", "sistem prompt", "manba kod", "manba kodi",
+    "source code", "kodni ko'rsat", "kodingni ko'rsat", "loyiha skeleti",
+    "ichki arxitektura", "arxitekturangni",
+    # kalit/token/muhit
+    "api key", "api kalit", "api token", "bot token", "bot tokeni", ".env",
+    # DB va admin/xavfsizlik
+    "ma'lumotlar bazasi", "database", "sql so'rov", "admin parol", "administrator parol",
+    "xavfsizlik sozlamalari", "server sozlamalari",
+    # prompt-injection urinishlari
+    "ko'rsatmalaringni unut", "ko'rsatmalarni unut", "instruksiyalaringni unut",
+    "instruksiyalarni unut", "avvalgi ko'rsatma", "oldingi ko'rsatma",
+    "ignore previous", "ignore all previous", "ignore your instructions",
+    "jailbreak", "promptingni chiqar", "promptini chiqar",
+)
+
+
+def _normalize_for_probe(text: str) -> str:
+    return (text or "").strip().lower().replace("‘", "'").replace("’", "'")
+
+
+def is_security_probe(text: str) -> bool:
+    """Faqat kalit so'z asosida — AI mavjud bo'lmasa ham HAR DOIM
+    ishlaydi, chunki bu eng muhim himoya qatlami (hech qachon ichki
+    tizim/xavfsizlik ma'lumoti oshkor bo'lmasligi kerak)."""
+    lowered = _normalize_for_probe(text)
+    if not lowered:
+        return False
+    return any(keyword in lowered for keyword in _SECURITY_KEYWORDS)
+
+
+async def is_off_topic(client: AsyncOpenAI | None, question_text: str, answer_text: str) -> bool:
+    """Nomzod javob o'rniga botga aloqasiz savol/mavzu yozganini
+    aniqlaydi (masalan ob-havo, shaxsiy suhbat). AI mavjud bo'lmasa yoki
+    xato bersa HAR DOIM ``False`` — noaniq holatda nomzodni asossiz
+    "mavzudan chetga chiqdingiz" deb ushlab qolmaslik xavfsizroq."""
+    if client is None:
+        return False
+    try:
+        response = await client.responses.create(
+            model=_MODEL,
+            instructions=(
+                "Sen ishga qabul suhbatidagi HR yordamchisan. Bot FAQAT "
+                "vakansiya, ish shartlari va nomzodning shu suhbatdagi "
+                "javoblari doirasida ishlashi kerak. Nomzod javobi ANIQ "
+                "botga umuman aloqasiz mavzuga (masalan ob-havo, sport, "
+                "shaxsiy suhbat, umuman boshqa mavzu) o'tib ketganini "
+                "aniqla — bu savolga qiyshiq/tushunarsiz/qisqa javob "
+                "berish EMAS, balki butunlay BOSHQA mavzuga o'tish. "
+                "Bezarar hazil yoki savolga tegishli (hatto chalkash) "
+                "javob mavzudan chetga chiqish deb hisoblanmaydi. "
+                "Ishonching past bo'lsa, mavzudan chetga chiqmagan deb hisobla. "
+                'Faqat quyidagi JSON formatida javob qaytar: '
+                '{"off_topic": true yoki false}'
+            ),
+            input=f"Kutilayotgan savol: {question_text}\nNomzod yozgani: {answer_text}",
+        )
+        data = _parse_json(response.output_text or "")
+        if data is None:
+            return False
+        return data.get("off_topic") is True
+    except Exception as error:  # noqa: BLE001 - AI xatosi suhbatni to'xtatmasin
+        logger.warning("OpenAI xatosi (recruiting off-topic detect): %r", error)
+        return False

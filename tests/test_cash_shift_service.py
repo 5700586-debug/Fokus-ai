@@ -51,7 +51,9 @@ def test_zero_difference_is_clean_closed():
     )
 
     assert result.difference == 0
-    assert result.status == cash_shift.STATUS_CLEAN_CLOSED
+    # Toza chiqsa ham smena darhol yopilmaydi — qabul qiluvchi kassir
+    # mustaqil sanab tasdiqlagunicha PENDING_HANDOVER'da qoladi.
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
     assert result.finalized is True
 
 
@@ -64,7 +66,7 @@ def test_difference_within_tolerance():
         cash_expenses=0, actual_cash_balance=100_000 - 15_000,
     )
 
-    assert result.status == cash_shift.STATUS_WITHIN_TOLERANCE
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
     assert result.finalized is True
 
 
@@ -146,6 +148,67 @@ def test_supervisor_approve_finalizes_shift():
     assert updated["closed_at"] is not None
 
 
+def test_duplicate_supervisor_decision_only_applies_once():
+    """Regressiya: bir xil smena bo'yicha qaror ikki marta ketma-ket
+    yuborilsa (masalan ikki marta bosilgan tugma yoki ikki xil
+    Nazoratchi/Founder bir vaqtda), faqat BIRINCHISI muvaffaqiyatli
+    bo'lishi va faqat BITTA approval yozuvi qo'shilishi kerak —
+    handler o'z holatini oldindan qayta tekshirmasdan to'g'ridan-to'g'ri
+    ikkinchi marta chaqirish orqali (haqiqiy parallel so'rovni
+    simulyatsiya qiladi, chunki handlerdagi oldindan tekshiruv
+    ikkinchisini allaqachon ushlab qolgan bo'lardi).
+    """
+    shift = _open(manual_opening=0)
+    for _ in range(3):
+        cash_shift.submit_close_attempt(
+            shift["id"], cash_sales=100_000, card_sales=0, other_payments=0,
+            cash_expenses=0, actual_cash_balance=50_000,
+        )
+
+    first = cash_shift.apply_supervisor_decision(shift["id"], reviewed_by=999, decision="approved", comment="OK")
+    second = cash_shift.apply_supervisor_decision(
+        shift["id"], reviewed_by=888, decision="rejected", comment="Kech qoldi"
+    )
+
+    assert first is True
+    assert second is False
+
+    updated = cash_shift.get_shift(shift["id"])
+    assert updated["status"] == cash_shift.STATUS_APPROVED_BY_SUPERVISOR  # ikkinchisi o'zgartirmadi
+
+    import db
+
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM cash_shift_approvals WHERE shift_id = ?", (shift["id"],)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["c"] == 1
+
+
+def test_duplicate_confirm_handover_only_succeeds_once():
+    """``handle_discrepancy_approve`` va oddiy topshirish oqimining
+    ikkalasi ham ``confirm_handover``ga tayanadi — shu funksiya ikki
+    marta ketma-ket chaqirilsa, faqat birinchisi smenani yopishi kerak.
+    """
+    shift = _open(manual_opening=0)
+    cash_shift.submit_close_attempt(
+        shift["id"], cash_sales=0, card_sales=0, other_payments=0,
+        cash_expenses=0, actual_cash_balance=0,
+    )  # toza (difference=0) -> PENDING_HANDOVER
+
+    first = cash_shift.confirm_handover(shift["id"])
+    second = cash_shift.confirm_handover(shift["id"])
+
+    assert first is True
+    assert second is False
+
+    updated = cash_shift.get_shift(shift["id"])
+    assert updated["status"] == cash_shift.STATUS_CLEAN_CLOSED
+
+
 def test_supervisor_recheck_lets_kassir_try_again():
     shift = _open(manual_opening=0)
     for _ in range(3):
@@ -161,7 +224,7 @@ def test_supervisor_recheck_lets_kassir_try_again():
         cash_expenses=0, actual_cash_balance=100_000,
     )
     assert result.finalized is True
-    assert result.status == cash_shift.STATUS_CLEAN_CLOSED
+    assert result.status == cash_shift.STATUS_PENDING_HANDOVER
 
 
 def test_duplicate_close_after_finalized_raises():
@@ -193,11 +256,11 @@ def test_next_day_opening_balance_carries_forward_from_yesterday_actual():
         cash_expenses=0, actual_cash_balance=600_000,
     )
 
-    assert cash_shift.is_first_ever_shift(1) is False
+    assert cash_shift.is_first_ever_shift("Filial-1") is False
 
     today = cash_shift.open_shift_for_today(1, "Filial-1", "2026-01-02")
     assert today["opening_balance"] == 600_000
 
 
 def test_is_first_ever_shift_true_before_any_closed_shift():
-    assert cash_shift.is_first_ever_shift(42) is True
+    assert cash_shift.is_first_ever_shift("Filial-Nonexistent") is True

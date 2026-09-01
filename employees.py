@@ -11,6 +11,13 @@ from datetime import datetime, timezone
 from db import get_connection
 from roles import role_name
 
+# Xodimning aktiv/aktiv emasligi uchun YAGONA kanonik manba —
+# ``employees.status``. Aktiv ro'yxat (``list_approved_by_branch``) aynan
+# shu ustunga tayanadi, shuning uchun ishdan chiqarish ham faqat shu
+# yerda holat almashtiradi (yozuv hech qachon o'chirilmaydi).
+STATUS_APPROVED = "approved"
+STATUS_OFFBOARDED = "offboarded"
+
 _EMPLOYEE_FIELDS = [
     "invite_token",
     "telegram_username",
@@ -39,7 +46,18 @@ _EMPLOYEE_FIELDS = [
     "extra_note",
     "prior_employer_reference_consent",
     "prior_employer_contact",
+    "night_shift_availability",
+    "teamwork_agreement",
+    "authority_cooperation_agreement",
 ]
+
+# INTEGER ustunlari (SQLite bool'ni 0/1 sifatida shaffof qabul qiladi, lekin
+# Postgres'da ``bool`` alohida tur bo'lgani uchun aniq ``int()`` kerak).
+_INT_FLAG_FIELDS = (
+    "prior_employer_reference_consent",
+    "teamwork_agreement",
+    "authority_cooperation_agreement",
+)
 
 
 def get_status(user_id: int) -> str | None:
@@ -57,13 +75,9 @@ def get_status(user_id: int) -> str | None:
 def submit_profile(user_id: int, data: dict) -> None:
     now = datetime.now(timezone.utc).isoformat()
     values = {field: data.get(field) for field in _EMPLOYEE_FIELDS}
-    # ``prior_employer_reference_consent`` ustuni INTEGER (SQLite bool'ni
-    # 0/1 sifatida shaffof qabul qiladi, lekin Postgres'da ``bool`` alohida
-    # tur bo'lgani uchun aniq ``int()``ga o'tkazish kerak).
-    if values.get("prior_employer_reference_consent") is not None:
-        values["prior_employer_reference_consent"] = int(
-            values["prior_employer_reference_consent"]
-        )
+    for field in _INT_FLAG_FIELDS:
+        if values.get(field) is not None:
+            values[field] = int(values[field])
     columns = ["user_id", *values.keys(), "status", "submitted_at"]
     placeholders = ", ".join("?" for _ in columns)
     update_clause = ", ".join(f"{col} = excluded.{col}" for col in columns if col != "user_id")
@@ -124,24 +138,82 @@ def get_profile(user_id: int) -> dict | None:
         conn.close()
 
 
-def approve_profile(user_id: int, approved_by: int) -> dict | None:
-    profile = get_profile(user_id)
-    if profile is None:
-        return None
-
-    now = datetime.now(timezone.utc).isoformat()
+def list_approved_by_branch(branch: str) -> list[dict]:
+    """Shu filialga biriktirilgan, tasdiqlangan (``status='approved'``)
+    xodimlar — Founder'ning "🏬 Do'konlar" filial kartasi va xodimlar
+    ro'yxati uchun (faqat o'qish, hech qanday yozuv yo'q)."""
     conn = get_connection()
     try:
-        conn.execute(
-            "UPDATE employees SET status = 'approved', approved_at = ?, approved_by = ? "
-            "WHERE user_id = ?",
-            (now, approved_by, user_id),
-        )
-        conn.commit()
+        rows = conn.execute(
+            "SELECT * FROM employees WHERE branch = ? AND status = 'approved' ORDER BY familiya, ism",
+            (branch,),
+        ).fetchall()
     finally:
         conn.close()
 
-    return profile
+    return [dict(row) for row in rows]
+
+
+def approve_profile(user_id: int, approved_by: int) -> dict | None:
+    """FAQAT profil hali ``'submitted'`` holatida bo'lsa tasdiqlaydi
+    (atomic ``UPDATE ... WHERE user_id = ? AND status = 'submitted'``,
+    natija ``rowcount`` orqali tekshiriladi) — parallel ikkinchi
+    chaqiruv (masalan ikki marta bosilgan "✅ Tasdiqlash" tugmasi) hech
+    narsa o'zgartirmaydi. Qaytaradi: yangilangan profil, yoki ``None``
+    — profil topilmadi YOKI hali ``'submitted'`` holatida emas edi
+    (allaqachon tasdiqlangan/rad etilgan). Chaqiruvchi (``approval.py``)
+    ``None`` qaytganda rolni qayta bermasligi, kalibratsiyani qayta
+    ishga tushirmasligi va xodimga xabarni qayta yubormasligi kerak.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE employees SET status = 'approved', approved_at = ?, approved_by = ? "
+            "WHERE user_id = ? AND status = 'submitted'",
+            (now, approved_by, user_id),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    if not updated:
+        return None
+
+    return get_profile(user_id)
+
+
+def offboard_profile(user_id: int) -> dict | None:
+    """Xodimni aktiv ro'yxatdan chiqaradi — FAQAT hozir aktiv
+    (``'approved'``) bo'lsa, ``approve_profile``dagi bilan bir xil
+    atomik ``UPDATE ... WHERE status = ?`` naqshi orqali: ikkinchi
+    (takroriy bosilgan yoki parallel) chaqiruv hech narsa
+    o'zgartirmaydi va ``None`` qaytaradi — chaqiruvchi shunda audit
+    yozmasligi va xabarni qayta yubormasligi kerak.
+
+    Xodim yozuvi HECH QACHON o'chirilmaydi (``DELETE`` yo'q) — profil,
+    kontaktlar va boshqa jadvallardagi butun tarix (ball ledgeri,
+    davomat, vazifa biriktirishlari, ish grafigi) joyida qoladi va
+    ``get_profile()`` orqali o'qilaveradi. Kim/qachon chiqargani alohida
+    ustunda emas, mavjud audit infratuzilmasida
+    (``security_audit_log``) saqlanadi.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE employees SET status = ? WHERE user_id = ? AND status = ?",
+            (STATUS_OFFBOARDED, user_id, STATUS_APPROVED),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    if not updated:
+        return None
+
+    return get_profile(user_id)
 
 
 def reject_profile(user_id: int, rejected_by: int) -> None:

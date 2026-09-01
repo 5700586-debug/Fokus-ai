@@ -22,6 +22,10 @@ EVENT_ROLE_ASSIGN_DENIED = "role_assign_denied"
 EVENT_NAZORATCHI_ASSIGN_BLOCKED = "nazoratchi_assign_blocked"
 EVENT_USER_REMOVED = "user_removed"
 EVENT_CROSS_BRANCH_ATTEMPT = "cross_branch_attempt"
+# Xodimni aktiv ro'yxatdan chiqarish (ishdan chiqarish) — kim, qachon,
+# oldingi va yangi status. Xodim yozuvi o'chirilmaydi, shuning uchun bu
+# yozuv holat o'zgarishining yagona tarixiy izi.
+EVENT_EMPLOYEE_OFFBOARDED = "employee_offboarded"
 EVENT_UNAUTHORIZED_PRIVILEGED_ACTION = "unauthorized_privileged_action"
 
 # Fokus HR (rekruting) — nomzod arizasi hayot aylanishi va Founder

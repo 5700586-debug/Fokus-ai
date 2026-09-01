@@ -76,6 +76,28 @@ def test_approve_missing_profile_returns_none():
     assert employees.approve_profile(999, approved_by=1) is None
 
 
+def test_duplicate_approve_only_succeeds_once():
+    """Regressiya: bir xil nomzod ikki marta ketma-ket approve qilinsa
+    (masalan ikki marta bosilgan tugma yoki parallel ikkinchi so'rov),
+    faqat BIRINCHISI muvaffaqiyatli bo'lishi kerak — ikkinchisi hech
+    narsa o'zgartirmasligi (``None`` qaytarishi) kerak, chunki status
+    endi ``'submitted'`` emas (atomic ``UPDATE ... WHERE status =
+    'submitted'`` tufayli). Chaqiruvchi (``approval.py``) shu ``None``
+    natijasiga qarab rolni/kalibratsiyani/xabarni qayta bermaydi.
+    """
+    _submit(1)
+
+    first = employees.approve_profile(1, approved_by=999)
+    second = employees.approve_profile(1, approved_by=888)
+
+    assert first is not None
+    assert second is None
+
+    profile = employees.get_profile(1)
+    assert profile["status"] == "approved"
+    assert profile["approved_by"] == 999  # ikkinchisi qayta yozmadi
+
+
 def test_reject_profile():
     _submit(1)
     employees.reject_profile(1, rejected_by=999)

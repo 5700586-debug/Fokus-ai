@@ -95,6 +95,7 @@ def get_bos_supervisor_late_penalty() -> int:
 
 def get_bos_grade_points() -> dict[str, int]:
     return {
+        "bajarilmagan": int(performance_repo.get_rule("bos.grade_points.bajarilmagan") or 0),
         "chala": int(performance_repo.get_rule("bos.grade_points.chala") or 1),
         "norma": int(performance_repo.get_rule("bos.grade_points.norma") or 2),
         "alo": int(performance_repo.get_rule("bos.grade_points.alo") or 3),
@@ -151,6 +152,27 @@ def get_saturn_evening_time() -> str:
 def get_saturn_tip_time() -> str:
     value = performance_repo.get_rule("saturn.tip_time")
     return value if value else "13:00"
+
+
+_FIXED_SHIFT_DEFAULTS = {
+    "fixed_1": ("08:00", "18:00"),
+    "fixed_2": ("14:00", "01:00"),
+}
+
+
+def get_fixed_shift_template(mode: str) -> tuple[str, str] | None:
+    """``fixed_1``/``fixed_2`` uchun markazlashtirilgan standart
+    boshlanish/tugash vaqti -- kod bo'ylab hardcode qilinmaydi, Founder
+    ``/setrule schedule.<mode>.start``/``.end`` bilan o'zgartirishi
+    mumkin (qayta deploy shart emas). Noma'lum ``mode`` uchun ``None``.
+    """
+    if mode not in _FIXED_SHIFT_DEFAULTS:
+        return None
+
+    default_start, default_end = _FIXED_SHIFT_DEFAULTS[mode]
+    start = performance_repo.get_rule(f"schedule.{mode}.start") or default_start
+    end = performance_repo.get_rule(f"schedule.{mode}.end") or default_end
+    return start, end
 
 
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:

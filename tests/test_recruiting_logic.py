@@ -53,10 +53,13 @@ def test_kassir_questions_do_not_ask_protected_characteristics():
 
 
 def test_kassir_and_sotuvchi_question_keys_are_unique():
-    all_keys = [k for k, _ in recruiting_questions.KASSIR_QUESTIONS] + [
-        k for k, _ in recruiting_questions.SOTUVCHI_QUESTIONS
-    ]
-    assert len(all_keys) == len(set(all_keys))
+    # ``COMMON_QUESTIONS`` (masalan "ishga kech qolish") ATAYLAB ikkala
+    # lavozimda ham ishlatiladi — shu sabab faqat HAR BIR ro'yxat o'z
+    # ICHIDA takrorlanmasligini tekshiramiz, ikkalasi orasida emas.
+    kassir_keys = [k for k, _ in recruiting_questions.KASSIR_QUESTIONS]
+    sotuvchi_keys = [k for k, _ in recruiting_questions.SOTUVCHI_QUESTIONS]
+    assert len(kassir_keys) == len(set(kassir_keys))
+    assert len(sotuvchi_keys) == len(set(sotuvchi_keys))
 
 
 def test_math_question_only_defined_for_kassir():
@@ -104,15 +107,22 @@ def _answer(question_key: str, text: str, is_follow_up: bool = False) -> dict:
     return {"question_key": question_key, "question_text": "...", "answer_text": text, "is_follow_up": is_follow_up}
 
 
-def test_score_application_flags_kassa_xavfsizlik_risk_as_mismatch():
+def test_score_application_flags_kassa_xavfsizlik_risk_as_needs_human_review():
+    """Kritik xavf (login/kassa ulashish) aniqlansa, yakuniy natija
+    HECH QACHON avtomatik ravishda chiqmaydi — majburiy inson
+    tekshiruvi (``NEEDS_HUMAN_REVIEW``) talab qilinadi, real Telegram
+    sinovida topilgan "haddan tashqari yumshoq yakuniy qaror" muammosi
+    tuzatilgandan keyin."""
     application = {"experience_text": "", "availability_text": ""}
     answers = [_answer("kassir_login", "Ishongan eski xodimga kassamni beraman")]
 
     result = recruiting_scoring.score_application("kassir", application, answers, math_correct=None)
 
-    assert result["overall_result"] == recruiting_scoring.RESULT_MISMATCH
+    assert result["overall_result"] == recruiting_scoring.RESULT_NEEDS_REVIEW
     risk_criteria = [r["criterion"] for r in result["risks"]]
     assert "Kassa xavfsizligi va shaxsiy login qoidasi" in risk_criteria
+    red_flag_keys = [f["key"] for f in result["red_flags"]]
+    assert "credential_sharing" in red_flag_keys
 
 
 def test_score_application_recognizes_reassuring_follow_up():
@@ -165,8 +175,110 @@ def test_score_application_missing_availability_alone_does_not_force_mismatch():
     result = recruiting_scoring.score_application("sotuvchi", application, answers, math_correct=None)
 
     schedule_criterion = next(c for c in result["criteria_scores"] if c["key"] == "jadval_moslik")
-    assert schedule_criterion["score"] == 0
+    # "Javobsiz savolga ball berilmaydi" — ma'lumot yo'qligi endi ``None``
+    # (o'rtacha ballga qo'shilmaydi), 0 (salbiy ball) emas.
+    assert schedule_criterion["score"] is None
     assert result["overall_result"] != recruiting_scoring.RESULT_MISMATCH
+
+
+def test_expired_product_sell_intent_is_critical_red_flag_and_forces_human_review():
+    """Real Telegram sinovida topilgan #6-muammo: "muddati o'tgan
+    mahsulotni sotsam bo'ladi" javobi natijaga ta'sir qilmagan edi.
+    Endi bu javob boshqa barcha javob a'lo bo'lsa ham natijani HECH
+    QACHON ``INTERVIEW_RECOMMENDED``ga chiqarmaydi."""
+    application = {"prev_employer_text": "2 yil tajribam bor", "availability_text": "Har kuni"}
+    answers = [
+        _answer("kassir_kamomad", "Darhol rahbarga aytib, hisobni tekshiraman"),
+        _answer("kassir_narx_farqi", "Narxni tekshirib, xaridorga tushuntiraman"),
+        _answer("kassir_telefon", "Ishdan keyin qo'ng'iroq qilaman"),
+        _answer("kassir_login", "Hech kimga bermayman, faqat o'zim ishlataman"),
+        _answer("kassir_javobgarlik", "Kassa egasi javobgar bo'lishi kerak deb o'ylayman"),
+        _answer("kassir_janjal", "Xotirjam tinglab, yechim topaman"),
+        _answer("kassir_muddat", "Muddati o'tgan bo'lsa ham sotsam bo'ladi, hech kim bilmaydi"),
+    ]
+
+    result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
+
+    assert result["overall_result"] == recruiting_scoring.RESULT_NEEDS_REVIEW
+    red_flag_keys = [f["key"] for f in result["red_flags"]]
+    assert "expired_product" in red_flag_keys
+    muddat_criterion = next(c for c in result["criteria_scores"] if c["key"] == "muddat_xavfsizligi")
+    assert muddat_criterion["score"] == 0
+
+
+def test_shortage_avoidance_is_critical_red_flag_and_not_scored_positively():
+    """Real Telegram sinovida topilgan #5-muammo: kamomadda
+    javobgarlikdan qochgan javob ijobiy baholangan edi."""
+    application = {"prev_employer_text": "1 yil tajribam bor", "availability_text": "Har kuni"}
+    answers = [
+        _answer("kassir_kamomad", "Bu mening ishim emas, hech kimga aytmayman, boshqasining aybi"),
+        _answer("kassir_narx_farqi", "Narxni tekshirib, xaridorga tushuntiraman"),
+        _answer("kassir_login", "Hech kimga bermayman"),
+        _answer("kassir_muddat", "Darhol olib tashlab, rahbarga aytaman"),
+    ]
+
+    result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
+
+    javobgarlik = next(c for c in result["criteria_scores"] if c["key"] == "javobgarlik")
+    assert javobgarlik["score"] == 0
+    assert result["overall_result"] == recruiting_scoring.RESULT_NEEDS_REVIEW
+    red_flag_keys = [f["key"] for f in result["red_flags"]]
+    assert "shortage_coverup" in red_flag_keys
+
+
+def test_unanswered_critical_question_gets_no_score_not_zero():
+    """"Javobsiz savolga ball berilmaydi" — kassa xavfsizligi savoli
+    umuman berilmagan bo'lsa, ball ``None`` (o'rtachaga qo'shilmaydi),
+    salbiy 0 emas va red flag ham qo'shilmaydi (hech narsa aytilmagan)."""
+    application = {"prev_employer_text": "tajribam bor"}
+    answers = [_answer("kassir_kamomad", "Darhol rahbarga aytaman")]
+
+    result = recruiting_scoring.score_application("kassir", application, answers, math_correct=None)
+
+    security = next(c for c in result["criteria_scores"] if c["key"] == "kassa_xavfsizlik")
+    assert security["score"] is None
+    assert result["red_flags"] == []
+
+
+def test_reassuring_follow_up_after_expired_product_red_flag_clears_it():
+    """Nomzod dastlab xavfli javob bergan bo'lsa ham, aniqlashtiruvchi
+    savolga chinakam fikridan qaytgan javob bersa (masalan xato
+    tushunganini tushuntirsa), red flag olib tashlanadi — lekin
+    fikridan qaytmasa (E misolidagi kabi), RED holicha qoladi."""
+    application = {"prev_employer_text": "tajribam bor"}
+    retracted = [
+        _answer("kassir_muddat", "Sotib yuboraman"),
+        _answer("kassir_muddat", "Yo'q xato tushundim, albatta olib tashlayman va rahbarga aytaman", is_follow_up=True),
+    ]
+    result_retracted = recruiting_scoring.score_application("kassir", application, retracted, math_correct=None)
+    assert result_retracted["red_flags"] == []
+
+    not_retracted = [
+        _answer("kassir_muddat", "Sotib yuboraman"),
+        _answer("kassir_muddat", "Ha albatta sotib yuboraman, muammo emas", is_follow_up=True),
+    ]
+    result_not_retracted = recruiting_scoring.score_application("kassir", application, not_retracted, math_correct=None)
+    assert any(f["key"] == "expired_product" for f in result_not_retracted["red_flags"])
+
+
+def test_birth_year_never_affects_scoring_or_criteria():
+    """Tug'ilgan yil ballga HECH QACHON ta'sir qilmasligi kerak —
+    ``application`` dict'ida ``birth_year`` bo'lishi/bo'lmasligi yoki
+    qiymati natijaga farq qilmasligi kerak (faqat FSM darajasida
+    qonuniy yosh tekshiruvi uchun ishlatiladi, bu modulda umuman
+    o'qilmaydi)."""
+    answers = [
+        _answer("kassir_kamomad", "Darhol rahbarga aytib, hisobni tekshiraman"),
+        _answer("kassir_login", "Hech kimga bermayman"),
+    ]
+    young = {"prev_employer_text": "1 yil tajribam bor", "birth_year": 2009}
+    old = {"prev_employer_text": "1 yil tajribam bor", "birth_year": 1970}
+
+    result_young = recruiting_scoring.score_application("kassir", young, answers, math_correct=True)
+    result_old = recruiting_scoring.score_application("kassir", old, answers, math_correct=True)
+
+    assert result_young["criteria_scores"] == result_old["criteria_scores"]
+    assert result_young["overall_result"] == result_old["overall_result"]
 
 
 def test_only_three_overall_results_exist_no_ai_auto_decision():

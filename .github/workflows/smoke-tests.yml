@@ -1,0 +1,248 @@
+name: Smoke tests
+
+# Har pushda ishlaydi — TEZ va KICHIK: haqiqiy dependency (shu jumladan
+# haqiqiy psycopg2, hech qanday stub yo'q) o'rnatiladi va faqat eng
+# muhim, barqaror ishlaydigan bir nechta test ishga tushiriladi. To'liq
+# (900+) to'plam uchun qarang ``tests.yml`` (endi faqat qo'lda
+# ishga tushiriladi).
+
+on:
+  push:
+    branches:
+      - feature/hr-conversational-interview
+  workflow_dispatch: {}
+
+# E2E workflow'dagi bilan bir xil sabab: xom job log'ga
+# autentifikatsiyasiz kirish imkonsiz -- muvaffaqiyatsizlikda pytest
+# chiqishi shu commit'ga comment sifatida yoziladi (workflow'ning
+# bepul GITHUB_TOKEN'i orqali, yangi credential shart emas), keyin
+# oddiy public API orqali o'qiladi.
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify real psycopg2 import (no stub/workaround)
+        run: python -c "import psycopg2; print('psycopg2 import OK:', psycopg2.__version__)"
+
+      - name: Smoke tests
+        id: smoke_run
+        continue-on-error: true
+        run: >
+          set -o pipefail;
+          pytest -v
+          tests/test_saturn_group_bot_flows.py::test_saturntest_tip_sends_only_tip_no_financial_dashboard
+          tests/test_saturn_group_bot_flows.py::test_daily_greeting_messages_have_no_financial_block
+          tests/test_recruiting_card.py::test_card_shows_birth_date
+          tests/test_recruiting_card.py::test_card_computes_age_correctly_from_birth_date
+          tests/test_cash_shift_bot_flows.py::test_discrepancy_approve_finalizes_handed_over_shift
+          tests/test_cash_shift_bot_flows.py::test_discrepancy_recount_keeps_shift_open_and_resets_kassir_state
+          tests/test_bot_flows.py::test_approve_sends_employee_menu_without_requiring_start
+          tests/test_bot_flows.py::test_build_menu_and_category_menu_are_persistent
+          tests/test_menu_and_fsm_escape.py::test_kassir_menu_buttons_are_paired_two_per_row
+          tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_still_triggers_real_command
+          tests/test_menu_and_fsm_escape.py::test_kassir_friendly_button_escapes_stale_expense_state
+          tests/test_menu_and_fsm_escape.py::test_start_shows_role_specific_category_for_kassir
+          tests/test_cash_shifts_repo.py::test_set_shift_status_if_only_updates_when_status_matches
+          tests/test_cash_shift_service.py::test_duplicate_supervisor_decision_only_applies_once
+          tests/test_cash_shift_service.py::test_duplicate_confirm_handover_only_succeeds_once
+          tests/test_employees.py::test_duplicate_approve_only_succeeds_once
+          tests/test_recruiting_permissions.py::test_founder_hire_creates_active_employee_with_role_branch_and_auto_menu
+          tests/test_recruiting_permissions.py::test_double_hire_click_does_not_crash_or_duplicate
+          tests/test_recruiting_permissions.py::test_set_founder_decision_if_only_claims_when_status_matches
+          tests/test_recruiting_permissions.py::test_hire_does_not_touch_employees_when_application_already_claimed
+          tests/test_recruiting_permissions.py::test_ordinary_employee_cannot_decide_on_application
+          tests/test_recruiting_permissions.py::test_founder_can_decide_on_application
+          tests/test_recruiting_permissions.py::test_reject_works_on_first_click_for_a_fresh_application
+          tests/test_recruiting_permissions.py::test_double_click_on_decision_button_is_a_no_op_the_second_time
+          tests/test_recruiting_permissions.py::test_decision_on_unknown_application_does_not_crash
+          tests/test_menu_and_fsm_escape.py::test_top_level_menu_button_escapes_stale_expense_state
+          tests/test_discipline_bot_flows.py::test_penalty_entry_skipped_when_already_pending_for_same_nazoratchi
+          tests/test_cash_shift_bot_flows.py::test_expense_finish_skipped_when_already_pending_for_same_kassir
+          tests/test_cash_shift_bot_flows.py::test_closeshift_confirm_skipped_when_already_pending_for_same_kassir
+          tests/test_bot_flows.py::test_approve_does_not_send_menu_when_role_assignment_fails
+          tests/test_recruiting_permissions.py::test_hire_does_not_send_menu_when_role_assignment_fails
+          tests/test_recruiting_bot_flow.py
+          tests/test_recruiting_repository.py
+          tests/test_bot_flows.py::test_stores_button_shows_one_button_per_branch
+          tests/test_bot_flows.py::test_stores_back_button_returns_founder_menu
+          tests/test_bot_flows.py::test_employees_button_shows_empty_placeholder_when_no_users
+          tests/test_bot_flows.py::test_employees_button_shows_friendly_name_not_user_id
+          tests/test_bot_flows.py::test_tapping_employee_shows_full_read_only_card
+          tests/test_cash_shift_bot_flows.py::test_expense_before_shift_open_shows_friendly_message_not_command
+          tests/test_cash_shift_bot_flows.py::test_closeshift_before_shift_open_shows_friendly_message_not_command
+          tests/test_cash_shift_bot_flows.py::test_first_shift_prompt_has_no_technical_command_wording
+          tests/test_cash_shift_bot_flows.py::test_kassa_category_body_text_has_no_raw_slash_commands
+          tests/test_cash_shift_bot_flows.py::test_supervisor_recheck_message_has_no_raw_slash_command
+          tests/test_bot_flows.py::test_full_onboarding_to_approval_flow
+          tests/test_menu_and_fsm_escape.py::test_stale_penalty_state_does_not_swallow_start
+          tests/test_menu_and_fsm_escape.py::test_start_shows_founder_category_for_founder
+          tests/test_bot_flows.py::test_founder_start_shows_new_greeting_and_seven_menu_buttons
+          tests/test_store_management.py::test_store_card_shows_no_data_placeholder_when_branch_is_empty
+          tests/test_store_management.py::test_store_card_shows_active_employee_count
+          tests/test_store_management.py::test_store_card_shows_todays_open_shift_status
+          tests/test_store_management.py::test_store_card_employees_subview_shows_name_not_user_id
+          tests/test_store_management.py::test_store_card_back_returns_to_branch_list
+          tests/test_store_management.py::test_global_employees_button_unaffected_when_not_viewing_a_branch
+          tests/test_store_management.py::test_viewing_store_card_does_not_change_employee_or_shift_data
+          tests/test_ai_flow.py::test_ai_tahlil_button_removed_from_founder_menu
+          tests/test_ai_flow.py::test_ai_tahlil_text_no_longer_triggers_open_ended_chat
+          tests/test_calibration_bot_flows.py::test_calibration_question_filter_ignores_users_without_active_question
+          tests/test_menu_and_fsm_escape.py::test_sotuvchi_menu_has_no_role_category_button
+          tests/test_chat_cleanup.py::test_cleanup_deletes_all_tracked_messages_for_workflow
+          tests/test_chat_cleanup.py::test_cleanup_survives_telegram_delete_failure
+          tests/test_chat_cleanup.py::test_cleanup_only_touches_its_own_workflow_key
+          tests/test_cash_shift_bot_flows.py::test_closeshift_clean_close_deletes_tracked_dialog_messages
+          tests/test_recruiting_retention_scheduler.py::test_retention_purge_tick_deletes_only_expired_applications
+          tests/test_recruiting_retention_scheduler.py::test_start_scheduler_registers_job_and_can_shutdown
+          tests/test_menu_and_fsm_escape.py::test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row
+          tests/test_menu_and_fsm_escape.py::test_nazoratchi_friendly_button_still_triggers_real_command
+          tests/test_role_test_sandbox.py::test_role_test_button_does_nothing_for_ordinary_user
+          tests/test_role_test_sandbox.py::test_founder_sees_role_test_button_only_in_test_environment
+          tests/test_role_test_sandbox.py::test_founder_can_open_role_picker_in_test_environment
+          tests/test_role_test_sandbox.py::test_selecting_preview_role_does_not_touch_real_role_or_allowed_users
+          tests/test_role_test_sandbox.py::test_preview_kassir_menu_shows_kassa_category
+          tests/test_role_test_sandbox.py::test_preview_nazoratchi_menu_shows_nazoratchi_category
+          tests/test_role_test_sandbox.py::test_preview_mutating_action_is_blocked_and_writes_nothing
+          tests/test_role_test_sandbox.py::test_exit_preview_returns_real_founder_menu
+          tests/test_role_test_sandbox.py::test_exit_from_inside_category_subview_then_start_then_dokonlar
+          tests/test_role_test_sandbox.py::test_start_while_preview_active_safely_escapes_sandbox
+          tests/test_role_test_sandbox.py::test_founder_menu_button_while_preview_active_safely_escapes_and_runs
+          tests/test_role_test_sandbox.py::test_slash_command_while_picking_role_safely_escapes
+          tests/test_e2e_scenario.py::test_scenario_has_expected_step_order
+          tests/test_e2e_scenario.py::test_response_matches_accepts_valid_response
+          tests/test_e2e_scenario.py::test_response_matches_rejects_missing_text
+          tests/test_e2e_scenario.py::test_response_matches_rejects_missing_button
+          tests/test_e2e_scenario.py::test_response_matches_rejects_timeout_none_response
+          tests/test_e2e_scenario.py::test_mutating_action_step_targets_sandbox_blocked_message_not_a_real_shift_action
+          tests/test_e2e_scenario.py::test_dokonlar_step_does_not_hardcode_a_specific_branch_name
+          tests/test_nazoratchi_supervision.py::test_filiallar_command_shows_a_button_per_configured_branch
+          tests/test_nazoratchi_supervision.py::test_ordinary_employee_cannot_use_filiallar
+          tests/test_nazoratchi_supervision.py::test_empty_branch_shows_no_data_placeholder
+          tests/test_nazoratchi_supervision.py::test_branch_with_employee_shows_paired_employee_buttons
+          tests/test_nazoratchi_supervision.py::test_nazoratchi_does_not_appear_as_gradeable_employee_in_own_branch
+          tests/test_nazoratchi_supervision.py::test_tapping_employee_shows_simple_card
+          tests/test_nazoratchi_supervision.py::test_card_back_button_returns_to_the_employees_own_branch
+          tests/test_nazoratchi_supervision.py::test_unknown_employee_id_shows_alert_not_crash
+          tests/test_nazoratchi_supervision.py::test_card_shows_no_data_placeholder_when_no_tasks_assigned
+          tests/test_nazoratchi_supervision.py::test_card_shows_assigned_tasks
+          tests/test_nazoratchi_supervision.py::test_vazifabiriktir_founder_only
+          tests/test_nazoratchi_supervision.py::test_vazifabiriktir_assigns_task_visible_on_card
+          tests/test_nazoratchi_supervision.py::test_vazifabekor_removes_task_from_card
+          tests/test_tasks_repository.py::test_assign_task_to_employee_creates_task_once_by_title
+          tests/test_tasks_repository.py::test_list_tasks_for_employee_returns_assigned_titles
+          tests/test_tasks_repository.py::test_one_task_can_be_assigned_to_multiple_employees
+          tests/test_tasks_repository.py::test_assigning_the_same_task_twice_is_a_safe_no_op
+          tests/test_tasks_repository.py::test_unassign_task_removes_it_from_employee_card
+          tests/test_tasks_repository.py::test_unassign_unknown_task_returns_false
+          tests/test_tasks_repository.py::test_inactive_task_no_longer_shown_after_unassign_but_task_row_kept
+          tests/test_nazoratchi_supervision.py::test_card_shows_time_bonus_button_when_not_yet_confirmed
+          tests/test_nazoratchi_supervision.py::test_confirming_time_bonus_updates_card_and_hides_button
+          tests/test_nazoratchi_supervision.py::test_double_click_on_time_bonus_button_does_not_duplicate
+          tests/test_time_bonus_repository.py::test_grant_records_source_and_confirmed_by
+          tests/test_time_bonus_repository.py::test_grant_is_duplicate_safe_for_same_employee_and_date
+          tests/test_time_bonus_repository.py::test_manual_grant_does_not_overwrite_existing_auto_grant
+          tests/test_time_bonus_repository.py::test_different_employees_or_dates_do_not_conflict
+          tests/test_time_bonus_repository.py::test_service_confirm_manual_uses_todays_date
+          tests/test_time_bonus_repository.py::test_get_today_status_none_when_not_yet_granted
+          tests/test_nazoratchi_supervision.py::test_card_shows_grade_buttons_and_no_grade_placeholder
+          tests/test_nazoratchi_supervision.py::test_picking_a_grade_updates_the_card
+          tests/test_nazoratchi_supervision.py::test_regrading_same_day_does_not_double_count_bonus
+          tests/test_nazoratchi_supervision.py::test_grading_zero_is_allowed_and_shown_as_bajarilmagan
+          tests/test_nazoratchi_supervision.py::test_existing_baholash_flow_still_only_offers_three_grades
+          tests/test_discipline_service.py::test_bajarilmagan_grade_is_worth_zero_points
+          tests/test_discipline_service.py::test_regrade_from_alo_to_bajarilmagan_removes_the_points
+          tests/test_discipline_service.py::test_get_daily_grade_returns_none_when_not_yet_graded
+          tests/test_discipline_service.py::test_get_daily_grade_returns_recorded_grade
+          tests/test_discipline_service.py::test_new_rule_has_no_penalty_amount_by_default
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_makes_it_selectable
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_unknown_rule_returns_false
+          tests/test_discipline_service.py::test_set_rule_penalty_amount_rejects_non_positive
+          tests/test_discipline_service.py::test_apply_penalty_accepts_rule_specific_amount_outside_default_set
+          tests/test_discipline_service.py::test_apply_penalty_still_rejects_amount_matching_neither_source
+          tests/test_discipline_service.py::test_report_unmatched_incident_does_not_touch_bonus_bank
+          tests/test_nazoratchi_supervision.py::test_penalty_menu_shows_placeholder_when_no_rule_has_amount
+          tests/test_nazoratchi_supervision.py::test_penalty_menu_shows_rule_buttons_with_preset_amount
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_deducts_bonus_and_notifies_employee_with_buttons
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_does_not_touch_fixed_salary
+          tests/test_nazoratchi_supervision.py::test_penalty_other_reports_to_founder_without_deducting_bonus
+          tests/test_nazoratchi_supervision.py::test_employee_ack_removes_notice_buttons
+          tests/test_nazoratchi_supervision.py::test_employee_appeal_button_starts_existing_appeal_flow
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_ai_chosen_number
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_when_ai_says_no_match
+          tests/test_discipline_ai.py::test_match_incident_to_rule_ignores_hallucinated_rule_number
+          tests/test_discipline_ai.py::test_match_incident_to_rule_ignores_non_numeric_response
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_on_openai_error
+          tests/test_discipline_ai.py::test_match_incident_to_rule_returns_none_when_no_eligible_rules
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_asks_for_confirmation_first
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_applies_penalty
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_rejected_goes_to_founder_with_original_text
+          tests/test_nazoratchi_supervision.py::test_penalty_other_no_ai_match_falls_back_to_founder_directly
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_blocked_while_same_nazoratchi_has_a_pending_application
+          tests/test_nazoratchi_supervision.py::test_penalty_apply_guard_is_released_after_completion
+          tests/test_nazoratchi_supervision.py::test_penalty_other_ai_match_confirmed_preserves_original_text_as_comment
+          tests/test_nazoratchi_supervision.py::test_e2exodim_creates_approved_employee_for_founder_in_test_env
+          tests/test_nazoratchi_supervision.py::test_e2exodim_does_not_touch_roles_or_allowed_users
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_a_noop_outside_test_environment
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_a_noop_for_non_founder
+          tests/test_nazoratchi_supervision.py::test_e2exodim_is_idempotent
+          tests/test_nazoratchi_supervision.py::test_bootstrapped_founder_employee_shows_up_in_filiallar_flow
+          tests/test_bonus_point_ledger.py
+          tests/test_employee_dashboard.py
+          tests/test_nazoratchi_attendance_review.py
+          tests/test_work_hours.py
+          tests/test_scheduled_shifts.py
+          tests/test_schedule_policy_and_overnight.py
+          tests/test_branch_mobility.py
+          tests/test_schedule_management_ui.py
+          tests/test_mobility_management_ui.py
+          tests/test_shift_deficiency_service.py
+          tests/test_shift_deficiency_bot_flow.py
+          tests/test_shift_daily_report_service.py
+          tests/test_shift_daily_report_bot_flow.py
+          tests/test_supplier_purchase_listing.py
+          tests/test_supplier_purchase_entry.py
+          tests/test_supplier_purchase_allocation.py
+          tests/test_founder_today_problems.py
+          | tee smoke_output.log
+
+      - name: Post smoke diagnostics as a commit comment on failure
+        if: steps.smoke_run.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json
+
+          with open("smoke_output.log", "r", errors="replace") as f:
+              log = f.read()
+
+          body = "## Smoke test diagnostics (auto-posted on failure)\n\n```\n" + log[-55000:] + "\n```"
+
+          with open("comment_body.json", "w") as f:
+              json.dump({"body": body}, f)
+          PY
+
+          curl -sS -o curl_response.json -w "HTTP %{http_code}\n" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @comment_body.json
+
+      - name: Fail the job if smoke tests failed
+        if: steps.smoke_run.outcome == 'failure'
+        run: exit 1

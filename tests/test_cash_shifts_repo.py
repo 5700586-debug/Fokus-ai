@@ -19,8 +19,8 @@ def test_open_shift_is_idempotent_for_same_day():
 
 
 def test_get_last_closed_shift_ignores_open_shifts():
-    repo.open_shift(1, None, "2026-01-01", opening_balance=0, tolerance=20000)
-    assert repo.get_last_closed_shift(1) is None
+    repo.open_shift(1, "Filial-1", "2026-01-01", opening_balance=0, tolerance=20000)
+    assert repo.get_last_closed_shift("Filial-1") is None
 
     shift = repo.get_open_shift(1, "2026-01-01")
     repo.update_shift_result(
@@ -37,10 +37,34 @@ def test_get_last_closed_shift_ignores_open_shifts():
         close=True,
     )
 
-    last_closed = repo.get_last_closed_shift(1)
+    last_closed = repo.get_last_closed_shift("Filial-1")
     assert last_closed["id"] == shift["id"]
     assert last_closed["actual_cash_balance"] == 100
     assert last_closed["closed_at"] is not None
+
+
+def test_set_shift_status_if_only_updates_when_status_matches():
+    """Atomic guard: ikkita "parallel" chaqiruv (masalan ikki marta
+    bosilgan tugma) bir smenani ikki marta o'zgartirmasligi kerak —
+    birinchisi ``True`` (yangiladi), ikkinchisi ``False`` (joriy status
+    endi kutilganidan farq qiladi, hech narsa o'zgarmadi) qaytarishi
+    kerak.
+    """
+    shift = repo.open_shift(1, "Filial-1", "2026-01-01", opening_balance=0, tolerance=20000)
+    repo.set_shift_status(shift["id"], "needs_supervisor_approval", close=False)
+
+    first = repo.set_shift_status_if(
+        shift["id"], "needs_supervisor_approval", "approved_by_supervisor", close=True
+    )
+    second = repo.set_shift_status_if(
+        shift["id"], "needs_supervisor_approval", "rejected_by_supervisor", close=True
+    )
+
+    assert first is True
+    assert second is False
+
+    updated = repo.get_shift(shift["id"])
+    assert updated["status"] == "approved_by_supervisor"  # ikkinchi urinish o'zgartirmadi
 
 
 def test_increment_retry_count():

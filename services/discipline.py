@@ -10,15 +10,23 @@ audit sifatida qoladi).
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
+import company_time
 from repositories import discipline as discipline_repo
 from services import rules as rules_service
 
+GRADE_BAJARILMAGAN = "bajarilmagan"
 GRADE_CHALA = "chala"
 GRADE_NORMA = "norma"
 GRADE_ALO = "alo"
 
-GRADE_LABELS = {GRADE_CHALA: "Chala", GRADE_NORMA: "Norma", GRADE_ALO: "A'lo"}
+GRADE_LABELS = {
+    GRADE_BAJARILMAGAN: "Bajarilmagan",
+    GRADE_CHALA: "Chala",
+    GRADE_NORMA: "Norma",
+    GRADE_ALO: "A'lo",
+}
 
 
 def get_grade_points() -> dict[str, int]:
@@ -66,6 +74,38 @@ def get_bonus_ledger(user_id: int, limit: int = 20) -> list[dict]:
     return discipline_repo.get_bonus_ledger(user_id, limit)
 
 
+def _current_period_start_utc_iso() -> str:
+    """Joriy (kompaniya vaqt zonasidagi) oyning 00:00 boshlanishi,
+    UTC ISO ko'rinishida — ``bonus_bank_ledger.created_at`` HAM har
+    doim UTC ISO (``repositories/discipline.py::_now()``) sifatida
+    saqlanadi, shuning uchun ikkalasi to'g'ridan-to'g'ri solishtirish
+    mumkin bo'lishi uchun bu yerda ham UTC'ga aylantiriladi (aks holda
+    oy chegarasida — mahalliy va UTC orasidagi 5 soatlik farq tufayli
+    — noto'g'ri natija chiqishi mumkin edi)."""
+    local_today = company_time.today()
+    local_month_start = datetime(
+        local_today.year, local_today.month, 1, tzinfo=company_time.resolve_timezone()
+    )
+    return local_month_start.astimezone(timezone.utc).isoformat()
+
+
+def get_period_point_totals(user_id: int) -> dict:
+    """Joriy oy uchun Bonus/Minus/Jami ball — ``bonus_bank_ledger``dan
+    hisoblanadi (kunlik baho va jarima allaqachon shu ledgerga yozadi,
+    qarang ``record_daily_grade``/``apply_penalty``). Eski oylar hech
+    qachon o'chirilmaydi/tozalanmaydi — bu funksiya faqat KO'RSATISH
+    uchun davrni filtrlaydi, yangi oy boshlanishi bilan tabiiy ravishda
+    0/0/0dan boshlanadi (chunki hali shu oyga tegishli yozuv yo'q)."""
+    since_iso = _current_period_start_utc_iso()
+    totals = discipline_repo.get_bonus_ledger_totals_since(user_id, since_iso)
+    return {
+        "period_key": company_time.today().strftime("%Y-%m"),
+        "bonus": totals["bonus"],
+        "minus": totals["minus"],
+        "net": totals["net"],
+    }
+
+
 # --------------------------------------------------------- company rules --
 
 
@@ -79,6 +119,31 @@ def get_rule(rule_number: int) -> dict | None:
 
 def list_rules() -> list[dict]:
     return discipline_repo.list_active_rules()
+
+
+def list_rules_with_penalty_amount() -> list[dict]:
+    return discipline_repo.list_rules_with_penalty_amount()
+
+
+def set_rule_penalty_amount(rule_number: int, amount: int, updated_by: int) -> bool:
+    """Nizom bandiga standart ball miqdorini belgilaydi — Nazoratchi
+    kartasidagi tugma orqali ball ayirish shu miqdordan foydalanadi.
+    Faqat Founder chaqiradi (``ACTION_MANAGE_DISCIPLINE_RULES``).
+    ``updated_by`` hozircha audit uchun saqlanmaydi (``company_rules``da
+    alohida ustun yo'q) — kerak bo'lsa keyin qo'shiladi."""
+    if amount <= 0:
+        raise ValueError(f"ball miqdori musbat bo'lishi kerak: {amount}")
+
+    return discipline_repo.set_rule_penalty_amount(rule_number, amount)
+
+
+def report_unmatched_incident(
+    employee_id: int, reported_by: int, report_text: str, ai_note: str | None = None
+) -> int:
+    """Hech qanday tasdiqlangan nizom bandiga mos kelmagan holat —
+    minus ball QO'LLANMAYDI, faqat Founder ko'rib chiqishi uchun
+    audit yozuvi yaratiladi (qarang ``discipline_unmatched_reports``)."""
+    return discipline_repo.create_unmatched_report(employee_id, reported_by, report_text, ai_note)
 
 
 def extract_rule_number(text: str) -> int | None:
@@ -119,6 +184,10 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
     return EvaluationResult(grade_key=grade_key, grade_points=grade_points, bonus_bank_balance=balance)
 
 
+def get_daily_grade(employee_id: int, eval_date: str) -> dict | None:
+    return discipline_repo.get_daily_evaluation(employee_id, eval_date)
+
+
 def get_daily_leaderboard(eval_date: str) -> list[dict]:
     rows = discipline_repo.get_evaluations_for_date(eval_date)
     return [{"employee_id": row["employee_id"], "grade_points": row["grade_points"]} for row in rows]
@@ -154,12 +223,18 @@ def apply_penalty(
     comment: str | None,
     ai_note: str | None,
 ) -> dict:
-    if amount not in get_penalty_amounts():
-        raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
-
     rule = discipline_repo.get_rule_by_number(rule_number)
     if rule is None:
         raise ValueError(f"{rule_number}-nizom topilmadi")
+
+    # ``bos.penalty_amounts`` — /baholash oqimidagi umumiy tugma
+    # to'plami (-10/-20/-30). Nazoratchi kartasidagi nizom-bandi
+    # tugmalari esa har bir bandning O'Z ``default_penalty_amount``
+    # qiymatidan foydalanadi (Founder /setnizombahosi bilan
+    # belgilagan) — bu ikkalasi mustaqil, shuning uchun ikkalasidan
+    # BIRIGA mos kelsa yetarli.
+    if amount not in get_penalty_amounts() and amount != rule.get("default_penalty_amount"):
+        raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
     penalty_id = discipline_repo.create_penalty(
         employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note

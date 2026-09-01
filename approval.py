@@ -69,8 +69,36 @@ def register(dp: Dispatcher) -> None:
                 )
                 return
 
-        employees.approve_profile(user_id, approved_by=FOUNDER_ID)
-        roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+        approved_profile = employees.approve_profile(user_id, approved_by=FOUNDER_ID)
+        if approved_profile is None:
+            # Boshqa so'rov (masalan ikki marta bosilgan tugma yoki
+            # parallel ikkinchi chaqiruv) shu nomzodni allaqachon ko'rib
+            # chiqib ulgurgan — rol qayta berilmasin, kalibratsiya qayta
+            # ishga tushmasin, xabar qayta yuborilmasin (qarang
+            # ``employees.approve_profile``).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer("Bu profil allaqachon ko'rib chiqilgan.", show_alert=True)
+            return
+
+        role_assigned = roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
+        if not role_assigned:
+            # DB darajasidagi race (masalan single-slot rolga deyarli bir
+            # vaqtdagi ikkinchi urinish) — ilova darajasidagi tekshiruv
+            # (62-70 qatorlar) buni ko'ra olmagan bo'lishi mumkin, DB
+            # darajasidagi qisman UNIQUE indeks rad etgan (qarang
+            # ``roles.set_role``). Xodim "approved" holatida qoladi, lekin
+            # rolisiz ishlay olmaydi — shuning uchun muvaffaqiyat xabari/
+            # menyu YUBORILMAYDI, Founder holatni ko'rib qo'lda hal qilishi
+            # kerak (masalan /setrole orqali).
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.answer(
+                f"⚠️ Profil tasdiqlandi, lekin {roles.role_name(role_key)} lavozimi band bo'lib qoldi "
+                f"(parallel urinish). /setrole {user_id} orqali qo'lda rol bering.",
+                show_alert=True,
+            )
+            return
 
         try:
             calibration_bot.on_employee_approved(user_id, role_key)
@@ -83,9 +111,12 @@ def register(dp: Dispatcher) -> None:
         if callback.message:
             await callback.message.edit_reply_markup(reply_markup=None)
 
+        import main  # funksiya ichida — main approval'ni import qilgani uchun (aylanma import)
+
         await callback.bot.send_message(
             user_id,
-            "✅ Profilingiz tasdiqlandi! Botdan to'liq foydalanish uchun /start ni bosing.",
+            f"✅ Profilingiz tasdiqlandi!\n\n{main.greeting_for_user(user_id)}",
+            reply_markup=main.build_menu(user_id),
         )
         await callback.answer("Tasdiqlandi ✅")
 

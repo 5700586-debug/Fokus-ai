@@ -81,6 +81,31 @@ def adjust_bonus_bank(
         conn.close()
 
 
+def get_bonus_ledger_totals_since(user_id: int, since_iso: str) -> dict:
+    """``bonus_bank_ledger``dagi ``since_iso``dan keyingi yozuvlarni
+    musbat (bonus) va manfiy (minus) qatorlarga ajratib yig'adi —
+    joriy davr (masalan joriy oy) uchun alohida Bonus/Minus/Jami
+    ko'rsatish uchun (dashboard). Balansning o'zi (``salaries.bonus_bank``)
+    umrbod yig'iladigan qiymat bo'lib qoladi — bu funksiya faqat
+    KO'RSATISH uchun davr bo'yicha filtrlangan yig'indi beradi, hech
+    narsani qayta yozmaydi/tiklamaydi."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN change_amount > 0 THEN change_amount ELSE 0 END), 0) AS bonus, "
+            "COALESCE(SUM(CASE WHEN change_amount < 0 THEN -change_amount ELSE 0 END), 0) AS minus "
+            "FROM bonus_bank_ledger WHERE user_id = ? AND created_at >= ?",
+            (user_id, since_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    bonus = row["bonus"] if row else 0
+    minus = row["minus"] if row else 0
+    return {"bonus": bonus, "minus": minus, "net": bonus - minus}
+
+
 def get_bonus_ledger(user_id: int, limit: int = 20) -> list[dict]:
     conn = get_connection()
     try:
@@ -136,6 +161,58 @@ def list_active_rules() -> list[dict]:
         conn.close()
 
     return [dict(row) for row in rows]
+
+
+def list_rules_with_penalty_amount() -> list[dict]:
+    """Faqat Founder ``default_penalty_amount`` belgilab qo'ygan
+    ("tasdiqlangan") nizom bandlari — Nazoratchi tugma orqali ball
+    ayirish uchun. Yangi nizom bandi standart holatda bu ro'yxatda
+    KO'RINMAYDI, chunki miqdor ustuni ``NULL`` bo'lib boshlanadi
+    (qarang ``db.py``dagi ``_ADDITIVE_COLUMNS``)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM company_rules WHERE is_active = 1 AND default_penalty_amount IS NOT NULL "
+            "ORDER BY rule_number"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def set_rule_penalty_amount(rule_number: int, amount: int) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE company_rules SET default_penalty_amount = ? WHERE rule_number = ? AND is_active = 1",
+            (amount, rule_number),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def create_unmatched_report(
+    employee_id: int, reported_by: int, report_text: str, ai_note: str | None = None
+) -> int:
+    """Nazoratchi "📝 Boshqa holat" orqali yozgan, hech qanday tasdiqlangan
+    nizom bandiga mos kelmagan (yoki AI hali ulanmagan/xato bergan)
+    holat — ball ayirilmaydi, faqat Founder ko'rib chiqishi uchun
+    audit sifatida saqlanadi (qarang ``services/discipline.py``)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO discipline_unmatched_reports "
+            "(employee_id, reported_by, report_text, ai_note, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'sent_to_founder', ?)",
+            (employee_id, reported_by, report_text, ai_note, _now()),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------- daily grading --

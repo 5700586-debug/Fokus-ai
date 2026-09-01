@@ -1,0 +1,64 @@
+name: Claude Task Runner
+
+on:
+  push:
+    branches:
+      - feature/hr-conversational-interview
+    paths:
+      - ".claude/tasks/**.md"
+
+permissions:
+  contents: write
+  id-token: write
+  actions: read
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/hr-conversational-interview
+          fetch-depth: 0
+
+      - name: Prepare task
+        shell: bash
+        run: |
+          TASK_FILE="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^\.claude/tasks/.*\.md$' | head -n 1)"
+
+          test -n "$TASK_FILE"
+
+          {
+            echo "FOKUS AI vazifasi."
+            echo
+            echo "Do not search the codebase."
+            echo "Modify only the specified file/function."
+            echo "No full-suite tests."
+            echo "If another file/change/test is required, STOP and report exactly:"
+            echo "[STOP sababi: ... | Kerakli fayl/ruxsat: ...]"
+            echo "NATIVE WINDOWS EXECUTION = 0."
+            echo "Barcha test/runtime faqat GitHub Actions ubuntu-latest yoki Render TEST'da."
+            echo "Faqat feature/hr-conversational-interview branchida ishlagin."
+            echo "main va productionga tegma."
+            echo ".claude/tasks fayllarini o'zgartirma."
+            echo "Minimal yechim qil."
+            echo "Kerakli targeted testni Linuxda o'tkaz."
+            echo "PASS bo'lsa o'zgarishlarni commit va shu feature branchga push qil."
+            echo
+            echo "VAZIFA:"
+            cat "$TASK_FILE"
+          } > "$RUNNER_TEMP/claude-task-prompt.md"
+
+      - name: Run Claude
+          
+        uses: anthropics/claude-code-action/base-action@v1
+        with:
+          prompt_file: ${{ runner.temp }}/claude-task-prompt.md
+          anthropic_federation_rule_id: fdrl_01B1gTWmb5bdJ58vciskqALa
+          anthropic_organization_id: 8571f626-8cf3-4745-9be4-30355e8c39ed
+          anthropic_service_account_id: svac_01CHZrCAp8Mo79XxXmAidUDX
+          anthropic_workspace_id: wrkspc_011Lqfhn5PNPoHKgeGxHU1MP
+          show_full_output: true
+          claude_args: |
+            --allowedTools Read,Edit,Write,Bash

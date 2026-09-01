@@ -80,6 +80,5 @@ def bot_dp(temp_db):
     import main
     from tests.bot_harness import RecordingBot
 
-    main.ai_users.clear()
     bot = RecordingBot(token=os.environ["BOT_TOKEN"])
     return main, bot

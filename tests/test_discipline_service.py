@@ -99,6 +99,93 @@ def test_record_daily_grade_invalid_grade_raises():
         discipline.record_daily_grade(111, 999, "2026-03-01", "a'lo-emas")
 
 
+# --------------------- VAZIFA+NAZORATCHI+BONUS V1, 4-bosqich: ISH BAHOSI --
+
+
+def test_bajarilmagan_grade_is_worth_zero_points():
+    result = discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_BAJARILMAGAN)
+
+    assert result.grade_points == 0
+    assert result.bonus_bank_balance == 0
+
+
+def test_regrade_from_alo_to_bajarilmagan_removes_the_points():
+    discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_ALO)
+    result = discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_BAJARILMAGAN)
+
+    assert result.bonus_bank_balance == 0
+
+
+def test_get_daily_grade_returns_none_when_not_yet_graded():
+    assert discipline.get_daily_grade(111, "2026-03-01") is None
+
+
+def test_get_daily_grade_returns_recorded_grade():
+    discipline.record_daily_grade(111, 999, "2026-03-01", discipline.GRADE_NORMA)
+
+    grade = discipline.get_daily_grade(111, "2026-03-01")
+    assert grade["grade_key"] == "norma"
+    assert grade["grade_points"] == 2
+
+
+# --------------------- VAZIFA+NAZORATCHI+BONUS V1, 5-bosqich: BALL AYIRISH --
+
+
+def test_new_rule_has_no_penalty_amount_by_default():
+    _add_rule(5)
+
+    rule = discipline.get_rule(5)
+    assert rule["default_penalty_amount"] is None
+    assert discipline.list_rules_with_penalty_amount() == []
+
+
+def test_set_rule_penalty_amount_makes_it_selectable():
+    _add_rule(5)
+
+    assert discipline.set_rule_penalty_amount(5, 30, updated_by=1) is True
+
+    rules = discipline.list_rules_with_penalty_amount()
+    assert len(rules) == 1
+    assert rules[0]["rule_number"] == 5
+    assert rules[0]["default_penalty_amount"] == 30
+
+
+def test_set_rule_penalty_amount_unknown_rule_returns_false():
+    assert discipline.set_rule_penalty_amount(999, 30, updated_by=1) is False
+
+
+def test_set_rule_penalty_amount_rejects_non_positive():
+    _add_rule(5)
+    with pytest.raises(ValueError):
+        discipline.set_rule_penalty_amount(5, 0, updated_by=1)
+
+
+def test_apply_penalty_accepts_rule_specific_amount_outside_default_set():
+    """25 ``bos.penalty_amounts`` standart to'plamida (10,20,30) yo'q,
+    lekin nizom bandining O'Z belgilangan miqdori bo'lgani uchun
+    qabul qilinishi kerak (Nazoratchi kartasidagi tugma oqimi)."""
+    _add_rule(5)
+    discipline.set_rule_penalty_amount(5, 25, updated_by=1)
+
+    result = discipline.apply_penalty(1, 999, "2026-03-01", 25, 5, comment=None, ai_note=None)
+
+    assert result["bonus_bank_balance"] == -25
+
+
+def test_apply_penalty_still_rejects_amount_matching_neither_source():
+    _add_rule(5)
+    discipline.set_rule_penalty_amount(5, 25, updated_by=1)
+
+    with pytest.raises(ValueError):
+        discipline.apply_penalty(1, 999, "2026-03-01", 999, 5, comment=None, ai_note=None)
+
+
+def test_report_unmatched_incident_does_not_touch_bonus_bank():
+    discipline.report_unmatched_incident(1, reported_by=999, report_text="Nazoratchini haqorat qildi")
+
+    assert discipline.get_salary(1)["bonus_bank"] == 0
+
+
 def test_grade_points_are_tunable_via_rules(monkeypatch):
     """Founder /setrule orqali (kod o'zgarishisiz) baho ballarini
     o'zgartira olishi kerak — GRADE_POINTS avvalgidek kodga hardcode

@@ -101,11 +101,11 @@ async def test_penalty_flow_happy_path_notifies_employee(bot_dp, monkeypatch):
     sent = await send(main.dp, bot, 1, text="3-nizom")
 
     texts = [m.text for m in sent]
-    assert any("jarima qo'llanildi" in (t or "") for t in texts)
+    assert any("ball ayirildi" in (t or "") for t in texts)
     assert discipline.get_salary(111)["bonus_bank"] == -20
 
     employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111]
-    assert any("jarima qo'llanildi" in (t or "") for t in employee_texts)
+    assert any("ball ayirildi" in (t or "") for t in employee_texts)
 
 
 async def test_penalty_flow_unknown_rule_shows_error_and_stays_in_state(bot_dp, monkeypatch):
@@ -121,6 +121,35 @@ async def test_penalty_flow_unknown_rule_shows_error_and_stays_in_state(bot_dp, 
     from services import discipline
 
     assert discipline.get_salary(111)["bonus_bank"] == 0
+
+
+async def test_penalty_entry_skipped_when_already_pending_for_same_nazoratchi(bot_dp, monkeypatch):
+    """Atomic guard: agar shu nazoratchi uchun jarima jarayoni allaqachon
+    "band" bo'lsa (masalan deyarli bir vaqtda kelgan ikkinchi xabar hali
+    AI tasdig'ini kutayotganda), keyingi xabar jarimani QAYTA
+    qo'llamasligi kerak — aks holda ``bonus_bank`` ikki marta kamayib
+    ketishi mumkin edi (qarang ``_PENDING_PENALTY_APPLICATIONS``).
+    """
+    main, bot = bot_dp
+    _set_role(1, "nazoratchi")
+    _set_role(111, "kassir")
+
+    from services import discipline
+
+    discipline.add_rule(3, "Kechikish", "Ishga kechikish taqiqlanadi", created_by=FOUNDER_ID)
+    _mock_openai_text(monkeypatch, main, "✅ Mos keladi.")
+
+    await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
+
+    # "Boshqa parallel xabar" hali qayta ishlanayotganini simulyatsiya qilamiz.
+    discipline_bot._PENDING_PENALTY_APPLICATIONS.add(1)
+    try:
+        sent = await send(main.dp, bot, 1, text="3-nizom")
+    finally:
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(1)
+
+    assert sent == []  # hech qanday javob yuborilmadi, jarayon darhol to'xtadi
+    assert discipline.get_salary(111)["bonus_bank"] == 0  # jarima qo'llanmadi
 
 
 async def test_kunniyop_close_day_then_reports_already_closed(bot_dp):

@@ -46,6 +46,8 @@ ACTION_LIST_RULES = "list_rules"
 ACTION_PROCESS_MONTH = "process_month"
 ACTION_MANAGE_VEHICLES = "manage_vehicles"
 ACTION_LOG_MARKET_OBSERVATION = "log_market_observation"
+ACTION_RECORD_SUPPLIER_PURCHASE = "record_supplier_purchase"
+ACTION_VIEW_SUPPLIER_RESULTS = "view_supplier_results"
 ACTION_ENTER_MEAL_PLAN = "enter_meal_plan"
 ACTION_DRIVER_DAILY_CHECK = "driver_daily_check"
 
@@ -76,6 +78,30 @@ ACTION_MANAGE_DISCIPLINE_RULES = "manage_discipline_rules"
 ACTION_SET_SALARY = "set_salary"
 ACTION_LOOKUP_ANY_SALARY = "lookup_any_salary"
 ACTION_DECIDE_APPEAL = "decide_appeal"
+ACTION_DECIDE_ATTENDANCE_PERMISSION = "decide_attendance_permission"
+
+# ADVANCED WORK SCHEDULE + MOBILITY V1 -- hozircha hech qanday
+# Telegram handler bu ACTION_*larni chaqirmaydi (UI hali qurilmagan),
+# lekin kelajakdagi boshqaruv shu chegaraga mos bo'lishi uchun oldindan
+# tayyorlangan. Birortasi ham ROLE_PERMISSIONS'ga qo'shilmagan --
+# hozircha faqat Founder bypass orqali ishlaydi; Nazoratchiga (yoki
+# kelajakdagi boshqa vakolatli rolga) shu amalni berish alohida,
+# ataylab qilinadigan qaror bo'lishi kerak, avtomatik emas.
+ACTION_MANAGE_SCHEDULE_POLICY = "manage_schedule_policy"
+ACTION_MANAGE_DAILY_SCHEDULE = "manage_daily_schedule"
+ACTION_MANAGE_MOBILITY_POLICY = "manage_mobility_policy"
+ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS = "manage_branch_visit_requirements"
+
+# nazoratchi_bot.py — xodimga doimiy vazifa/hudud biriktirish (Founder-only;
+# ko'rish — xodim kartasida — ACTION_EVALUATE_EMPLOYEE orqali, nazoratchi
+# allaqachon shu amalga ega).
+ACTION_MANAGE_TASK_ASSIGNMENTS = "manage_task_assignments"
+
+# nazoratchi_bot.py — xodimni aktiv ro'yxatdan chiqarish (ishdan
+# chiqarish). Tarix o'chirilmaydi, faqat ``employees.status`` o'zgaradi.
+# Filial chegarasi ALOHIDA tekshiriladi (``can_access_branch``) —
+# bu amalga ruxsat o'zi filial chegarasini bermaydi.
+ACTION_OFFBOARD_EMPLOYEE = "offboard_employee"
 
 # saturn_group_bot.py (Founder-only).
 ACTION_SATURN_TEST = "saturn_test"
@@ -94,6 +120,10 @@ ACTION_COMPARE_SUPPLIERS = "compare_suppliers"
 ACTION_RECRUITING_REVIEW = "recruiting_review"
 ACTION_MANAGE_VACANCIES = "manage_vacancies"
 
+# main.py — "🚨 Bugungi muammolar" (Founder-only, read-only grafik
+# muammolari ko'rinishi).
+ACTION_VIEW_FOUNDER_TODAY_PROBLEMS = "view_founder_today_problems"
+
 # Founder-only amallar (masalan /setrule, /processmonth, /invite) shu
 # ro'yxatga kiritilmaydi — ularga faqat Founder ruxsatli (pastdagi
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol
@@ -105,8 +135,13 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         ACTION_REVIEW_INVENTORY_VARIANCE,
         ACTION_EVALUATE_EMPLOYEE,
         ACTION_CLOSE_DAY,
+        ACTION_MANAGE_DAILY_SCHEDULE,
+        ACTION_MANAGE_MOBILITY_POLICY,
+        ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS,
+        ACTION_OFFBOARD_EMPLOYEE,
+        ACTION_VIEW_SUPPLIER_RESULTS,
     },
-    "taminotchi": {ACTION_LOG_MARKET_OBSERVATION},
+    "taminotchi": {ACTION_LOG_MARKET_OBSERVATION, ACTION_RECORD_SUPPLIER_PURCHASE, ACTION_VIEW_SUPPLIER_RESULTS},
     "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT},
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
     "kassir": {ACTION_OPEN_CASH_SHIFT, ACTION_CLOSE_CASH_SHIFT, ACTION_LOG_CASH_EXPENSE},

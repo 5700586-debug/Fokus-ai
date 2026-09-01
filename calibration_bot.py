@@ -84,8 +84,7 @@ def on_employee_approved(user_id: int, role_key: str) -> None:
 
 class HasActiveCalibrationQuestion(Filter):
     """Foydalanuvchida DB'da javob kutayotgan kalibratsiya savoli bo'lsagina
-    ishlaydi — aks holda boshqa ``F.text`` handlerlari (masalan AI Tahlil)
-    ishlashda davom etadi.
+    ishlaydi — aks holda boshqa ``F.text`` handlerlari ishlashda davom etadi.
     """
 
     async def __call__(self, message: Message) -> bool | dict:

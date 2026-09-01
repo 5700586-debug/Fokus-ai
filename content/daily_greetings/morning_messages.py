@@ -1,0 +1,36 @@
+"""30 kunlik tayyor tonggi salom matnlari — Founder tomonidan aynan shu
+holatda tasdiqlangan, o'zgartirilmaydi va yangi matn qo'shilmaydi.
+Moliyaviy/savdo/KPI mazmuni yo'q."""
+
+MORNING_MESSAGES: list[str] = [
+    "🌅 Xayrli tong, Saturn jamoasi!\nBugun sizning muomalangiz kimningdir kunini yaxshilashi mumkin.\n🎯 Bir insonni chin dildan kutib oling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nIshning kattasi-kichigi yo'q. Uni qanday bajarishimiz farq qiladi.\n🎯 Bugun bitta ishni odatdagidan yaxshiroq bajaring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nXaridor mahsulotni unutishi mumkin. Muomalani esa eslab qoladi.\n🎯 Bugun bir xaridorni diqqat bilan tinglang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nYaxshi ish ko'pincha hech kim qaramayotganda bilinadi.\n🎯 Bugun aytishlarini kutmay, bitta foydali ishni bajaring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\n\"Bu mening ishim emas\" deyish oson. Yordam berish esa jamoani kuchaytiradi.\n🎯 Bugun imkon topsangiz, bir hamkasbingizning ishini yengillashtiring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nHar kuni katta natija shart emas. Kichik yaxshilanish ham natija.\n🎯 Kecha qilgan bitta ishingizni bugun sal yaxshiroq qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nBir hafta — yuzlab kichik tanlovlar. Ular odamning qanday xodimligini ko'rsatadi.\n🎯 Bugun o'zingiz faxrlanadigan bitta ish qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nTartib — birov kelib qiladigan ish emas. U bizdan boshlanadi.\n🎯 Ko'zingiz tushgan bitta tartibsizlikni to'g'rilang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nYaxshi xizmatning boshlanishi — insonni ko'rish.\n🎯 Bugun salomlashayotganda odamga qarab salom bering.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nShoshilish boshqa, beparvolik boshqa.\n🎯 Bugun tez ishlang, lekin bitta ishni ikki marta tekshiring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nOdam o'ziga berilgan vazifadan biroz ko'prog'ini qilganda o'sish boshlanadi.\n🎯 Bugun vazifangizdan tashqari bitta foydali narsani ko'ring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nYaxshi muomala pul talab qilmaydi, lekin qiymati katta.\n🎯 Bugun \"rahmat\"ni chin dildan ayting.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nCharchaganda ham sifatni saqlash — mahorat.\n🎯 Bugun charchagan paytingizda bir soniya to'xtab, keyin javob bering.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nKuchli odatlar birdan paydo bo'lmaydi. Ular takrorlanadi.\n🎯 Shu haftadagi yaxshi odatlardan bittasini yana takrorlang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nBugungi raqibingiz boshqa odam emas — kechagi o'zingiz.\n🎯 Bugun bitta ishni kechagidan yaxshiroq qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nXato — yashirilsa muammo, undan o'rganilsa tajriba.\n🎯 Xato qilsangiz, bahona izlashdan oldin yechim izlang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nBilmaslik uyat emas. Bilmay turib so'ramaslik qimmatga tushishi mumkin.\n🎯 Tushunmagan narsangiz bo'lsa, so'rang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nMahorat \"men bilaman\"dan emas, \"yana nimani o'rganaman?\"dan o'sadi.\n🎯 Bugun tajribaliroq odamdan bitta foydali narsa o'rganing.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nKayfiyat har doim bizga bo'ysunmaydi. Xatti-harakatimiz esa ko'proq o'z qo'limizda.\n🎯 Kayfiyatingiz tushsa ham, bitta mijozga yaxshi muomala qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nO'sishning belgisi — kecha qiyin bo'lgan narsa bugun osonlashishi.\n🎯 Oldin qiynalgan bitta ishingizni kuzating.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nOdam bir kunda o'zgarmaydi. Ammo har kuni ozgina o'zgarishi mumkin.\n🎯 Kelasi haftaga bitta kichik maqsad tanlang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nBitta odamning kayfiyati butun jamoaga yuqishi mumkin. Yaxshisi ham.\n🎯 Bugun jamoaga yaxshi kayfiyat olib kiring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nKuchli jamoada \"meniki-seniki\"dan ko'ra \"bizniki\" ko'proq bo'ladi.\n🎯 Bugun umumiy ish uchun bitta kichik yordam qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nHurmat lavozimdan boshlanmaydi. Muomaladan boshlanadi.\n🎯 Bugun hamkasbingizni gapini bo'lmay tinglang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nMuammo ko'rgan odam ikki yo'l tanlaydi: shikoyat yoki yechim.\n🎯 Bugun bitta muammoga kichik yechim taklif qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nYaxshi hamkasb faqat o'z ishini emas, yonidagi odamni ham ko'radi.\n🎯 Kimdir qiynalayotganini ko'rsangiz, yordam taklif qiling.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nIshonch katta gaplardan emas, kichik va'dalarni bajarishdan yig'iladi.\n🎯 Bugun aytgan bitta va'dangizni albatta bajaring.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nJamoa kuchi — bir-birimizni ayblashda emas, ishni birga bitirishda.\n🎯 Bugun muammo chiqsa, avval \"nima qilamiz?\" deb o'ylang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\n29 kun oldingi siz bilan bugungi siz bir xil bo'lishi shart emas.\n🎯 Shu oyda o'rgangan eng foydali odatingizni bugun ataylab takrorlang.",
+    "🌅 Xayrli tong, Saturn jamoasi!\nKuchli jamoa tayyor holda topilmaydi. Uni odamlar har kuni birga quradi.\n🎯 Bugun keyingi oyga olib o'tadigan bitta yaxshi odatingizni tanlang.",
+]

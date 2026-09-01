@@ -95,7 +95,7 @@ mumkin, `allowed_users`ga kirmaydi.
 
 | Funksiya | Holat | Fayl | Izoh |
 |---|---|---|---|
-| "🤖 AI Tahlil" — erkin savol-javob | production | `main.py` | `gpt-5-mini`, xato bo'lsa foydalanuvchiga xabar, botni yiqitmaydi |
+| "🤖 AI Tahlil" — erkin savol-javob | **olib tashlandi** | — | Umumiy/erkin AI-chat menyusi butunlay olib tashlandi (xodim/founder menyusida ko'rinmaydi) — tizim faqat aniq belgilangan ichki AI-vazifalarni saqlaydi |
 | BOS nizom-tasdiqlash/apellyatsiya tavsiyasi | production | `services/discipline_ai.py` | Faqat matn tavsiya beradi, hech qachon jarima/qarorni o'zi qabul qilmaydi (deterministik gate oldindan bor) |
 | Kalibratsiya savollari | **AI emas** | `services/calibration.py` | Statik savol banki, OpenAI chaqirmaydi (aniqlik uchun yozildi — ba'zi joyda "AI" deb atalishi mumkin, lekin haqiqiy modelga ulanmagan) |
 

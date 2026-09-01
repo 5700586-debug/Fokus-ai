@@ -1,0 +1,176 @@
+name: Gemini Consultant (read-only)
+
+# Gemini FAQAT konsultant/reviewer: repo kodini O'QIYDI, ChatGPT (bosh
+# arxitektor) taklifini tahlil qiladi, risk va alternativani aytadi.
+# Gemini hech qachon kod yozmaydi, commit/push qilmaydi va hech kimga
+# buyruq bermaydi. Buni uchta mustaqil chegara ta'minlaydi:
+#   1) `tools.core` -- faqat read-only tool allowlist. Action gemini CLI'ni
+#      `--yolo` (avto-tasdiq) bilan ishlatadi, shuning uchun YAGONA haqiqiy
+#      chegara aynan shu allowlist -- write/shell tool umuman ro'yxatdan
+#      o'tmaydi.
+#   2) `tools.exclude` -- write_file/replace/run_shell_command va web
+#      tool'lari qo'shimcha ravishda aniq taqiqlanadi.
+#   3) Gemini step'iga GITHUB_TOKEN umuman berilmaydi -- u GitHub API'ga
+#      (commit/PR/comment) hech qanday yo'l bilan yeta olmaydi.
+#
+# Ishga tushirish:
+#   a) Actions -> "Gemini Consultant (read-only)" -> Run workflow -> savol,
+#   b) yoki `docs/consult/<nom>.md` faylini shu branchga push qilish.
+#
+# Kerakli secret: GEMINI_API_KEY
+
+on:
+  workflow_dispatch:
+    inputs:
+      savol:
+        description: "Savol / ChatGPT (bosh arxitektor) taklifi"
+        required: true
+        type: string
+  push:
+    branches:
+      - feature/hr-conversational-interview
+    paths:
+      - "docs/consult/*.md"
+
+# `contents: write` FAQAT natijani commit comment sifatida yozish uchun --
+# xom job log va artifact'ni tashqaridan autentifikatsiyasiz o'qib
+# bo'lmasligi shu repoda allaqachon aniqlangan (qarang FOKUS_AI_STATE.md va
+# e2e_real_telegram.yml), commit comment esa oddiy public API orqali
+# o'qiladi. Bu token Gemini step'iga BERILMAYDI.
+permissions:
+  contents: write
+
+concurrency:
+  group: gemini-consultant-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  consult:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # So'rov matni har doim bitta joyga (`gemini_request.md`) yoziladi --
+      # shunda prompt'ning o'zi o'zgarmas bo'ladi va foydalanuvchi matni
+      # YAML/expression ichiga umuman qo'yilmaydi (injection yo'q).
+      - name: Prepare consultation request
+        env:
+          MANUAL_INPUT: ${{ github.event.inputs.savol }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            REQ_FILE="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^docs/consult/.*\.md$' | head -n 1)"
+            test -n "$REQ_FILE"
+            cp "$REQ_FILE" gemini_request.md
+          else
+            printf '%s\n' "$MANUAL_INPUT" > gemini_request.md
+          fi
+          echo "--- so'rov ---"
+          cat gemini_request.md
+
+      - name: Gemini consultation
+        id: gemini
+        continue-on-error: true
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+        uses: google-github-actions/run-gemini-cli@v0
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          upload_artifacts: true
+          settings: |-
+            {
+              "model": {
+                "maxSessionTurns": 20
+              },
+              "tools": {
+                "core": [
+                  "read_file",
+                  "read_many_files",
+                  "glob",
+                  "grep_search",
+                  "list_directory"
+                ],
+                "exclude": [
+                  "write_file",
+                  "replace",
+                  "run_shell_command",
+                  "web_fetch",
+                  "google_web_search",
+                  "ask_user"
+                ]
+              }
+            }
+          prompt: |-
+            Sen FOKUS AI loyihasining READ-ONLY konsultanti/reviewerisan.
+
+            QAT'IY CHEGARALAR:
+            - Hech qanday faylni yaratma, o'zgartirma yoki o'chirma.
+            - Hech qanday commit/push/PR qilma, hech qanday buyruq ishlatma.
+            - Claude'ga yoki boshqa agentga BUYRUQ berma -- sen faqat tahlil
+              va tavsiya berasan, qaror Founder'niki.
+            - Sening yagona natijang -- quyidagi matnli hisobot.
+            - Secret/token/API key qiymatlarini hech qachon chiqarma.
+
+            VAZIFA:
+            1. `gemini_request.md` faylini o'qi -- bu Founder yoki ChatGPT
+               (bosh arxitektor) so'rovi/taklifi.
+            2. Kerak bo'lganini o'qi: `CLAUDE.md`, `.claude/rules.md`,
+               `FOKUS_AI_STATE.md`, `docs/PROJECT_STATE.md` va so'rovga
+               tegishli Python fayllar.
+            3. O'zbek tilida, aynan shu tuzilishda javob ber:
+
+            ## 1. So'rovni qanday tushundim
+            ## 2. Kod bilan mosligi (har bir da'voga dalil: `fayl.py:qator`)
+            ## 3. Risklar (har biri: ta'sir + ehtimollik + qayerda)
+            ## 4. Alternativalar (kamida bitta MINIMAL variant)
+            ## 5. Tavsiya (bitta jumla) + Founder aniqlashi kerak bo'lgan savollar
+
+            Taxmin qilma: kodda ko'rmagan narsani "bor" dema, ko'rmasang
+            "kodda topilmadi" deb yoz.
+
+      # Xom job log/artifact tashqaridan autentifikatsiyasiz o'qilmaydi,
+      # shuning uchun natija shu commit'ga comment sifatida ham yoziladi --
+      # ChatGPT keyin uni oddiy public API orqali o'qiy oladi.
+      - name: Post consultation as a commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GEMINI_SUMMARY: ${{ steps.gemini.outputs.summary }}
+          GEMINI_ERROR: ${{ steps.gemini.outputs.error }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+
+          summary = (os.environ.get("GEMINI_SUMMARY") or "").strip()
+          error = (os.environ.get("GEMINI_ERROR") or "").strip()
+
+          parts = ["## Gemini konsultatsiyasi (read-only)", "", os.environ["RUN_URL"], ""]
+          if summary:
+              parts.append(summary[:60000])
+          else:
+              parts.append("_Gemini javob qaytarmadi._")
+          if error:
+              parts += ["", "### Xatolik", "", "```", error[:5000], "```"]
+
+          with open("comment_body.json", "w") as f:
+              json.dump({"body": "\n".join(parts)}, f)
+          PY
+
+          curl -sS -o curl_response.json -w "HTTP %{http_code}\n" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
+            -d @comment_body.json
+
+      - name: Fail the job if the consultation failed
+        if: steps.gemini.outcome == 'failure'
+        run: exit 1

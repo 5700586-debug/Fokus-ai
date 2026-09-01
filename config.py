@@ -105,6 +105,39 @@ RECRUITING_RETENTION_DAYS = int(os.getenv("RECRUITING_RETENTION_DAYS") or "90")
 # rad etiladi (yozma javob so'raladi), butun ariza to'xtamaydi.
 RECRUITING_MAX_VOICE_SECONDS = int(os.getenv("RECRUITING_MAX_VOICE_SECONDS") or "60")
 
-# Bitta suhbatda AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
-# (adaptive follow-up) savollar soni chegarasi.
-RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "2")
+# BITTA javobga AI/deterministik qoida taklif qiladigan aniqlashtiruvchi
+# (adaptive follow-up) savollar soni chegarasi — oddiy savollar uchun.
+# Har bir asosiy savol qayta boshlanganda hisoblagich reset qilinadi
+# (qarang recruiting_bot.py). Real Telegram sinovidan keyin: bu endi
+# FAQAT javob chindan ham ikkilanuvchan bo'lganda ishlatiladi — pozitsiyasi
+# aniq (garchi salbiy bo'lsa ham) javobga follow-up so'ralmaydi.
+RECRUITING_MAX_FOLLOW_UPS = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS") or "1")
+
+# Kritik mavzular (o'g'irlik/halollik, kassa xavfsizligi) uchun — javob
+# chindan ham ikkilanuvchan bo'lib qolaversa, bitta qo'shimcha urinishga
+# ruxsat beriladi (qarang recruiting_bot._follow_up_cap_for).
+RECRUITING_MAX_FOLLOW_UPS_CRITICAL = int(os.getenv("RECRUITING_MAX_FOLLOW_UPS_CRITICAL") or "2")
+
+# Qonuniy minimal ishga qabul yoshi — faqat shu yosh talabini tekshirish
+# uchun ishlatiladi, ballga HECH QACHON ta'sir qilmaydi (qarang
+# recruiting_bot.py va services/recruiting_scoring.py).
+RECRUITING_MIN_AGE = int(os.getenv("RECRUITING_MIN_AGE") or "18")
+
+# Nomzod filial tanlashda ko'radigan tugmalar — vergul bilan ajratilgan
+# ro'yxat (.env orqali). Standart qiymat faqat PLACEHOLDER — ishga
+# tushirishdan oldin haqiqiy filial nomlari bilan almashtirilishi kerak
+# (qarang recruiting_bot.py: "preferred_branch" qadami).
+RECRUITING_BRANCH_NAMES = [
+    name.strip() for name in (os.getenv("RECRUITING_BRANCH_NAMES") or "Filial-1,Filial-2").split(",") if name.strip()
+]
+
+# Ish e'loni uchun filialning HAQIQIY manzili (Founder tomonidan
+# berilgan) — V1 uchun minimal, yangi DB jadvali YO'Q. Faqat
+# ``RECRUITING_BRANCH_NAMES``dagi nomlar bilan mos keladigan filiallar
+# uchun aniq manzil ko'rsatiladi; xaritada yo'q filial uchun ish
+# e'lonida faqat nom ko'rsatiladi (uydirma manzil YO'Q).
+RECRUITING_BRANCH_ADDRESSES: dict[str, str] = {
+    "Derizlik": "Alisher Navoiy ko'chasi, 76-B uy",
+    "Charhiy": "A.T. Xuqandiy mavzesi, 101-A uy",
+    "Navoiy": "Alisher Navoiy mavzesi, 74-A uy",
+}

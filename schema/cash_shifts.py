@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS cash_shifts (
     branch TEXT,
     shift_date TEXT NOT NULL,
     opening_balance INTEGER NOT NULL DEFAULT 0,
+    -- Qabul qiluvchi kassirning o'zi mustaqil sanagan summasi — topshiruvchi
+    -- kassirning ``opening_balance``iga (uning real kassa summasi) ta'sir
+    -- qilmaydi, faqat solishtirish uchun alohida saqlanadi.
+    received_cash_balance INTEGER,
+    -- Qabul qiluvchi kassirning ``opening_balance`` va ``received_cash_balance``
+    -- orasidagi tafovutga bergan qisqa izohi — rahbar keyinchalik ko'rishi
+    -- uchun smenaga bog'langan holda saqlanadi.
+    discrepancy_reason_text TEXT,
     cash_sales INTEGER,
     card_sales INTEGER,
     other_payments INTEGER,

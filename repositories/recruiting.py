@@ -60,6 +60,89 @@ def set_vacancy_active(vacancy_id: int, is_active: bool) -> None:
         conn.close()
 
 
+def set_vacancy_requirements(vacancy_id: int, required_shift: str | None, requires_weekends: bool) -> None:
+    """Founder/admin tomonidan vakansiyaning qat'iy talablarini
+    sozlash uchun (qarang ``services/recruiting_fit.py``) — hozircha
+    faqat dasturiy/test chaqiruvi orqali, botda alohida buyruq shart
+    emas (ikkala standart vakansiyada ham sukut bo'yicha bo'sh, ya'ni
+    hech qanday qat'iy cheklov yo'q)."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE recruiting_vacancies SET required_shift = ?, requires_weekends = ?, updated_at = ? WHERE id = ?",
+            (required_shift, 1 if requires_weekends else 0, _now(), vacancy_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------- vakansiya <-> filial --
+
+
+def set_vacancy_branches(vacancy_id: int, branches: list[dict]) -> bool:
+    """``branches`` -- [{"branch_name": str, "headcount": int}, ...].
+    Vacancy mavjud bo'lishi, har bir nom bo'sh bo'lmasligi, headcount
+    musbat butun son bo'lishi va duplicate branch bo'lmasligi shart --
+    aks holda HECH NARSA yozilmaydi (``False``). Eski bog'lanishlarni
+    ATAYLAB tozalamaydi -- chaqiruvchi avval ``clear_vacancy_branches``ni
+    o'zi chaqirishi kerak (qarang recruiting_bot.py'dagi Founder e'lon
+    tasdiqlash oqimi)."""
+    if get_vacancy(vacancy_id) is None:
+        return False
+
+    seen: set[str] = set()
+    cleaned: list[tuple[str, int]] = []
+    for item in branches:
+        name = (item.get("branch_name") or "").strip()
+        headcount = item.get("headcount")
+        if not name or not isinstance(headcount, int) or isinstance(headcount, bool) or headcount <= 0:
+            return False
+        if name in seen:
+            return False
+        seen.add(name)
+        cleaned.append((name, headcount))
+
+    if not cleaned:
+        return False
+
+    now = _now()
+    conn = get_connection()
+    try:
+        for name, headcount in cleaned:
+            conn.execute(
+                "INSERT INTO recruiting_vacancy_branches (vacancy_id, branch_name, headcount, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (vacancy_id, name, headcount, now),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return True
+
+
+def list_vacancy_branches(vacancy_id: int) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM recruiting_vacancy_branches WHERE vacancy_id = ? ORDER BY id",
+            (vacancy_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def clear_vacancy_branches(vacancy_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM recruiting_vacancy_branches WHERE vacancy_id = ?", (vacancy_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------------- ariza --
 
 
@@ -117,6 +200,36 @@ _UPDATABLE_APPLICATION_FIELDS = {
     "motivation_text",
     "current_step",
     "status",
+    "birth_year",
+    "residence_area",
+    "preferred_branch",
+    "shift_preference",
+    "unavailable_days_text",
+    "holiday_available",
+    "expected_salary",
+    "commute_issue",
+    "accommodation_needed",
+    "accommodation_text",
+    "fit_result",
+    "fit_reason",
+    "prev_employer_text",
+    "experience_duration_text",
+    "pos_experience",
+    "cash_handling_text",
+    "reference_check_consent",
+    "prev_salary_text",
+    "retention_intent",
+    "retention_intent_reason",
+    "attendance_barrier_text",
+    "substance_policy_agree",
+    "criminal_record",
+    "candidate_photo_file_id",
+    "leave_reason_followup_text",
+    "property_honesty_flag",
+    "birth_date_text",
+    "birth_day",
+    "birth_month",
+    "job_stability_text",
 }
 
 
@@ -192,6 +305,33 @@ def set_founder_decision(application_id: int, decision: str, decided_by: int) ->
         conn.commit()
     finally:
         conn.close()
+
+
+def set_founder_decision_if(
+    application_id: int, expected_status: str, decision: str, decided_by: int
+) -> bool:
+    """``set_founder_decision`` bilan bir xil, lekin FAQAT ariza joriy
+    statusi ``expected_status``ga teng bo'lsagina yozadi (atomic
+    ``UPDATE ... WHERE id = ? AND status = ?``) — parallel ikkinchi
+    chaqiruv (masalan ikki xil worker bir vaqtda "Ishga olish" bossa)
+    hech narsa o'zgartirmaydi. Qaytadi: ``True`` — yozildi (shu
+    chaqiruv arizani "band qildi"), ``False`` — joriy status
+    kutilganidan farq qiladi (boshqa chaqiruv allaqachon band qilgan).
+    """
+    now = _now()
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE recruiting_applications SET founder_decision = ?, founder_decision_by = ?, "
+            "founder_decision_at = ?, status = 'reviewed', updated_at = ? WHERE id = ? AND status = ?",
+            (decision, decided_by, now, now, application_id, expected_status),
+        )
+        conn.commit()
+        claimed = cursor.rowcount > 0
+    finally:
+        conn.close()
+
+    return claimed
 
 
 def list_applications_past_retention(now_iso: str | None = None) -> list[dict]:
@@ -313,6 +453,8 @@ def save_assessment(
     risks: list[dict],
     ai_summary: str | None,
     source: str,
+    red_flags: list[dict] | None = None,
+    clarify_questions: list[str] | None = None,
 ) -> None:
     now = _now()
     conn = get_connection()
@@ -323,8 +465,9 @@ def save_assessment(
         conn.execute(
             "INSERT INTO recruiting_assessments "
             "(application_id, rubric_version_id, overall_result, criteria_scores_json, "
-            "strengths_json, risks_json, ai_summary, source, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "strengths_json, risks_json, ai_summary, source, red_flags_json, "
+            "clarify_questions_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 application_id,
                 rubric_version_id,
@@ -334,6 +477,8 @@ def save_assessment(
                 json.dumps(risks, ensure_ascii=False),
                 ai_summary,
                 source,
+                json.dumps(red_flags or [], ensure_ascii=False),
+                json.dumps(clarify_questions or [], ensure_ascii=False),
                 now,
             ),
         )

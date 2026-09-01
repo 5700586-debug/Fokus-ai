@@ -104,6 +104,28 @@ async def test_founder_can_decide_on_application(bot_dp):
     assert application["status"] == "reviewed"
 
 
+async def test_reject_works_on_first_click_for_a_fresh_application(bot_dp):
+    """Bug tekshiruvi: hali hech qanday qaror qabul qilinmagan, toza
+    ``awaiting_review`` holatidagi arizada "❌ Rad etish" birinchi
+    bosishda muvaffaqiyatli ishlashi kerak (mavjud
+    ``_handle_founder_decision``/``set_founder_decision_if`` oqimi
+    orqali, "interview" bilan bir xil mexanizm)."""
+    main, bot = bot_dp
+    application_id = _create_awaiting_review_application(600004)
+
+    from aiogram.methods import AnswerCallbackQuery
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_reject:{application_id}", target_chat_id=FOUNDER_ID)
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision"] == "rejected"
+    assert application["status"] == "reviewed"
+
+    acks = [m for m in sent if isinstance(m, AnswerCallbackQuery)]
+    assert any("Rad etildi" in (a.text or "") for a in acks)
+    assert not any("topilmadi" in (a.text or "").lower() for a in acks)
+
+
 # --------------------------------------------------------- idempotentlik --
 
 
@@ -125,6 +147,133 @@ async def test_decision_on_unknown_application_does_not_crash(bot_dp):
     main, bot = bot_dp
     sent = await send_callback(main.dp, bot, FOUNDER_ID, "rec_interview:999999", target_chat_id=FOUNDER_ID)
     assert sent  # AnswerCallbackQuery (alert) yuborilgan bo'lishi kerak, xato emas
+
+
+# --------------------------------------------------------------- post-hire --
+
+
+async def test_founder_hire_creates_active_employee_with_role_branch_and_auto_menu(bot_dp):
+    """Post-hire oqimi: "🎯 Ishga olish" bosilgach nomzod MAVJUD
+    employee/role mexanizmi orqali aktiv xodimga aylanishi, lavozim va
+    filiali biriktirilishi, "👥 Xodimlar" ro'yxatida (``roles.list_users``
+    orqali) darhol ko'rinishi va /start so'ramasdan o'z menyusini
+    avtomatik olishi kerak — Recruiting tarixi (``founder_decision``)
+    alohida saqlanadi.
+    """
+    import employees
+    import roles
+
+    main, bot = bot_dp
+    candidate_id = 600006
+    application_id = _create_awaiting_review_application(candidate_id)
+    recruiting_repo.update_application(
+        application_id, phone="+998901112233", residence_area="Toshkent",
+        preferred_branch="Chilonzor filiali",
+    )
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert roles.get_role(candidate_id) == "kassir"
+    profile = employees.get_profile(candidate_id)
+    assert profile["status"] == "approved"
+    assert profile["role_key"] == "kassir"
+    assert profile["branch"] == "Chilonzor filiali"
+    assert candidate_id in roles.list_users()
+
+    candidate_messages = [m for m in sent if getattr(m, "chat_id", None) == candidate_id]
+    assert len(candidate_messages) == 1
+    assert "/start" not in candidate_messages[0].text
+    assert "Fokus AI botiga xush kelibsiz" not in candidate_messages[0].text
+    assert "Saturn jamoasiga xush kelibsiz" in candidate_messages[0].text
+    assert "💼 Lavozimingiz" in candidate_messages[0].text
+    assert candidate_messages[0].reply_markup is not None
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision"] == "hired"
+
+
+async def test_hire_does_not_send_menu_when_role_assignment_fails(bot_dp, monkeypatch):
+    """Regressiya: agar ``roles.set_role`` DB darajasidagi race tufayli
+    ``False`` qaytarsa (masalan single-slot rolga deyarli bir vaqtdagi
+    ikkinchi urinish), nomzodga tabriklash xabari/menyu
+    yuborilmasligi kerak.
+    """
+    import recruiting_bot
+
+    main, bot = bot_dp
+    candidate_id = 700003
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    monkeypatch.setattr(recruiting_bot.roles, "set_role", lambda *args, **kwargs: False)
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    candidate_messages = [m for m in sent if getattr(m, "chat_id", None) == candidate_id]
+    assert candidate_messages == []
+
+    import employees
+
+    assert employees.get_profile(candidate_id)["status"] == "approved"
+
+
+async def test_double_hire_click_does_not_crash_or_duplicate(bot_dp):
+    main, bot = bot_dp
+    candidate_id = 600007
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    first = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+    second = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert first and second  # ikkalasi ham javob yubordi, xato emas
+
+    import employees
+
+    profile = employees.get_profile(candidate_id)
+    assert profile["status"] == "approved"
+
+
+def test_set_founder_decision_if_only_claims_when_status_matches():
+    """Atomic guard: ikkita "parallel worker" bir xil arizani bir
+    vaqtda "Ishga olish" deb band qilishga urinsa (masalan ikki xil
+    bot worker yoki ikki marta tez ketma-ket bosilgan tugma), faqat
+    BIRINCHISI muvaffaqiyatli bo'lishi kerak.
+    """
+    application_id = _create_awaiting_review_application(700001)
+
+    first = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 999)
+    second = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 888)
+
+    assert first is True
+    assert second is False
+
+    application = recruiting_repo.get_application(application_id)
+    assert application["founder_decision_by"] == 999  # ikkinchisi qayta yozmadi
+    assert application["status"] == "reviewed"
+
+
+async def test_hire_does_not_touch_employees_when_application_already_claimed(bot_dp):
+    """Regressiya (multi-worker idempotency): agar ariza allaqachon
+    (masalan parallel boshqa worker tomonidan) "band qilingan" bo'lsa,
+    ``handle_hire`` ``employees.submit_profile``ga UMUMAN yetib
+    bormasligi kerak — xodim yozuvi yaratilmaydi/tegilmaydi, rol
+    berilmaydi, nomzodga xabar yuborilmaydi.
+    """
+    main, bot = bot_dp
+    candidate_id = 700002
+    application_id = _create_awaiting_review_application(candidate_id)
+
+    # "Boshqa worker" arizani allaqachon band qilgan deb simulyatsiya qilamiz.
+    claimed = recruiting_repo.set_founder_decision_if(application_id, "awaiting_review", "hired", 999999)
+    assert claimed is True
+
+    import employees
+    import roles
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_hire:{application_id}", target_chat_id=FOUNDER_ID)
+
+    assert employees.get_profile(candidate_id) is None
+    assert roles.get_role(candidate_id) is None
+    assert [m for m in sent if getattr(m, "chat_id", None) == candidate_id] == []
 
 
 # --------------------------------------------------------- karta manzili --
@@ -158,3 +307,23 @@ async def test_more_questions_button_shows_phone_and_follow_ups_to_founder_only(
 
     allowed = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_question:{application_id}", target_chat_id=FOUNDER_ID)
     assert any("+998900000000" in (getattr(m, "text", "") or "") for m in allowed)
+
+
+async def test_raw_answers_button_shows_full_text_to_founder_only(bot_dp):
+    import roles
+
+    main, bot = bot_dp
+    roles.set_role(ORDINARY_EMPLOYEE_ID, "kassir", set_by=FOUNDER_ID)
+    application_id = _create_awaiting_review_application(600005)
+    recruiting_repo.add_answer(
+        application_id, "kassir_muddat", "Muddati o'tgan mahsulot?",
+        "juda xatoli va uzun asl javob matni bo'lsin",
+    )
+
+    denied = await send_callback(
+        main.dp, bot, ORDINARY_EMPLOYEE_ID, f"rec_raw:{application_id}", target_chat_id=FOUNDER_ID
+    )
+    assert not any("juda xatoli va uzun asl javob matni" in (getattr(m, "text", "") or "") for m in denied)
+
+    allowed = await send_callback(main.dp, bot, FOUNDER_ID, f"rec_raw:{application_id}", target_chat_id=FOUNDER_ID)
+    assert any("juda xatoli va uzun asl javob matni" in (getattr(m, "text", "") or "") for m in allowed)

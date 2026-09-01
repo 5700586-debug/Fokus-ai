@@ -63,6 +63,58 @@ async def test_saturntest_sends_requested_post_type(bot_dp, monkeypatch):
     assert any("yuborildi" in (t or "") for t in texts_out)
 
 
+async def test_saturntest_tip_sends_only_tip_no_financial_dashboard(bot_dp):
+    """1-MUAMMO: ``/saturntest tip`` guruhga FAQAT qisqa motivatsion
+    tip yuborishi kerak — moliyaviy dashboard (reja/savdo/foiz/chek)
+    umuman qo'shilmasin.
+
+    Guruh ID oldindan ``/setrule`` orqali sozlangan holat sinaladi
+    (xuddi ``test_saturntest_sends_requested_post_type``dagidek) —
+    buyruq guruhning o'zida birinchi marta yuborilganda "Guruh ID
+    saqlandi" tasdig'i ham o'sha guruhga ketadi, bu esa tip mazmuniga
+    aloqasi yo'q, alohida (allaqachon boshqa testda qamrab olingan)
+    holat."""
+    main, bot = bot_dp
+
+    rules_service.set_rule("saturn.group_chat_id", "-100777", updated_by=FOUNDER_ID)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/saturntest tip")
+
+    group_messages = [m for m in sent if getattr(m, "chat_id", None) == -100777]
+    assert len(group_messages) == 1
+    assert group_messages[0].text.startswith("💡 Foydali ma'lumot")
+
+    forbidden = (
+        "kunlik reja", "haqiqiy savdo", "bajarilish foizi", "cheklar soni",
+        "o'rtacha chek", "qolgan reja", "dashboard",
+    )
+    lowered = group_messages[0].text.lower()
+    assert not any(word in lowered for word in forbidden)
+
+
+async def test_daily_greeting_messages_have_no_financial_block():
+    """1-MUAMMO: tong/tun avtomatik xabarlarida (va ular bilan bir
+    tickda) moliyaviy blok tasodifan ulanib qolmagan — bitta tickda
+    aynan 2 ta post (tong+tun) ketadi, dashboard emas."""
+    bot = RecordingBot(token="123456:TEST-TOKEN")
+    rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
+    rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
+    rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)
+    rules_service.set_rule("saturn.tip_time", "23:59", updated_by=FOUNDER_ID)
+
+    await saturn_group_bot._tick(bot, _FakeClient())
+
+    assert len(bot.sent) == 2  # faqat tong + tun — dashboard aralashmagan
+
+    forbidden = (
+        "kunlik reja", "haqiqiy savdo", "bajarilish foizi", "cheklar soni",
+        "o'rtacha chek", "qolgan reja", "dashboard",
+    )
+    for method in bot.sent:
+        content = (getattr(method, "caption", None) or getattr(method, "text", None) or "").lower()
+        assert not any(word in content for word in forbidden)
+
+
 async def test_saturntest_in_group_auto_captures_chat_id(bot_dp, monkeypatch):
     main, bot = bot_dp
     monkeypatch.setattr(main.openai_client.responses, "create", _FakeResponses().create)

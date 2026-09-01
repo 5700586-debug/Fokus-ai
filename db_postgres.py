@@ -84,6 +84,17 @@ def _split_script(script: str) -> list[str]:
     return [part.strip() for part in script.split(";") if part.strip()]
 
 
+def _has_executable_sql(sql: str) -> bool:
+    """Whitespace yoki faqat SQL kommentidan iborat bo'lakni o'tkazib yuboradi.
+
+    sqlite3.executescript bunday bo'laklarni tabiiy ravishda e'tiborsiz
+    qoldiradi; psycopg2 esa comment-only matnni ``empty query`` deb rad etadi.
+    """
+    without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", "\n", sql)
+    without_comments = re.sub(r"/\*.*?\*/", "", without_line_comments, flags=re.DOTALL)
+    return bool(without_comments.strip())
+
+
 class _PgCursorResult:
     def __init__(self, cursor, lastrowid):
         self._cursor = cursor
@@ -136,6 +147,8 @@ class PgConnection:
         for statement in _split_script(script):
             translated, stripped_fk = _translate_statement(statement)
             needs_emergency_fk = needs_emergency_fk or stripped_fk
+            if not _has_executable_sql(translated):
+                continue
             cursor.execute(translated)
 
         if needs_emergency_fk:

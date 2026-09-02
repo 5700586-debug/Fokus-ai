@@ -135,6 +135,22 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data: dict):
         message: Message | None = getattr(event, "message", None)
         text = getattr(message, "text", None) or ""
+        state: FSMContext | None = data.get("state")
+        current_state = await state.get_state() if state is not None else None
+
+        # Bir martalik onboarding havolasini anketa davomida qayta bosish
+        # anketani o'chirmasin. Xodim mavjud savoldan davom etadi.
+        if (
+            message is not None
+            and text.startswith("/start")
+            and current_state is not None
+            and current_state.startswith("OnboardingStates:")
+        ):
+            await message.answer(
+                "Anketangiz davom etmoqda. Havolani qayta bosmang, "
+                "oxirgi savolga javob bering."
+            )
+            return
         # ``_STALE_LABEL_TO_COMMAND``/``_TOP_LEVEL_NAV_TEXTS`` shu modulda
         # pastroqda e'lon qilinadi, lekin bu yerda faqat CHAQIRILGANDA
         # (modul to'liq yuklangandan keyin) o'qiladi — shuning uchun

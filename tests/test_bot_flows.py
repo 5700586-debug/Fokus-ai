@@ -259,6 +259,35 @@ async def test_invite_and_setrole_flow(bot_dp):
     assert any("Ismingiz" in t or "F.I.Sh" in t or "Familiya" in t for t in texts(sent)), texts(sent)
 
 
+async def test_reopening_invite_does_not_erase_active_onboarding(bot_dp):
+    main, bot = bot_dp
+
+    import invites
+
+    user_id = 60061
+    token = invites.create_invite("kassir", "SATURN Derizlik", FOUNDER_ID)
+    await send(main.dp, bot, user_id, text=f"/start {token}")
+    for answer in (
+        "Familiyev",
+        "Ism",
+        "Ota",
+        "01.05.1995",
+        "Erkak",
+        "+998901234567",
+        "Kontakt Bir",
+    ):
+        await send(main.dp, bot, user_id, text=answer)
+
+    sent = await send(main.dp, bot, user_id, text=f"/start {token}")
+    assert sent[-1].text == (
+        "Anketangiz davom etmoqda. Havolani qayta bosmang, "
+        "oxirgi savolga javob bering."
+    )
+
+    sent = await send(main.dp, bot, user_id, text="+998901111111")
+    assert sent[-1].text.startswith("Bu odam xodimga kim bo'ladi?")
+
+
 async def test_only_founder_can_assign_nazoratchi(bot_dp):
     """Bu yil kompaniyada faqat bitta nazoratchi ishlaydi va uni faqat
     asoschi tayinlay oladi — begona emas, balki ALLAQACHON ro'yxatdan

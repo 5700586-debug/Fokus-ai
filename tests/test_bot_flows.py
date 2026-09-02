@@ -200,11 +200,18 @@ async def test_add_employee_role_and_branch_selection_produces_invite_link(bot_d
     sent = await send(main.dp, bot, FOUNDER_ID, text="Kassir")
     assert sent[0].text == "Qaysi do'konda ishlaydi?"
 
-    sent = await send(main.dp, bot, FOUNDER_ID, text="Filial-1")
+    rows = sent[0].reply_markup.keyboard
+    assert [b.text for b in rows[0]] == ["SATURN Charhiy", "SATURN Derizlik"]
+    assert [b.text for b in rows[1]] == ["SATURN Navoiy", "SATURN Shafran"]
+    assert [b.text for b in rows[2]] == ["⬅️ Orqaga"]
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="SATURN Charhiy")
     assert sent[0].text.startswith("✅ Link tayyor\n")
     assert "https://t.me/" in sent[0].text
     assert "invite" not in sent[0].text.lower()
     assert "token" not in sent[0].text.lower()
+    assert "Filial-1" not in sent[0].text
+    assert "Filial-2" not in sent[0].text
 
 
 async def test_invite_role_buttons_are_paired_two_per_row(bot_dp):

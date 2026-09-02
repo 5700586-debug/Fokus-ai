@@ -1,0 +1,25 @@
+name: Telegram BIGINT targeted check
+
+on:
+  push:
+    branches:
+      - fix/telegram-bigint-onboarding
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - name: Targeted tests
+        run: >
+          python -m pytest -q
+          tests/test_db_migration.py
+          tests/test_bot_flows.py::test_invite_and_setrole_flow
+          tests/test_supplier_chat_bot_flows.py::test_start_with_supplier_token_claims_and_greets

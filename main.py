@@ -1769,6 +1769,13 @@ async def set_role_handler(message: Message) -> None:
 
     if set_role(user_id, role_key, set_by=message.from_user.id):
         await message.answer(f"✅ {user_id} uchun rol o‘rnatildi: {role_name(role_key)}")
+        try:
+            # Faqat OLDINDAN mavjud, yakunlanmagan enrollment bo'lsa
+            # davom etadi — bu yerda yangi enrollment yaratilmaydi
+            # (qarang ``discipline_bot.start_or_resume_rule_learning``).
+            await discipline_bot.start_or_resume_rule_learning(message.bot, user_id)
+        except Exception as error:
+            print(f"Nizom o'qishni davom ettirishda xato (user_id={user_id}): {error!r}")
     else:
         await message.answer("❌ Rol o‘rnatib bo‘lmadi.")
 

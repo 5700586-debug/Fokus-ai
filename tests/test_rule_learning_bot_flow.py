@@ -11,6 +11,7 @@ import pytest
 from aiogram.methods import AnswerCallbackQuery, DeleteMessage, EditMessageText, SendMessage
 
 import company_time
+import employees
 from config import FOUNDER_ID
 from repositories import discipline as discipline_repo
 from repositories import rule_learning as rule_learning_repo
@@ -383,3 +384,94 @@ async def test_cleanup_deletes_card_but_keeps_audit_row(bot_dp):
     assert stored["completed_at"] is not None
     assert stored["completed_company_date"] is not None
     assert rule_learning.completed_today(EMPLOYEE_ID) == 1
+
+
+# ----------------------------------------------- approval integratsiyasi --
+
+APPLICANT_ID = 940101
+
+
+def _submit_profile(user_id: int, role_key: str = "kassir") -> None:
+    employees.submit_profile(
+        user_id,
+        {"familiya": "Familiyev", "ism": "Ism", "branch": "Filial-1", "role_key": role_key, "contacts": []},
+    )
+
+
+def _applicant_messages(sent, user_id: int = APPLICANT_ID) -> list:
+    return [m for m in sent if getattr(m, "chat_id", None) == user_id]
+
+
+async def test_approval_success_enrolls_and_sends_first_rule(bot_dp):
+    main, bot = bot_dp
+    _add_rule(1)
+    _submit_profile(APPLICANT_ID)
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{APPLICANT_ID}", target_chat_id=FOUNDER_ID
+    )
+
+    assert rule_learning.get_enrollment(APPLICANT_ID) is not None
+    applicant_texts = texts(_applicant_messages(sent))
+    assert any("1-nizom" in (t or "") for t in applicant_texts)
+
+
+async def test_approval_role_failure_enrolls_but_sends_no_rule_message(bot_dp, monkeypatch):
+    import approval
+
+    main, bot = bot_dp
+    _add_rule(1)
+    _submit_profile(APPLICANT_ID)
+    monkeypatch.setattr(approval.roles, "set_role", lambda *args, **kwargs: False)
+
+    sent = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{APPLICANT_ID}", target_chat_id=FOUNDER_ID
+    )
+
+    assert rule_learning.get_enrollment(APPLICANT_ID) is not None
+    assert _applicant_messages(sent) == []
+
+
+async def test_setrole_resumes_pending_enrollment_after_role_failure(bot_dp, monkeypatch):
+    import approval
+
+    main, bot = bot_dp
+    _add_rule(1)
+    _submit_profile(APPLICANT_ID)
+    monkeypatch.setattr(approval.roles, "set_role", lambda *args, **kwargs: False)
+    await send_callback(main.dp, bot, FOUNDER_ID, data=f"approve:{APPLICANT_ID}", target_chat_id=FOUNDER_ID)
+    assert rule_learning.get_enrollment(APPLICANT_ID) is not None
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text=f"/setrole {APPLICANT_ID} kassir")
+
+    applicant_texts = texts(_applicant_messages(sent))
+    assert any("1-nizom" in (t or "") for t in applicant_texts)
+
+
+async def test_setrole_on_old_employee_does_not_create_new_enrollment(bot_dp):
+    main, bot = bot_dp
+    _add_rule(1)
+    set_role(EMPLOYEE_ID, "kassir", set_by=FOUNDER_ID)  # eski xodim -- enrollment yo'q
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text=f"/setrole {EMPLOYEE_ID} nazoratchi")
+
+    assert rule_learning.get_enrollment(EMPLOYEE_ID) is None
+    employee_texts = texts(_applicant_messages(sent, EMPLOYEE_ID))
+    assert not any("nizom" in (t or "").lower() for t in employee_texts)
+
+
+async def test_duplicate_approve_does_not_duplicate_enrollment_or_message(bot_dp):
+    main, bot = bot_dp
+    _add_rule(1)
+    _submit_profile(APPLICANT_ID)
+
+    first = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{APPLICANT_ID}", target_chat_id=FOUNDER_ID
+    )
+    second = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=f"approve:{APPLICANT_ID}", target_chat_id=FOUNDER_ID
+    )
+
+    assert len(_applicant_messages(first)) >= 1
+    assert _applicant_messages(second) == []
+    assert rule_learning_repo.list_started_rule_numbers(APPLICANT_ID) == [1]

@@ -72,6 +72,29 @@ def _employee_name(user_id: int) -> str:
     return full_name or str(user_id)
 
 
+_RULE_LEARNING_STATUS_LABELS = {
+    "not_learned": "nizom o'rganilishi boshlanmagan",
+    "learning_incomplete": "o'rganish tugallanmagan",
+    "understood_before_penalty": "ball ayirilishidan oldin tushunilgan",
+    "understood_after_penalty": "ball ayirilishidan keyin tushunilgan",
+}
+
+
+def _rule_learning_status_line(penalty_id: int) -> str:
+    """Nizom o'qish auditi holatidan bitta qatorli qo'shimcha matn --
+    lookup/format xatosi bo'lsa (masalan jarima topilmasa yoki holat
+    noma'lum bo'lsa) log qilinadi va mavjud oqim shu qatorsiz davom
+    etadi (qarang chaqiruvchi joylar)."""
+    try:
+        context = discipline.get_penalty_learning_context(penalty_id)
+        status_text = _RULE_LEARNING_STATUS_LABELS[context["status"]]
+    except Exception as error:
+        print(f"Nizom holatini olishda xato (penalty_id={penalty_id}): {error!r}")
+        return ""
+
+    return f"\n📚 Nizom holati: {status_text}"
+
+
 def _target_employees() -> list[tuple[int, str]]:
     result = [
         (user_id, _employee_name(user_id))
@@ -409,19 +432,23 @@ def register(dp: Dispatcher, openai_client) -> None:
                 ai_note=ai_note,
             )
 
+            rule_learning_line = _rule_learning_status_line(result["penalty_id"])
+
             name = _employee_name(employee_id)
             await waiting.edit_text(
                 f"{ai_note}\n\n"
                 f"🚫 {name} uchun -{amount} ball ayirildi ({rule_number}-nizom).\n"
                 f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
                 "ℹ️ Fiks oylikka ta'sir qilmaydi."
+                f"{rule_learning_line}"
             )
 
             try:
                 await message.bot.send_message(
                     employee_id,
                     f"⚠️ Sizga -{amount} ball ayirildi ({rule_number}-nizom: {rule['title']}).\n"
-                    "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring.",
+                    "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring."
+                    f"{rule_learning_line}",
                 )
             except Exception as error:
                 print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")

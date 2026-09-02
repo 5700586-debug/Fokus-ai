@@ -152,6 +152,158 @@ async def test_penalty_entry_skipped_when_already_pending_for_same_nazoratchi(bo
     assert discipline.get_salary(111)["bonus_bank"] == 0  # jarima qo'llanmadi
 
 
+# --------------------------------------------- nizom holati (rule learning) --
+
+_RULE_LEARNING_EMPLOYEE_ID = 111
+_RULE_NUMBER = 3
+
+
+def _add_penalty_rule() -> None:
+    from services import discipline as discipline_service
+
+    discipline_service.add_rule(_RULE_NUMBER, "Kechikish", "Ishga kechikish taqiqlanadi", created_by=FOUNDER_ID)
+
+
+def _create_penalty(employee_id: int = _RULE_LEARNING_EMPLOYEE_ID) -> int:
+    from services import discipline as discipline_service
+
+    result = discipline_service.apply_penalty(
+        employee_id, 1, "2026-09-02", 10, _RULE_NUMBER, comment=None, ai_note=None
+    )
+    return result["penalty_id"]
+
+
+def _set_progress_completed_at(progress_id: int, value: str) -> None:
+    import db
+
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "UPDATE rule_learning_progress SET completed_at = ?, understood_confirmed_at = ? WHERE id = ?",
+            (value, value, progress_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _set_penalty_created_at(penalty_id: int, value: str) -> None:
+    import db
+
+    conn = db.get_connection()
+    try:
+        conn.execute("UPDATE discipline_penalties SET created_at = ? WHERE id = ?", (value, penalty_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_rule_learning_line_not_learned():
+    _add_penalty_rule()
+    penalty_id = _create_penalty()
+
+    line = discipline_bot._rule_learning_status_line(penalty_id)
+
+    assert line == "\n📚 Nizom holati: nizom o'rganilishi boshlanmagan"
+
+
+def test_rule_learning_line_learning_incomplete():
+    from services import rule_learning
+
+    _add_penalty_rule()
+    rule_learning.enroll(_RULE_LEARNING_EMPLOYEE_ID)
+    rule_learning.get_current_rule(_RULE_LEARNING_EMPLOYEE_ID)  # progress yaratiladi, tugallanmagan
+    penalty_id = _create_penalty()
+
+    line = discipline_bot._rule_learning_status_line(penalty_id)
+
+    assert line == "\n📚 Nizom holati: o'rganish tugallanmagan"
+
+
+def test_rule_learning_line_understood_before_penalty():
+    from services import rule_learning
+
+    _add_penalty_rule()
+    rule_learning.enroll(_RULE_LEARNING_EMPLOYEE_ID)
+    progress = rule_learning.get_current_rule(_RULE_LEARNING_EMPLOYEE_ID)
+    assert rule_learning.confirm_read(progress["id"]) is True
+    assert rule_learning.confirm_understood(_RULE_LEARNING_EMPLOYEE_ID, progress["id"]) is True
+    _set_progress_completed_at(progress["id"], "2026-01-01T00:00:00+00:00")
+
+    penalty_id = _create_penalty()
+    _set_penalty_created_at(penalty_id, "2026-01-02T00:00:00+00:00")
+
+    line = discipline_bot._rule_learning_status_line(penalty_id)
+
+    assert line == "\n📚 Nizom holati: ball ayirilishidan oldin tushunilgan"
+
+
+def test_rule_learning_line_understood_after_penalty():
+    from services import rule_learning
+
+    _add_penalty_rule()
+    penalty_id = _create_penalty()
+    _set_penalty_created_at(penalty_id, "2026-01-01T00:00:00+00:00")
+
+    rule_learning.enroll(_RULE_LEARNING_EMPLOYEE_ID)
+    progress = rule_learning.get_current_rule(_RULE_LEARNING_EMPLOYEE_ID)
+    assert rule_learning.confirm_read(progress["id"]) is True
+    assert rule_learning.confirm_understood(_RULE_LEARNING_EMPLOYEE_ID, progress["id"]) is True
+    _set_progress_completed_at(progress["id"], "2026-01-02T00:00:00+00:00")
+
+    line = discipline_bot._rule_learning_status_line(penalty_id)
+
+    assert line == "\n📚 Nizom holati: ball ayirilishidan keyin tushunilgan"
+
+
+async def test_rule_learning_line_appears_in_both_penalty_messages(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _set_role(1, "nazoratchi")
+    _set_role(111, "kassir")
+
+    from services import discipline
+
+    discipline.add_rule(_RULE_NUMBER, "Kechikish", "Ishga kechikish taqiqlanadi", created_by=FOUNDER_ID)
+    _mock_openai_text(monkeypatch, main, "✅ Mos keladi.")
+
+    await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
+    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+
+    expected_line = "\n📚 Nizom holati: nizom o'rganilishi boshlanmagan"
+    supervisor_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 1 and m.text]
+    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111 and m.text]
+
+    assert any(t.endswith(expected_line) for t in supervisor_texts)
+    assert any(t.endswith(expected_line) for t in employee_texts)
+
+
+async def test_rule_learning_lookup_error_does_not_break_penalty_flow(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _set_role(1, "nazoratchi")
+    _set_role(111, "kassir")
+
+    from services import discipline
+
+    discipline.add_rule(_RULE_NUMBER, "Kechikish", "Ishga kechikish taqiqlanadi", created_by=FOUNDER_ID)
+    _mock_openai_text(monkeypatch, main, "✅ Mos keladi.")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulyatsiya")
+
+    monkeypatch.setattr(discipline_bot.discipline, "get_penalty_learning_context", _raise)
+
+    await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
+    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+
+    texts = [m.text for m in sent if m.text]
+    assert any("ball ayirildi" in t for t in texts)
+    assert not any("Nizom holati" in t for t in texts)
+    assert discipline.get_salary(111)["bonus_bank"] == -20
+
+    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111 and m.text]
+    assert any("ball ayirildi" in t for t in employee_texts)
+
+
 async def test_kunniyop_close_day_then_reports_already_closed(bot_dp):
     main, bot = bot_dp
     _set_role(1, "nazoratchi")

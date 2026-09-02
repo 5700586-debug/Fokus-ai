@@ -80,19 +80,20 @@ _RULE_LEARNING_STATUS_LABELS = {
 }
 
 
-def _rule_learning_status_line(penalty_id: int) -> str:
-    """Nizom o'qish auditi holatidan bitta qatorli qo'shimcha matn --
-    lookup/format xatosi bo'lsa (masalan jarima topilmasa yoki holat
-    noma'lum bo'lsa) log qilinadi va mavjud oqim shu qatorsiz davom
-    etadi (qarang chaqiruvchi joylar)."""
+def _rule_learning_status(penalty_id: int) -> tuple[dict | None, str]:
+    """BITTA ``discipline.get_penalty_learning_context`` chaqiruvidan
+    ``(context, status_line)`` qaytaradi. Lookup/format xatosi bo'lsa
+    (masalan jarima topilmasa yoki holat noma'lum bo'lsa) log qilinadi
+    va ``(None, "")`` qaytariladi -- mavjud oqim shu qatorsiz/alert-siz
+    davom etadi (qarang chaqiruvchi joy)."""
     try:
         context = discipline.get_penalty_learning_context(penalty_id)
         status_text = _RULE_LEARNING_STATUS_LABELS[context["status"]]
     except Exception as error:
         print(f"Nizom holatini olishda xato (penalty_id={penalty_id}): {error!r}")
-        return ""
+        return None, ""
 
-    return f"\n📚 Nizom holati: {status_text}"
+    return context, f"\n📚 Nizom holati: {status_text}"
 
 
 def _target_employees() -> list[tuple[int, str]]:
@@ -432,7 +433,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                 ai_note=ai_note,
             )
 
-            rule_learning_line = _rule_learning_status_line(result["penalty_id"])
+            rule_learning_context, rule_learning_line = _rule_learning_status(result["penalty_id"])
 
             name = _employee_name(employee_id)
             await waiting.edit_text(
@@ -452,6 +453,23 @@ def register(dp: Dispatcher, openai_client) -> None:
                 )
             except Exception as error:
                 print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
+
+            if (
+                rule_learning_context is not None
+                and rule_learning_context["status"] == "understood_before_penalty"
+                and nazoratchi_id != FOUNDER_ID
+            ):
+                founder_text = (
+                    f"🚨 Nizom buzilishi\nXodim: {name}\nNizom: {rule_number} — {rule['title']}\n"
+                    f"Ball: -{amount}\n📚 Xodim bu nizomni oldin tushunganini tasdiqlagan."
+                )
+                try:
+                    await message.bot.send_message(FOUNDER_ID, founder_text)
+                except Exception as error:
+                    print(
+                        f"Founderga nizom buzilishi ogohlantirishini yuborib bo'lmadi "
+                        f"(penalty_id={result['penalty_id']}): {error!r}"
+                    )
         finally:
             _PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 

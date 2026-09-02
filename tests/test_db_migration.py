@@ -80,6 +80,40 @@ def test_additive_column_migration_runs_twice_without_error(tmp_path, monkeypatc
     assert "prior_employer_reference_consent" in columns
 
 
+def test_postgres_bigint_migration_widens_telegram_identity_columns(monkeypatch):
+    class Result:
+        def fetchall(self):
+            return [
+                {"table_name": "invites", "column_name": "claimed_by"},
+                {"table_name": "employees", "column_name": "user_id"},
+                {"table_name": "employee_contacts", "column_name": "user_id"},
+                {"table_name": "supplier_offers", "column_name": "supplier_id"},
+            ]
+
+    class Connection:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=()):
+            self.sql.append(sql)
+            if "information_schema.columns" in sql:
+                return Result()
+            return Result()
+
+    monkeypatch.setattr(db, "_DATABASE_URL", "postgresql://example")
+    conn = Connection()
+
+    db._ensure_postgres_bigint_identity_columns(conn)
+
+    joined = "\n".join(conn.sql)
+    assert 'ALTER TABLE "invites" ALTER COLUMN "claimed_by" TYPE BIGINT' in joined
+    assert 'ALTER TABLE "employees" ALTER COLUMN "user_id" TYPE BIGINT' in joined
+    assert 'ALTER TABLE "employee_contacts" ALTER COLUMN "user_id" TYPE BIGINT' in joined
+    assert 'ALTER TABLE "supplier_offers" ALTER COLUMN "supplier_id" TYPE BIGINT' not in joined
+    assert "DROP CONSTRAINT IF EXISTS employee_contacts_user_id_fkey" in joined
+    assert "ADD CONSTRAINT employee_contacts_user_id_fkey" in joined
+
+
 def test_single_slot_role_unique_index_exists_after_init(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_DB_FILE", str(tmp_path / "fresh.db"))
     db.init_db()

@@ -60,13 +60,18 @@ def claim_invite(token: str, user_id: int) -> dict | None:
             return None
 
         invite = dict(row)
-        if invite["status"] != "active":
-            return None
-
         expires_at = datetime.fromisoformat(invite["expires_at"])
         if datetime.now(timezone.utc) > expires_at:
-            conn.execute("UPDATE invites SET status = 'expired' WHERE token = ?", (token,))
-            conn.commit()
+            if invite["status"] in ("active", "claimed"):
+                conn.execute("UPDATE invites SET status = 'expired' WHERE token = ?", (token,))
+                conn.commit()
+            return None
+
+        # Havolani band qilgan aynan o'sha Telegram foydalanuvchisi
+        # uzilgan anketani qayta boshlashi mumkin. Boshqa odamga yopiq.
+        if invite["status"] == "claimed":
+            return invite if invite.get("claimed_by") == user_id else None
+        if invite["status"] != "active":
             return None
 
         now = datetime.now(timezone.utc).isoformat()

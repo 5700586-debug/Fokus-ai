@@ -1,0 +1,19 @@
+name: Targeted onboarding recovery test
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q tests/test_invites.py tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding

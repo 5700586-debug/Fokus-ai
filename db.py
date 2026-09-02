@@ -126,6 +126,77 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("employee_scheduled_shifts", "schedule_mode", "TEXT"),
 ]
 
+# Telegram user/chat ID'lari 32-bit INTEGER chegarasidan katta bo'lishi
+# mumkin. SQLite ``INTEGER``ni 64-bit saqlaydi, Postgres ``INTEGER`` esa
+# 32-bit; shu sabab yangi Telegram akkauntlari invite claim paytida
+# ``integer out of range`` bilan yiqilmasligi uchun productiondagi shaxs
+# identifikator ustunlari BIGINTga kengaytiriladi.
+_TELEGRAM_ID_COLUMN_NAMES = {
+    "actor_id",
+    "assigned_driver_id",
+    "candidate_telegram_id",
+    "chat_id",
+    "driver_id",
+    "employee_a_id",
+    "employee_b_id",
+    "employee_id",
+    "manager_id",
+    "reported_by_employee_id",
+    "staff_complaint_employee_id",
+    "supervisor_id",
+    "target_id",
+    "telegram_user_id",
+    "user_id",
+}
+
+
+def _is_telegram_identity_column(column: str) -> bool:
+    return column in _TELEGRAM_ID_COLUMN_NAMES or column.endswith("_by")
+
+
+def _ensure_postgres_bigint_identity_columns(conn) -> None:
+    if not _DATABASE_URL:
+        return
+
+    rows = conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND data_type = 'integer'"
+    ).fetchall()
+    targets = [
+        (row["table_name"], row["column_name"])
+        for row in rows
+        if _is_telegram_identity_column(row["column_name"])
+    ]
+    if not targets:
+        return
+
+    # Bu loyiha sxemasidagi yagona user_id FK. Ikkala ustunni kengaytirish
+    # vaqtida vaqtincha olib tashlanib, darhol qayta tiklanadi.
+    employee_fk_touched = any(
+        table == "employees" and column == "user_id"
+        or table == "employee_contacts" and column == "user_id"
+        for table, column in targets
+    )
+    if employee_fk_touched:
+        conn.execute(
+            "ALTER TABLE employee_contacts "
+            "DROP CONSTRAINT IF EXISTS employee_contacts_user_id_fkey"
+        )
+
+    for table, column in targets:
+        # Nomlar faqat information_schema'dan olinadi va oddiy SQL
+        # identifikator ekanligi tekshiriladi.
+        if not table.replace("_", "").isalnum() or not column.replace("_", "").isalnum():
+            raise ValueError("Noto'g'ri Postgres identifikatori")
+        conn.execute(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE BIGINT')
+
+    if employee_fk_touched:
+        conn.execute(
+            "ALTER TABLE employee_contacts "
+            "ADD CONSTRAINT employee_contacts_user_id_fkey "
+            "FOREIGN KEY (user_id) REFERENCES employees(user_id)"
+        )
+
 
 def get_connection():
     if _DATABASE_URL:
@@ -181,6 +252,7 @@ def init_db() -> None:
         for statement in SCHEMA_STATEMENTS:
             conn.executescript(statement)
         _ensure_additive_columns(conn)
+        _ensure_postgres_bigint_identity_columns(conn)
         conn.commit()
     finally:
         conn.close()

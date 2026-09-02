@@ -99,6 +99,21 @@ def get_progress(progress_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_progress_for_rule(employee_id: int, rule_number: int) -> dict | None:
+    """Bitta xodim/nizom uchun yagona progress qatori (UNIQUE(employee_id,
+    rule_number) — retake/eng so'nggi tanlash mantig'i shart emas)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM rule_learning_progress WHERE employee_id = ? AND rule_number = ?",
+            (employee_id, rule_number),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
 def get_pending_progress(employee_id: int) -> dict | None:
     conn = get_connection()
     try:

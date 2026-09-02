@@ -88,6 +88,27 @@ CREATE TABLE IF NOT EXISTS supervisor_audit (
     UNIQUE(supervisor_id, audit_date, event_type)
 );
 
+CREATE TABLE IF NOT EXISTS rule_learning_enrollments (
+    employee_id INTEGER PRIMARY KEY,
+    enrolled_at TEXT NOT NULL,
+    finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rule_learning_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    rule_number INTEGER NOT NULL,
+    title_snapshot TEXT NOT NULL,
+    content_snapshot TEXT NOT NULL,
+    sent_at TEXT,
+    read_confirmed_at TEXT,
+    not_understood_at TEXT,
+    understood_confirmed_at TEXT,
+    completed_at TEXT,
+    completed_company_date TEXT,
+    UNIQUE(employee_id, rule_number)
+);
+
 INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUES
     ('bos.day_close_deadline', '20:00', NULL, NULL),
     ('bos.supervisor_late_penalty', '40', NULL, NULL),

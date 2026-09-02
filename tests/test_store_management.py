@@ -6,7 +6,7 @@ from tests.bot_harness import send
 
 pytestmark = pytest.mark.anyio
 
-_BRANCH = "Filial-1"
+_BRANCH = "SATURN Charhiy"
 
 
 @pytest.fixture

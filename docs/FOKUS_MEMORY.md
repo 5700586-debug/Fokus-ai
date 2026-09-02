@@ -24,6 +24,23 @@ Shundan keyin:
 - bir vaqtda imkon qadar bitta keyingi qadam ber;
 - I/S yoqilgan bo'lsa promptni avval tanqid qilib Founderga ko'rsat, `jo'nat` deyilmaguncha Claude'ga bermagin.
 
+## Claude'ga ulanish — KANONIK USUL
+
+Claude bilan FOKUS AI uchun ishlash usuli doim shu:
+
+1. Vazifani `.claude/tasks/<sana>-<qisqa-nom>.md` fayliga yoz.
+2. Faylni `feature/hr-conversational-interview` branchiga commit/push qil.
+3. `.github/workflows/claude-task-runner.yml` shu pushni avtomatik ushlab, `Claude Task Runner`ni ishga tushiradi.
+4. Runner task faylini Claude Code Action'ga yuboradi; Windows ishlatilmaydi, Ubuntu/Linux ishlaydi.
+5. Keyin GitHub Actions'dan aynan `Claude Task Runner` runini tekshir: `in_progress`, `success` yoki `failure`.
+6. `in_progress` bo'lsa ayni vazifani qayta jo'natma. Tugagach Claude yaratgan commit/test natijasini real tekshir.
+
+Muhim:
+- `Claude'ga jo'nat` degani oddiy matn berish emas; yuqoridagi `.claude/tasks/...md` + feature branch push usuli.
+- I/S rejimida foydalanuvchi aniq `jo'nat` demaguncha task faylini yaratma/push qilma.
+- Claude taski ketayotgan paytda takroriy prompt yuborib ortiqcha xarajat qilma.
+- `main`/productionga Claude task runner orqali to'g'ridan-to'g'ri tegma.
+
 ## Rejim buyrug'i
 
 ### `I/S` yoki `Iqtisodchi Sodiq rejimi`

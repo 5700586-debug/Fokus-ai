@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import company_time
 from repositories import discipline as discipline_repo
+from repositories import rule_learning as rule_learning_repo
 from services import rules as rules_service
 
 GRADE_BAJARILMAGAN = "bajarilmagan"
@@ -244,6 +245,40 @@ def apply_penalty(
     )
 
     return {"penalty_id": penalty_id, "bonus_bank_balance": balance, "rule": rule}
+
+
+def get_penalty_learning_context(penalty_id: int) -> dict | None:
+    """Jarima (``discipline_penalties``) va o'sha nizomni o'qish auditi
+    (``rule_learning_progress``) orasidagi READ-ONLY bog'lanish -- hech
+    qanday yozuv/UI/AI/xabar/avtomatik jazo bu yerda YO'Q, faqat holatni
+    o'qib qaytaradi."""
+    penalty = discipline_repo.get_penalty(penalty_id)
+    if penalty is None:
+        return None
+
+    progress = rule_learning_repo.get_progress_for_rule(penalty["employee_id"], penalty["rule_number"])
+    completed_at = progress.get("completed_at") if progress else None
+    penalty_created_at = penalty.get("created_at")
+
+    if progress is None:
+        status = "not_learned"
+    elif completed_at is None:
+        status = "learning_incomplete"
+    elif completed_at <= penalty_created_at:
+        status = "understood_before_penalty"
+    else:
+        status = "understood_after_penalty"
+
+    return {
+        "penalty_id": penalty["id"],
+        "employee_id": penalty["employee_id"],
+        "rule_number": penalty["rule_number"],
+        "status": status,
+        "title_snapshot": progress.get("title_snapshot") if progress else None,
+        "content_snapshot": progress.get("content_snapshot") if progress else None,
+        "understood_at": progress.get("understood_confirmed_at") if progress else None,
+        "penalty_created_at": penalty_created_at,
+    }
 
 
 def list_appealable_penalties(employee_id: int, limit: int = 10) -> list[dict]:

@@ -9,10 +9,12 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 import calibration_bot
+import discipline_bot
 import employees
 import roles
 from config import FOUNDER_ID
 from services import permissions
+from services import rule_learning
 
 
 def _review_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -81,6 +83,16 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Bu profil allaqachon ko'rib chiqilgan.", show_alert=True)
             return
 
+        try:
+            # Nizom auditiga yozib qo'yish rol muvaffaqiyatli
+            # berilishidan MUSTAQIL — rol keyinroq (masalan /setrole
+            # orqali) berilsa ham, enrollment allaqachon tayyor turadi
+            # va shu yerdan davom etadi (idempotent, qarang
+            # ``rule_learning.enroll``).
+            rule_learning.enroll(user_id)
+        except Exception as error:
+            print(f"Nizom auditiga yozishda xato (user_id={user_id}): {error!r}")
+
         role_assigned = roles.set_role(user_id, role_key, set_by=FOUNDER_ID)
         if not role_assigned:
             # DB darajasidagi race (masalan single-slot rolga deyarli bir
@@ -118,6 +130,12 @@ def register(dp: Dispatcher) -> None:
             f"✅ Profilingiz tasdiqlandi!\n\n{main.greeting_for_user(user_id)}",
             reply_markup=main.build_menu(user_id),
         )
+
+        try:
+            await discipline_bot.start_or_resume_rule_learning(callback.bot, user_id)
+        except Exception as error:
+            print(f"Nizom o'qishni boshlashda xato (user_id={user_id}): {error!r}")
+
         await callback.answer("Tasdiqlandi ✅")
 
     @dp.callback_query(F.data.startswith("reject:"))

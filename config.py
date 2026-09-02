@@ -128,7 +128,12 @@ RECRUITING_MIN_AGE = int(os.getenv("RECRUITING_MIN_AGE") or "18")
 # tushirishdan oldin haqiqiy filial nomlari bilan almashtirilishi kerak
 # (qarang recruiting_bot.py: "preferred_branch" qadami).
 RECRUITING_BRANCH_NAMES = [
-    name.strip() for name in (os.getenv("RECRUITING_BRANCH_NAMES") or "Filial-1,Filial-2").split(",") if name.strip()
+    name.strip()
+    for name in (
+        os.getenv("RECRUITING_BRANCH_NAMES")
+        or "SATURN Charhiy,SATURN Derizlik,SATURN Navoiy,SATURN Shafran"
+    ).split(",")
+    if name.strip()
 ]
 
 # Ish e'loni uchun filialning HAQIQIY manzili (Founder tomonidan
@@ -140,4 +145,7 @@ RECRUITING_BRANCH_ADDRESSES: dict[str, str] = {
     "Derizlik": "Alisher Navoiy ko'chasi, 76-B uy",
     "Charhiy": "A.T. Xuqandiy mavzesi, 101-A uy",
     "Navoiy": "Alisher Navoiy mavzesi, 74-A uy",
+    "SATURN Charhiy": "A.T. Xuqandiy mavzesi, 101-A uy",
+    "SATURN Derizlik": "Alisher Navoiy ko'chasi, 76-B uy",
+    "SATURN Navoiy": "Alisher Navoiy mavzesi, 74-A uy",
 }

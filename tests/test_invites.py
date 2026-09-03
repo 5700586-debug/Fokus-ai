@@ -25,6 +25,19 @@ def test_claim_already_claimed_token_returns_none():
     assert invites.claim_invite(token, user_id=999) is None
 
 
+def test_same_user_can_reopen_claimed_invite_until_completed():
+    token = invites.create_invite("kassir", branch="SATURN Derizlik", created_by=1)
+    invites.claim_invite(token, user_id=555)
+
+    reopened = invites.claim_invite(token, user_id=555)
+    assert reopened is not None
+    assert reopened["status"] == "claimed"
+    assert reopened["claimed_by"] == 555
+
+    invites.mark_completed(token)
+    assert invites.claim_invite(token, user_id=555) is None
+
+
 def test_expired_invite_cannot_be_claimed():
     token = invites.create_invite("nazoratchi", branch=None, created_by=1)
 

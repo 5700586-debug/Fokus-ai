@@ -9,9 +9,6 @@ on:
     branches:
       - fix/onboarding-resume-prompt
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -34,31 +31,15 @@ jobs:
           tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding
           | tee test_output.log
 
-      - name: Post diagnostics as a commit comment on failure
+      - name: Publish output to step summary on failure
         if: steps.test_run.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
         run: |
-          python - <<'PY'
-          import json
-
-          with open("test_output.log", "r", errors="replace") as f:
-              log = f.read()
-
-          body = "## Onboarding resume test diagnostics (auto-posted on failure)\n\n```\n" + log[-55000:] + "\n```"
-
-          with open("comment_body.json", "w") as f:
-              json.dump({"body": body}, f)
-          PY
-
-          curl -sS -o curl_response.json -w "HTTP %{http_code}\n" -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/$REPO/commits/$SHA/comments" \
-            -d @comment_body.json
+          {
+            echo '## Onboarding resume test output'
+            echo '```'
+            tail -c 55000 test_output.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail the job if the test failed
         if: steps.test_run.outcome == 'failure'

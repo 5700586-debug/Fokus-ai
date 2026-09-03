@@ -1,0 +1,26 @@
+name: Temp onboarding resume targeted test
+
+# VAQTINCHALIK workflow — faqat fix/onboarding-resume-prompt branchini
+# tekshirish uchun, PASS bo'lgach o'chiriladi. Boshqa hech qanday
+# doimiy workflow o'zgartirilmagan.
+
+on:
+  push:
+    branches:
+      - fix/onboarding-resume-prompt
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run targeted onboarding resume test
+        run: python -m pytest -q tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding

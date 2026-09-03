@@ -139,17 +139,18 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
         current_state = await state.get_state() if state is not None else None
 
         # Bir martalik onboarding havolasini anketa davomida qayta bosish
-        # anketani o'chirmasin. Xodim mavjud savoldan davom etadi.
+        # anketani o'chirmasin. Xodim mavjud FSM ma'lumoti va joriy
+        # savol/tugma bilan aynan o'sha nuqtadan davom etadi (invite
+        # qayta band qilinmaydi, anketa boshidan boshlanmaydi — qarang
+        # ``onboarding.resend_current_step``).
         if (
             message is not None
             and text.startswith("/start")
             and current_state is not None
             and current_state.startswith("OnboardingStates:")
+            and state is not None
         ):
-            await message.answer(
-                "Anketangiz davom etmoqda. Havolani qayta bosmang, "
-                "oxirgi savolga javob bering."
-            )
+            await onboarding.resend_current_step(message, state, current_state)
             return
         # ``_STALE_LABEL_TO_COMMAND``/``_TOP_LEVEL_NAV_TEXTS`` shu modulda
         # pastroqda e'lon qilinadi, lekin bu yerda faqat CHAQIRILGANDA

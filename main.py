@@ -913,15 +913,25 @@ async def _finish_invite_creation(message: Message, role_key: str, branch: str |
             )
             return
 
-        if invites.has_pending_invite_for_role(role_key):
-            await message.answer(
-                f"❌ {role_name(role_key)} uchun allaqachon faol havola mavjud.",
-                reply_markup=build_menu(message.from_user.id),
-            )
-            return
-
-    token = invites.create_invite(role_key, branch, created_by=FOUNDER_ID)
+    # Pending (muddati o'tmagan active/claimed) havola BARCHA rollar
+    # uchun tekshiriladi (avval faqat bir kishilik rollarga xos edi) —
+    # Founder hech qachon "allaqachon mavjud" deb qo'l ko'tarib
+    # qo'yilmasin, aksincha aynan o'sha ishlaydigan havolani ko'rsin.
     me = await message.bot.get_me()
+    pending = invites.get_pending_invite_for_role(role_key)
+    if pending is not None and pending["status"] == "claimed":
+        link = f"https://t.me/{me.username}?start={pending['token']}"
+        await message.answer(
+            f"ℹ️ {role_name(role_key)} uchun taklif havolasi allaqachon ochilgan "
+            f"va xodim anketani to'ldirmoqda:\n{link}\n\n"
+            "Faqat shu havolani ochgan xodimning o'zi davom ettira oladi.",
+            reply_markup=build_menu(message.from_user.id),
+        )
+        return
+
+    token = pending["token"] if pending is not None else invites.create_invite(
+        role_key, branch, created_by=FOUNDER_ID
+    )
     link = f"https://t.me/{me.username}?start={token}"
 
     await message.answer(
@@ -1730,23 +1740,33 @@ async def invite_handler(message: Message) -> None:
                 f"(user_id: {existing_user}). Bu rol uchun faqat 1 kishi bo‘lishi mumkin."
             )
             return
-
-        if invites.has_pending_invite_for_role(role_key):
-            await message.answer(
-                f"❌ {role_name(role_key)} uchun allaqachon faol taklif havolasi mavjud. "
-                "Avval uni yakunlang yoki muddati tugashini kuting."
-            )
-            return
     else:
         if len(parts) < 3 or not parts[2].strip():
             await message.answer(f"Foydalanish: /invite {role_key} <filial nomi>")
             return
         branch = parts[2].strip()
 
-    token = invites.create_invite(role_key, branch, created_by=FOUNDER_ID)
+    # Pending (muddati o'tmagan active/claimed) havola BARCHA rollar
+    # uchun tekshiriladi (avval faqat bir kishilik rollarga xos edi) —
+    # Founder hech qachon "allaqachon mavjud" deb qo'l ko'tarib
+    # qo'yilmasin, aksincha aynan o'sha ishlaydigan havolani ko'rsin.
     me = await message.bot.get_me()
+    pending = invites.get_pending_invite_for_role(role_key)
+    if pending is not None and pending["status"] == "claimed":
+        link = f"https://t.me/{me.username}?start={pending['token']}"
+        await message.answer(
+            f"ℹ️ {role_name(role_key)} uchun taklif havolasi allaqachon ochilgan "
+            f"va xodim anketani to'ldirmoqda:\n{link}\n\n"
+            "Faqat shu havolani ochgan xodimning o'zi davom ettira oladi."
+        )
+        return
+
+    token = pending["token"] if pending is not None else invites.create_invite(
+        role_key, branch, created_by=FOUNDER_ID
+    )
+    display_branch = pending["branch"] if pending is not None else branch
     link = f"https://t.me/{me.username}?start={token}"
-    branch_line = f"Filial: {branch}" if branch else "Filial: Umumiy (barcha filiallar)"
+    branch_line = f"Filial: {display_branch}" if display_branch else "Filial: Umumiy (barcha filiallar)"
 
     await message.answer(
         "✅ Taklif havolasi yaratildi (2 soat amal qiladi):\n"

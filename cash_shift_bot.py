@@ -23,11 +23,20 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
 )
+from openai import AsyncOpenAI
 
 from config import FOUNDER_ID
 from employees import STATUS_APPROVED, get_profile, list_approved_by_branch
 from providers.file_storage import get_file_storage_provider
-from services import cash_expense, cash_shift, chat_cleanup, permissions, shift_daily_report, shift_deficiency
+from services import (
+    cash_expense,
+    cash_shift,
+    chat_cleanup,
+    deficiency_list_ai,
+    permissions,
+    shift_daily_report,
+    shift_deficiency,
+)
 
 _CLOSESHIFT_WORKFLOW = "cash_shift_close"
 
@@ -156,6 +165,7 @@ class DeficiencyStates(StatesGroup):
     item_name = State()
     item_amount = State()
     yesterday_missing_numbers = State()
+    list_clarify = State()
 
 
 class DailyReportStates(StatesGroup):
@@ -341,6 +351,58 @@ def _deficiency_more_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="➕ Yana qo'shish", callback_data="csdef_add_more"),
         InlineKeyboardButton(text="✅ Tugatish", callback_data="csdef_done"),
     ]])
+
+
+def _deficiency_list_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="csdef_list_confirm"),
+        InlineKeyboardButton(text="✏️ Tuzatish", callback_data="csdef_list_edit"),
+    ]])
+
+
+def _format_deficiency_qty(value: float) -> str:
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+async def _advance_deficiency_list(reply_target: Message, state: FSMContext, shift_id: int) -> None:
+    """Ro'yxatdagi keyingi noaniq qatorni so'raydi; barcha qatorlar
+    aniq bo'lsa, yakuniy tasdiqlash xulosasini ko'rsatadi."""
+    data = await state.get_data()
+    items = data.get("deficiency_list_items") or []
+    index = next((i for i, item in enumerate(items) if item["parsed"] is None), None)
+
+    if index is None:
+        await state.set_state(None)
+        lines = [
+            f"{i + 1}. {item['parsed']['product_name']} — "
+            f"{_format_deficiency_qty(item['parsed']['quantity'])} {item['parsed']['unit']}"
+            for i, item in enumerate(items)
+        ]
+        sent = await reply_target.answer(
+            "📋 Ro'yxat tayyor:\n\n" + "\n".join(lines) + "\n\nTasdiqlaysizmi?",
+            reply_markup=_deficiency_list_confirm_kb(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
+        return
+
+    await state.update_data(deficiency_list_unclear_index=index)
+    await state.set_state(DeficiencyStates.list_clarify)
+    sent = await reply_target.answer(
+        f"❓ Bu qatorni tushunmadim: \"{items[index]['raw_line']}\"\n"
+        "Iltimos mahsulot, miqdor va birlikni shu formatda qayta yozing "
+        "(masalan: Pomidor 10 kg):"
+    )
+    chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
+
+
+async def _process_deficiency_list(
+    message: Message, state: FSMContext, openai_client: AsyncOpenAI, lines: list[str]
+) -> None:
+    data = await state.get_data()
+    results = await deficiency_list_ai.parse_shopping_list(openai_client, "\n".join(lines))
+    await state.update_data(deficiency_list_items=results)
+    await _advance_deficiency_list(message, state, data["shift_id"])
 
 
 def _deficiency_yesterday_confirm_kb() -> InlineKeyboardMarkup:
@@ -534,7 +596,7 @@ async def _enter_daily_report_step(reply_target: Message, state: FSMContext, shi
     await _enter_close_shift_photo_flow(reply_target, state, shift)
 
 
-def register(dp: Dispatcher) -> None:
+def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     # ---------------------------------------------------------- /openshift --
 
@@ -923,7 +985,16 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(StateFilter(DeficiencyStates.item_name))
     async def deficiency_item_name(message: Message, state: FSMContext) -> None:
-        name = (message.text or "").strip()
+        text = message.text or ""
+        lines = deficiency_list_ai.split_lines(text)
+
+        if len(lines) >= 2:
+            # Ko'p qatorli bozor ro'yxati — mavjud bitta-mahsulot oqimi
+            # o'zgarmaydi, bu faqat qo'shimcha yo'l.
+            await _process_deficiency_list(message, state, openai_client, lines)
+            return
+
+        name = text.strip()
         if not name:
             await message.answer("❌ Mahsulot nomini yozing.")
             return
@@ -933,6 +1004,64 @@ def register(dp: Dispatcher) -> None:
         data = await state.get_data()
         sent = await message.answer("Miqdorini kiriting (masalan: 10 kg). Birliklar: kg, dona, litr, quti.")
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+
+    @dp.message(StateFilter(DeficiencyStates.list_clarify))
+    async def deficiency_list_clarify(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        items = data.get("deficiency_list_items") or []
+        index = data.get("deficiency_list_unclear_index")
+        if index is None or index >= len(items):
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        parsed = deficiency_list_ai.parse_line_deterministic(message.text or "")
+        if parsed is None:
+            await message.answer("❌ Masalan: Pomidor 10 kg — shu formatda qayta yozing:")
+            return
+
+        items[index]["parsed"] = parsed
+        await state.update_data(deficiency_list_items=items)
+        await _advance_deficiency_list(message, state, data["shift_id"])
+
+    @dp.callback_query(F.data == "csdef_list_confirm")
+    async def deficiency_list_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        items = data.get("deficiency_list_items")
+        shift = cash_shift.get_shift(data.get("shift_id"))
+        category = data.get("deficiency_category")
+        if not items or shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+            await callback.answer()
+            return
+
+        parsed_items = [item["parsed"] for item in items]
+        # Takroriy tugma bosilishidan himoya: state'dagi ro'yxat DB
+        # yozuvidan OLDIN tozalanadi, shuning uchun ikkinchi urinish
+        # yuqoridagi ``if not items`` tekshiruvida darhol to'xtaydi.
+        await state.update_data(deficiency_list_items=None)
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+        added_ids = shift_deficiency.add_items_bulk(shift["id"], callback.from_user.id, category, parsed_items)
+
+        await callback.answer()
+        sent = await callback.message.answer(
+            f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+
+    @dp.callback_query(F.data == "csdef_list_edit")
+    async def deficiency_list_edit(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        if data.get("deficiency_category") not in shift_deficiency.KNOWN_CATEGORIES:
+            await callback.answer()
+            return
+
+        await state.update_data(deficiency_list_items=None, deficiency_list_unclear_index=None)
+        await state.set_state(DeficiencyStates.item_name)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        sent = await callback.message.answer("✏️ Ro'yxatni qaytadan yozing:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        await callback.answer()
 
     @dp.message(StateFilter(DeficiencyStates.item_amount))
     async def deficiency_item_amount(message: Message, state: FSMContext) -> None:

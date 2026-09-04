@@ -33,6 +33,34 @@ def add_item(
         conn.close()
 
 
+def add_items_bulk(
+    shift_id: int, employee_id: int, branch: str | None, category: str,
+    items: list[dict], source_date: str,
+) -> list[int]:
+    """Bir nechta pozitsiyani BITTA ulanish/tranzaksiyada yozadi — bitta
+    ``commit()`` chaqiruvi, ya'ni hammasi yoki hech biri (oraliqda xato
+    chiqsa, ``commit()``ga yetib bormaydi va hech narsa saqlanmaydi)."""
+    conn = get_connection()
+    try:
+        now = _now()
+        ids = []
+        for item in items:
+            cursor = conn.execute(
+                "INSERT INTO shift_deficiency_items "
+                "(shift_id, employee_id, branch, category, product_name, quantity, unit, status, source_date, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+                (
+                    shift_id, employee_id, branch, category,
+                    item["product_name"], item["quantity"], item["unit"], source_date, now,
+                ),
+            )
+            ids.append(cursor.lastrowid)
+        conn.commit()
+        return ids
+    finally:
+        conn.close()
+
+
 def get_open_items_for_branch_before(branch: str | None, before_date: str) -> list[dict]:
     """Filial bo'yicha, ``source_date`` berilgan sanadan OLDIN yozilgan
     va hali ``open`` bo'lgan mahsulotlar — shu SANADA (bugun, boshqa

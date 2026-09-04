@@ -52,6 +52,32 @@ def add_market_item(shift_id: int, employee_id: int, product_name: str, quantity
     return _add_item(shift_id, employee_id, CATEGORY_MARKET, product_name, quantity, unit)
 
 
+def add_items_bulk(shift_id: int, employee_id: int, category: str, items: list[dict]) -> list[int]:
+    """Ko'p qatorli bozor ro'yxati tasdiqlanganda ishlatiladi — BARCHA
+    pozitsiyalar bitta tranzaksiyada, aynan bir marta yoziladi.
+    Fail-safe: bironta pozitsiya yaroqsiz bo'lsa (nom bo'sh, birlik
+    noma'lum yoki miqdor musbat emas), HECH NARSA yozilmaydi."""
+    shift = cash_shift.get_shift(shift_id)
+    if shift is None or category not in KNOWN_CATEGORIES:
+        return []
+
+    valid_items = []
+    for item in items:
+        name = (item.get("product_name") or "").strip()
+        quantity = item.get("quantity")
+        unit = item.get("unit")
+        if not name or unit not in KNOWN_UNITS or quantity is None or quantity <= 0:
+            return []
+        valid_items.append({"product_name": name, "quantity": quantity, "unit": unit})
+
+    if not valid_items:
+        return []
+
+    return repo.add_items_bulk(
+        shift_id, employee_id, shift.get("branch"), category, valid_items, shift["shift_date"]
+    )
+
+
 def add_company_item(shift_id: int, employee_id: int, product_name: str, quantity: float, unit: str) -> int | None:
     return _add_item(shift_id, employee_id, CATEGORY_COMPANY, product_name, quantity, unit)
 

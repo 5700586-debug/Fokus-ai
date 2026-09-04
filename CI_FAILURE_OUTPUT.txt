@@ -1,0 +1,52 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.12.14/x64/bin/python
+cachedir: .pytest_cache
+rootdir: /home/runner/work/Fokus-ai/Fokus-ai
+plugins: anyio-4.15.0
+collecting ... collected 1 item
+
+tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding FAILED [100%]
+
+=================================== FAILURES ===================================
+____________ test_reopening_invite_does_not_erase_active_onboarding ____________
+
+bot_dp = (<module 'main' from '/home/runner/work/Fokus-ai/Fokus-ai/main.py'>, <tests.bot_harness.RecordingBot object at 0x7f56c8ba39e0>)
+
+    async def test_reopening_invite_does_not_erase_active_onboarding(bot_dp):
+        main, bot = bot_dp
+    
+        import invites
+    
+        user_id = 60061
+        token = invites.create_invite("kassir", "SATURN Derizlik", FOUNDER_ID)
+        await send(main.dp, bot, user_id, text=f"/start {token}")
+        for answer in (
+            "Familiyev",
+            "Ism",
+            "Ota",
+            "01.05.1995",
+            "Erkak",
+            "+998901234567",
+            "Kontakt Bir",
+        ):
+            await send(main.dp, bot, user_id, text=answer)
+    
+        sent = await send(main.dp, bot, user_id, text=f"/start {token}")
+>       assert sent[-1].text == (
+            "Anketangiz davom etmoqda. Havolani qayta bosmang, "
+            "oxirgi savolga javob bering."
+        )
+E       AssertionError: assert 'Telefon raqa...+998901234567' == 'Anketangiz d...javob bering.'
+E         
+E         - Anketangiz davom etmoqda. Havolani qayta bosmang, oxirgi savolga javob bering.
+E         + Telefon raqamini kiriting. Masalan: +998901234567
+
+tests/test_bot_flows.py:347: AssertionError
+---------------------------- Captured stdout setup -----------------------------
+🚀 Fokus AI ishga tushmoqda — ENVIRONMENT=production, bot_id=123456
+=========================== short test summary info ============================
+FAILED tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding - AssertionError: assert 'Telefon raqa...+998901234567' == 'Anketangiz d...javob bering.'
+  
+  - Anketangiz davom etmoqda. Havolani qayta bosmang, oxirgi savolga javob bering.
+  + Telefon raqamini kiriting. Masalan: +998901234567
+============================== 1 failed in 4.10s ===============================

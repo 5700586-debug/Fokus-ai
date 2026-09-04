@@ -1,4 +1,6 @@
+import json
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -169,6 +171,170 @@ async def test_yesterday_review_confirm_keeps_still_missing_open(bot_dp):
 
     shift = cash_shifts_repo.get_open_shift(111, company_time.today().isoformat())
     assert shift_deficiency.is_flow_complete(shift["id"]) is True
+
+
+# ------------------------------------------------- ko'p qatorli AI ro'yxat --
+
+
+async def test_multiline_list_all_deterministic_no_ai_call(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    async def _fail_if_called(**kwargs):
+        raise AssertionError("Barcha qatorlar deterministik parse bo'lishi kerak — AI chaqirilmasin")
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _fail_if_called)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor 10 kg\nMilter iriska 500 gr 4 dona")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Ro'yxat tayyor" in combined
+    assert "Pomidor — 10 kg" in combined
+    assert "Milter iriska 500 gr — 4 dona" in combined
+    assert "Tasdiqlaysizmi?" in combined
+
+    # 10-band: tasdiqlashdan OLDIN hech narsa DBga yozilmaydi.
+    assert shift_deficiency.get_daily_market_shortage() == []
+
+    sent = await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    assert "2 ta mahsulot qo'shildi" in " ".join(t for t in texts(sent) if t)
+
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Pomidor"]["total_quantity"] == 10
+    assert products["Pomidor"]["unit"] == "kg"
+    assert products["Milter iriska 500 gr"]["total_quantity"] == 4
+    assert products["Milter iriska 500 gr"]["unit"] == "dona"
+
+
+async def test_multiline_list_unclear_lines_use_single_batched_ai_call(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    call_count = 0
+
+    async def _fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        payload = [
+            {"line": "Sabzi biroz", "product_name": "Sabzi", "quantity": 3, "unit": "kg"},
+            {"line": "Un karobka", "product_name": "Un", "quantity": 1, "unit": "karobka"},
+        ]
+        return SimpleNamespace(output_text=json.dumps(payload, ensure_ascii=False))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _fake_create)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor 10 kg\nSabzi biroz\nUn karobka")
+    combined = " ".join(t for t in texts(sent) if t)
+
+    assert call_count == 1  # 3-band: bitta qator uchun emas, butun ro'yxat uchun BITTA chaqiruv
+    assert "Ro'yxat tayyor" in combined
+    assert "Pomidor — 10 kg" in combined
+    assert "Sabzi — 3 kg" in combined
+    assert "Un — 1 quti" in combined  # karobka -> quti normalizatsiya
+
+
+async def test_multiline_list_ai_uncertain_line_asks_manual_clarification(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    async def _fake_create(**kwargs):
+        payload = [{"line": "nimadir tushunarsiz", "product_name": None, "quantity": None, "unit": None}]
+        return SimpleNamespace(output_text=json.dumps(payload))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _fake_create)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor 10 kg\nnimadir tushunarsiz")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "tushunmadim" in combined.lower()
+    assert "nimadir tushunarsiz" in combined
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Ro'yxat tayyor" in combined
+    assert "Pomidor — 10 kg" in combined
+    assert "Karam — 2 dona" in combined
+
+
+async def test_multiline_list_ai_failure_preserves_list_and_requests_manual_clarification(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    async def _boom(**kwargs):
+        raise RuntimeError("API xatosi")
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _boom)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor 10 kg\nnoaniq qator")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "tushunmadim" in combined.lower()
+    assert "noaniq qator" in combined
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Pomidor — 10 kg" in combined
+    assert "Karam — 2 dona" in combined
+
+
+async def test_multiline_list_confirm_twice_does_not_duplicate(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send(main.dp, bot, 111, text="Pomidor 10 kg\nKaram 2 dona")
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    sent = await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+
+    assert "qo'shildi" not in " ".join(t for t in texts(sent) if t)
+
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Pomidor"]["total_quantity"] == 10
+    assert products["Karam"]["total_quantity"] == 2
+
+
+async def test_multiline_list_edit_button_lets_user_retype(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send(main.dp, bot, 111, text="Pomidor 10 kg\nKaram 2 dona")
+
+    sent = await send_callback(main.dp, bot, 111, data="csdef_list_edit", target_chat_id=111)
+    assert "qaytadan yozing" in " ".join(t for t in texts(sent) if t).lower()
+
+    sent = await send(main.dp, bot, 111, text="Bodring 5 kg\nSholg'om 1 dona")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Bodring — 5 kg" in combined
+    assert "Sholg'om — 1 dona" in combined
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert "Pomidor" not in products
+    assert products["Bodring"]["total_quantity"] == 5
+    assert products["Sholg'om"]["total_quantity"] == 1
+
+
+async def test_single_product_flow_still_works_unchanged(bot_dp):
+    """1-band: mavjud bitta-mahsulot oqimi (nom, keyin alohida miqdor)
+    yangi ko'p qatorli AI oqimidan keyin ham o'zgarishsiz qolishi kerak."""
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    await send(main.dp, bot, 111, text="Pomidor")
+    sent = await send(main.dp, bot, 111, text="10 kg")
+    assert "Qo'shildi" in " ".join(t for t in texts(sent) if t)
+
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Pomidor"]["total_quantity"] == 10
 
 
 async def test_full_closeshift_still_succeeds_after_clearing_deficiency_gate(bot_dp):

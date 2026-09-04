@@ -87,6 +87,8 @@ def _kb(*rows: list[str]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
         resize_keyboard=True,
+        is_persistent=True,
+        one_time_keyboard=False,
     )
 
 
@@ -129,6 +131,40 @@ _AUTHORITY_PROMPT = (
     "‘sen menga xo'jayin emassan’ demasdan bajarishga rozimisiz? Teng lavozimdagi "
     "sherigingiz ish yuzasidan yordam so'rasa, hamkorlik qilishingiz shart."
 )
+
+# Har bir qadamning savol matni nomlangan konstantaga chiqarilgan --
+# shu bilan asl yuborish joyi VA anketa uzilib qolganda qayta
+# yuboriladigan joy (``resend_current_step``) ANIQ bir xil matnni
+# ishlatishi kafolatlanadi (qarang shu faylning oxiridagi funksiya).
+_FAMILIYA_PROMPT = "Familiyangizni kiriting:"
+_ISM_PROMPT = "Ismingizni kiriting:"
+_OTASINING_ISMI_PROMPT = "Otangizning ismini kiriting:"
+_BIRTH_DATE_PROMPT = "Tug'ilgan sanangizni kiriting (KK.OO.YYYY), masalan: 01.05.2000"
+_JINSI_PROMPT = "Jinsingizni tanlang:"
+_PHONE_OWN_PROMPT = "Asosiy telefon raqamingizni kiriting. Masalan: +998901234567"
+_CONTACT_PHONE_PROMPT = "Telefon raqamini kiriting. Masalan: +998901234567"
+_CONTACT_RELATION_PROMPT = (
+    "Bu odam xodimga kim bo'ladi? (masalan: ota, ona, aka, opa, turmush o'rtog'i, qarindosh)"
+)
+_MARITAL_STATUS_PROMPT = "Oilaviy holatingizni tanlang:"
+_ADDRESS_CITY_PROMPT = "Qaysi shahar yoki tumanda yashaysiz?\nMasalan: Qo'qon"
+_ADDRESS_MAHALLA_UY_PROMPT = "Uy manzilingizni kiriting.\nMasalan: Alisher Navoiy ko‘chasi, 15-uy."
+_HIRE_DATE_PROMPT = "Ish boshlagan (yoki boshlaydigan) sanangizni kiriting (KK.OO.YYYY):"
+_PLANNED_DURATION_PROMPT = "Kompaniyada qancha muddat ishlashni rejalashtiryapsiz?"
+_MOTIVATION_PROMPT = "Nima sababdan aynan bizning kompaniyada ishlamoqchisiz?"
+_PRIOR_EXPERIENCE_PROMPT = (
+    "Oldingi ish tajribangiz haqida yozing (qayerda, qanday vazifada). "
+    "Agar bo'lmasa, o'tkazib yuboring:"
+)
+_PRIOR_EMPLOYER_CONSENT_PROMPT = (
+    "Zarurat bo'lsa, avvalgi ish joyingizdan siz haqingizda tavsif so'rashimiz mumkinmi?"
+)
+_PRIOR_EMPLOYER_CONTACT_PROMPT = (
+    "Avvalgi ish joyingiz yoki rahbaringizning aloqa raqamini qoldirishingiz "
+    "mumkin. Bo'lmasa, o'tkazib yuboring:"
+)
+_PHOTO_PROMPT = "Endi rasmingizni yuboring (Telegram orqali surat sifatida):"
+_EXTRA_NOTE_PROMPT = "Qo'shimcha izohingiz bo'lsa yozing. Bo'lmasa, o'tkazib yuboring:"
 
 _PHONE_RE = re.compile(r"^\+?\d{7,15}$")
 
@@ -177,7 +213,7 @@ async def start_onboarding_from_invite(message: Message, state: FSMContext, toke
     await state.set_state(OnboardingStates.familiya)
     await message.answer(
         "👋 Xush kelibsiz! Ishga qabul anketasini to'ldiramiz — bu bir necha "
-        "daqiqa vaqt oladi.\n\nFamiliyangizni kiriting:",
+        f"daqiqa vaqt oladi.\n\n{_FAMILIYA_PROMPT}",
         reply_markup=ReplyKeyboardRemove(),
     )
 
@@ -271,6 +307,70 @@ def _build_summary(data: dict) -> str:
     return "\n".join(lines)
 
 
+# Aksariyat qadamlar uchun -- matn va tugma o'zgarmas (statik). Ikkita
+# dinamik qadam (``contact_full_name``, ``emergency_contact``,
+# ``summary``) ``resend_current_step``da alohida ishlanadi, chunki
+# ularning matni/tugmasi mavjud FSM ma'lumotidan quriladi.
+_RESUMABLE_STATIC_STEPS: dict[str, tuple[str, ReplyKeyboardMarkup | None]] = {
+    OnboardingStates.familiya.state: (_FAMILIYA_PROMPT, None),
+    OnboardingStates.ism.state: (_ISM_PROMPT, None),
+    OnboardingStates.otasining_ismi.state: (_OTASINING_ISMI_PROMPT, None),
+    OnboardingStates.birth_date.state: (_BIRTH_DATE_PROMPT, None),
+    OnboardingStates.jinsi.state: (_JINSI_PROMPT, _JINSI_KB),
+    OnboardingStates.phone_own.state: (_PHONE_OWN_PROMPT, None),
+    OnboardingStates.contact_phone.state: (_CONTACT_PHONE_PROMPT, None),
+    OnboardingStates.contact_relation.state: (_CONTACT_RELATION_PROMPT, None),
+    OnboardingStates.marital_status.state: (_MARITAL_STATUS_PROMPT, _MARITAL_KB),
+    OnboardingStates.address_city.state: (_ADDRESS_CITY_PROMPT, None),
+    OnboardingStates.address_mahalla_uy.state: (_ADDRESS_MAHALLA_UY_PROMPT, None),
+    OnboardingStates.hire_date.state: (_HIRE_DATE_PROMPT, None),
+    OnboardingStates.work_schedule.state: (_WORK_SCHEDULE_PROMPT, None),
+    OnboardingStates.night_shift.state: (_NIGHT_SHIFT_PROMPT, _NIGHT_SHIFT_KB),
+    OnboardingStates.teamwork_agreement.state: (_TEAMWORK_PROMPT, _AGREEMENT_KB),
+    OnboardingStates.authority_agreement.state: (_AUTHORITY_PROMPT, _AGREEMENT_KB),
+    OnboardingStates.planned_duration.state: (_PLANNED_DURATION_PROMPT, _PLANNED_DURATION_KB),
+    OnboardingStates.motivation.state: (_MOTIVATION_PROMPT, None),
+    OnboardingStates.prior_experience.state: (_PRIOR_EXPERIENCE_PROMPT, _SKIP_KB),
+    OnboardingStates.prior_employer_consent.state: (_PRIOR_EMPLOYER_CONSENT_PROMPT, _YES_NO_KB),
+    OnboardingStates.prior_employer_contact.state: (_PRIOR_EMPLOYER_CONTACT_PROMPT, _SKIP_KB),
+    OnboardingStates.photo.state: (_PHOTO_PROMPT, None),
+    OnboardingStates.extra_note.state: (_EXTRA_NOTE_PROMPT, _SKIP_KB),
+}
+
+
+async def resend_current_step(message: Message, state: FSMContext, current_state: str) -> bool:
+    """Xodim onboarding davomida bir martalik havolani qayta bossa,
+    mavjud FSM ma'lumotini O'ZGARTIRMASDAN aynan joriy savolni va
+    uning tugmasini qaytadan yuboradi (anketa boshidan boshlanmaydi,
+    invite qayta band qilinmaydi). ``current_state`` --
+    ``state.get_state()`` natijasi (masalan ``"OnboardingStates:jinsi"``).
+    ``True`` -- taniqli onboarding qadami topilib qayta yuborildi;
+    ``False`` -- bu holat onboarding'ga tegishli emas, chaqiruvchi o'z
+    zaxira xatti-harakatini davom ettiraveradi."""
+    if current_state == OnboardingStates.contact_full_name.state:
+        data = await state.get_data()
+        contacts = data.get("contacts", [])
+        await message.answer(_contact_prompt(len(contacts) + 1), reply_markup=ReplyKeyboardRemove())
+        return True
+
+    if current_state == OnboardingStates.emergency_contact.state:
+        await _prompt_emergency_contact(message, state)
+        return True
+
+    if current_state == OnboardingStates.summary.state:
+        data = await state.get_data()
+        await message.answer(_build_summary(data), reply_markup=_SUMMARY_KB)
+        return True
+
+    step = _RESUMABLE_STATIC_STEPS.get(current_state)
+    if step is None:
+        return False
+
+    prompt, keyboard = step
+    await message.answer(prompt, reply_markup=keyboard or ReplyKeyboardRemove())
+    return True
+
+
 def register(dp: Dispatcher) -> None:
     @dp.message(StateFilter(OnboardingStates.familiya))
     async def handle_familiya(message: Message, state: FSMContext) -> None:
@@ -281,7 +381,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(familiya=text)
         await state.set_state(OnboardingStates.ism)
-        await message.answer("Ismingizni kiriting:")
+        await message.answer(_ISM_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.ism))
     async def handle_ism(message: Message, state: FSMContext) -> None:
@@ -292,7 +392,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(ism=text)
         await state.set_state(OnboardingStates.otasining_ismi)
-        await message.answer("Otangizning ismini kiriting:")
+        await message.answer(_OTASINING_ISMI_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.otasining_ismi))
     async def handle_otasining_ismi(message: Message, state: FSMContext) -> None:
@@ -303,7 +403,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(otasining_ismi=text)
         await state.set_state(OnboardingStates.birth_date)
-        await message.answer("Tug'ilgan sanangizni kiriting (KK.OO.YYYY), masalan: 01.05.2000")
+        await message.answer(_BIRTH_DATE_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.birth_date))
     async def handle_birth_date(message: Message, state: FSMContext) -> None:
@@ -319,7 +419,7 @@ def register(dp: Dispatcher) -> None:
             birth_date=birth_date.isoformat(), age=_calculate_age(birth_date)
         )
         await state.set_state(OnboardingStates.jinsi)
-        await message.answer("Jinsingizni tanlang:", reply_markup=_JINSI_KB)
+        await message.answer(_JINSI_PROMPT, reply_markup=_JINSI_KB)
 
     @dp.message(StateFilter(OnboardingStates.jinsi))
     async def handle_jinsi(message: Message, state: FSMContext) -> None:
@@ -330,10 +430,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(jinsi=text)
         await state.set_state(OnboardingStates.phone_own)
-        await message.answer(
-            "Asosiy telefon raqamingizni kiriting. Masalan: +998901234567",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer(_PHONE_OWN_PROMPT, reply_markup=ReplyKeyboardRemove())
 
     @dp.message(StateFilter(OnboardingStates.phone_own))
     async def handle_phone_own(message: Message, state: FSMContext) -> None:
@@ -359,7 +456,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(_pending_contact_name=text)
         await state.set_state(OnboardingStates.contact_phone)
-        await message.answer("Telefon raqamini kiriting. Masalan: +998901234567")
+        await message.answer(_CONTACT_PHONE_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.contact_phone))
     async def handle_contact_phone(message: Message, state: FSMContext) -> None:
@@ -370,9 +467,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(_pending_contact_phone=text)
         await state.set_state(OnboardingStates.contact_relation)
-        await message.answer(
-            "Bu odam xodimga kim bo'ladi? (masalan: ota, ona, aka, opa, turmush o'rtog'i, qarindosh)"
-        )
+        await message.answer(_CONTACT_RELATION_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.contact_relation))
     async def handle_contact_relation(message: Message, state: FSMContext) -> None:
@@ -401,7 +496,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.set_state(OnboardingStates.marital_status)
         await message.answer(
-            f"✅ {len(contacts)} ta kontakt qo'shildi.\n\nOilaviy holatingizni tanlang:",
+            f"✅ {len(contacts)} ta kontakt qo'shildi.\n\n{_MARITAL_STATUS_PROMPT}",
             reply_markup=_MARITAL_KB,
         )
 
@@ -414,10 +509,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(marital_status=text)
         await state.set_state(OnboardingStates.address_city)
-        await message.answer(
-            "Qaysi shahar yoki tumanda yashaysiz?\nMasalan: Qo'qon",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer(_ADDRESS_CITY_PROMPT, reply_markup=ReplyKeyboardRemove())
 
     @dp.message(StateFilter(OnboardingStates.address_city))
     async def handle_address_city(message: Message, state: FSMContext) -> None:
@@ -428,9 +520,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(tuman=text)
         await state.set_state(OnboardingStates.address_mahalla_uy)
-        await message.answer(
-            "Uy manzilingizni kiriting.\nMasalan: Alisher Navoiy ko‘chasi, 15-uy."
-        )
+        await message.answer(_ADDRESS_MAHALLA_UY_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.address_mahalla_uy))
     async def handle_address_mahalla_uy(message: Message, state: FSMContext) -> None:
@@ -441,9 +531,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(mahalla=text)
         await state.set_state(OnboardingStates.hire_date)
-        await message.answer(
-            "Ish boshlagan (yoki boshlaydigan) sanangizni kiriting (KK.OO.YYYY):"
-        )
+        await message.answer(_HIRE_DATE_PROMPT)
 
     @dp.message(StateFilter(OnboardingStates.hire_date))
     async def handle_hire_date(message: Message, state: FSMContext) -> None:
@@ -513,10 +601,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(authority_cooperation_agreement=value)
         await state.set_state(OnboardingStates.planned_duration)
-        await message.answer(
-            "Kompaniyada qancha muddat ishlashni rejalashtiryapsiz?",
-            reply_markup=_PLANNED_DURATION_KB,
-        )
+        await message.answer(_PLANNED_DURATION_PROMPT, reply_markup=_PLANNED_DURATION_KB)
 
     @dp.message(StateFilter(OnboardingStates.planned_duration))
     async def handle_planned_duration(message: Message, state: FSMContext) -> None:
@@ -528,10 +613,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(planned_duration=text)
         await state.set_state(OnboardingStates.motivation)
-        await message.answer(
-            "Nima sababdan aynan bizning kompaniyada ishlamoqchisiz?",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer(_MOTIVATION_PROMPT, reply_markup=ReplyKeyboardRemove())
 
     @dp.message(StateFilter(OnboardingStates.motivation))
     async def handle_motivation(message: Message, state: FSMContext) -> None:
@@ -542,11 +624,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(motivation=text)
         await state.set_state(OnboardingStates.prior_experience)
-        await message.answer(
-            "Oldingi ish tajribangiz haqida yozing (qayerda, qanday vazifada). "
-            "Agar bo'lmasa, o'tkazib yuboring:",
-            reply_markup=_SKIP_KB,
-        )
+        await message.answer(_PRIOR_EXPERIENCE_PROMPT, reply_markup=_SKIP_KB)
 
     @dp.message(StateFilter(OnboardingStates.prior_experience))
     async def handle_prior_experience(message: Message, state: FSMContext) -> None:
@@ -554,11 +632,7 @@ def register(dp: Dispatcher) -> None:
         await state.update_data(prior_experience=None if text == _SKIP_TEXT else text)
 
         await state.set_state(OnboardingStates.prior_employer_consent)
-        await message.answer(
-            "Zarurat bo'lsa, avvalgi ish joyingizdan siz haqingizda tavsif "
-            "so'rashimiz mumkinmi?",
-            reply_markup=_YES_NO_KB,
-        )
+        await message.answer(_PRIOR_EMPLOYER_CONSENT_PROMPT, reply_markup=_YES_NO_KB)
 
     @dp.message(StateFilter(OnboardingStates.prior_employer_consent))
     async def handle_prior_employer_consent(message: Message, state: FSMContext) -> None:
@@ -576,11 +650,7 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(prior_employer_reference_consent=True)
         await state.set_state(OnboardingStates.prior_employer_contact)
-        await message.answer(
-            "Avvalgi ish joyingiz yoki rahbaringizning aloqa raqamini qoldirishingiz "
-            "mumkin. Bo'lmasa, o'tkazib yuboring:",
-            reply_markup=_SKIP_KB,
-        )
+        await message.answer(_PRIOR_EMPLOYER_CONTACT_PROMPT, reply_markup=_SKIP_KB)
 
     @dp.message(StateFilter(OnboardingStates.prior_employer_contact))
     async def handle_prior_employer_contact(message: Message, state: FSMContext) -> None:
@@ -602,20 +672,14 @@ def register(dp: Dispatcher) -> None:
 
         await state.update_data(emergency_contact_index=names.index(text))
         await state.set_state(OnboardingStates.photo)
-        await message.answer(
-            "Endi rasmingizni yuboring (Telegram orqali surat sifatida):",
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer(_PHOTO_PROMPT, reply_markup=ReplyKeyboardRemove())
 
     @dp.message(StateFilter(OnboardingStates.photo), F.photo)
     async def handle_photo(message: Message, state: FSMContext) -> None:
         photo_file_id = message.photo[-1].file_id
         await state.update_data(photo_file_id=photo_file_id)
         await state.set_state(OnboardingStates.extra_note)
-        await message.answer(
-            "Qo'shimcha izohingiz bo'lsa yozing. Bo'lmasa, o'tkazib yuboring:",
-            reply_markup=_SKIP_KB,
-        )
+        await message.answer(_EXTRA_NOTE_PROMPT, reply_markup=_SKIP_KB)
 
     @dp.message(StateFilter(OnboardingStates.photo))
     async def handle_photo_missing(message: Message) -> None:

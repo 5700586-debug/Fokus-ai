@@ -260,6 +260,11 @@ async def test_invite_and_setrole_flow(bot_dp):
 
 
 async def test_reopening_invite_does_not_erase_active_onboarding(bot_dp):
+    """Regressiya: xodim anketa davomida bir martalik invite havolasini
+    qayta bossa (masalan eski xabarni topolmay), anketa hech qachon
+    o'chirilmasin va boshidan boshlanmasin — aynan joriy savol va
+    tugma qayta ko'rsatilib, mavjud FSM ma'lumoti saqlanishi kerak.
+    """
     main, bot = bot_dp
 
     import invites
@@ -267,25 +272,55 @@ async def test_reopening_invite_does_not_erase_active_onboarding(bot_dp):
     user_id = 60061
     token = invites.create_invite("kassir", "SATURN Derizlik", FOUNDER_ID)
     await send(main.dp, bot, user_id, text=f"/start {token}")
-    for answer in (
-        "Familiyev",
-        "Ism",
-        "Ota",
-        "01.05.1995",
-        "Erkak",
-        "+998901234567",
-        "Kontakt Bir",
-    ):
+    for answer in ("Familiyev", "Ism", "Ota", "01.05.1995"):
         await send(main.dp, bot, user_id, text=answer)
 
+    # Endi "jinsi" bosqichida -- xuddi shu havolani qayta bosadi.
     sent = await send(main.dp, bot, user_id, text=f"/start {token}")
-    assert sent[-1].text == (
-        "Anketangiz davom etmoqda. Havolani qayta bosmang, "
-        "oxirgi savolga javob bering."
-    )
 
-    sent = await send(main.dp, bot, user_id, text="+998901111111")
-    assert sent[-1].text.startswith("Bu odam xodimga kim bo'ladi?")
+    assert sent[0].text == "Jinsingizni tanlang:"
+    rows = sent[0].reply_markup.keyboard
+    assert [b.text for b in rows[0]] == ["Erkak", "Ayol"]
+    assert sent[0].reply_markup.is_persistent is True
+
+    sent = await send(main.dp, bot, user_id, text="Ayol")
+    assert sent[0].text == "Asosiy telefon raqamingizni kiriting. Masalan: +998901234567"
+
+    # Anketani oxirigacha davom ettiramiz -- ma'lumot yo'qolmagan bo'lsa,
+    # bu keyingi savollar to'g'ri ketma-ketlikda kelishi va oxir-oqibat
+    # yakunlanishi kerak.
+    await send(main.dp, bot, user_id, text="+998901234567")
+    await send(main.dp, bot, user_id, text="Kontakt Bir")
+    await send(main.dp, bot, user_id, text="+998901111111")
+    await send(main.dp, bot, user_id, text="Aka")
+    await send(main.dp, bot, user_id, text="Kontakt Ikki")
+    await send(main.dp, bot, user_id, text="+998902222222")
+    await send(main.dp, bot, user_id, text="Opa")
+    await send(main.dp, bot, user_id, text="Turmush qurmagan")
+    await send(main.dp, bot, user_id, text="Toshkent")
+    await send(main.dp, bot, user_id, text="Chilonzor MFY, 12-uy")
+    await send(main.dp, bot, user_id, text="01.08.2026")
+    await send(main.dp, bot, user_id, text="09:00-18:00")
+    await send(main.dp, bot, user_id, text="🔄 Ba'zan ishlay olaman")
+    await send(main.dp, bot, user_id, text="✅ Ha, roziman")
+    await send(main.dp, bot, user_id, text="✅ Ha, roziman")
+    await send(main.dp, bot, user_id, text="1–2 yil")
+    await send(main.dp, bot, user_id, text="Yaxshi jamoa bor")
+    await send(main.dp, bot, user_id, text="➖ O'tkazib yuborish")
+    await send(main.dp, bot, user_id, text="Yo'q")
+    await send(main.dp, bot, user_id, text="Kontakt Bir")
+    await send(main.dp, bot, user_id, photo_file_id="photo_abc")
+    await send(main.dp, bot, user_id, text="➖ O'tkazib yuborish")
+    await send(main.dp, bot, user_id, text="✅ Ma'lumotlar to'g'ri")
+
+    from employees import get_profile
+
+    profile = get_profile(user_id)
+    assert profile["status"] == "submitted"
+    assert profile["familiya"] == "Familiyev"
+    assert profile["ism"] == "Ism"
+    assert profile["otasining_ismi"] == "Ota"
+    assert profile["jinsi"] == "Ayol"
 
 
 async def test_only_founder_can_assign_nazoratchi(bot_dp):

@@ -9,6 +9,9 @@ on:
     branches:
       - fix/onboarding-resume-prompt
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,15 +34,15 @@ jobs:
           tests/test_bot_flows.py::test_reopening_invite_does_not_erase_active_onboarding
           | tee test_output.log
 
-      - name: Publish output to step summary on failure
+      - name: Commit raw output on failure
         if: steps.test_run.outcome == 'failure'
         run: |
-          {
-            echo '## Onboarding resume test output'
-            echo '```'
-            tail -c 55000 test_output.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp test_output.log CI_FAILURE_OUTPUT.txt
+          git add CI_FAILURE_OUTPUT.txt
+          git commit -m "chore: record onboarding resume test failure output"
+          git push
 
       - name: Fail the job if the test failed
         if: steps.test_run.outcome == 'failure'

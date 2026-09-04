@@ -259,6 +259,69 @@ async def test_invite_and_setrole_flow(bot_dp):
     assert any("Ismingiz" in t or "F.I.Sh" in t or "Familiya" in t for t in texts(sent)), texts(sent)
 
 
+async def test_command_invite_active_pending_returns_same_link_no_duplicate(bot_dp):
+    """/invite ikkinchi marta bosilganda (hali muddati o'tmagan active
+    havola bo'lsa) filial-bog'liq rollar uchun ham eski link qaytarilishi
+    kerak — avval bu himoya faqat bir kishilik rollarga xos edi, shu
+    sabab boshqa rollarda cheksiz dublikat token yaratilardi."""
+    main, bot = bot_dp
+
+    first = await send(main.dp, bot, FOUNDER_ID, text="/invite sotuvchi Chilonzor filiali")
+    token1 = first[0].text.split("start=")[1].split()[0]
+
+    second = await send(main.dp, bot, FOUNDER_ID, text="/invite sotuvchi Chilonzor filiali")
+    token2 = second[0].text.split("start=")[1].split()[0]
+
+    assert token1 == token2
+
+
+async def test_command_invite_claimed_pending_explains_instead_of_dead_end(bot_dp):
+    """Havola allaqachon boshqa xodim tomonidan ochilgan (claimed) bo'lsa,
+    Founder qayta /invite bossa, tushunarli javob va ishlaydigan havola
+    olishi kerak — bo'sh "allaqachon mavjud" degan tugagan javob emas."""
+    main, bot = bot_dp
+
+    first = await send(main.dp, bot, FOUNDER_ID, text="/invite nazoratchi")
+    token = first[0].text.split("start=")[1].split()[0]
+
+    await send(main.dp, bot, 777, text=f"/start {token}")
+
+    second = await send(main.dp, bot, FOUNDER_ID, text="/invite nazoratchi")
+    assert len(second) == 1
+    assert token in second[0].text
+    assert "faqat shu havolani ochgan xodim" in second[0].text.lower()
+
+
+async def test_button_invite_expired_pending_creates_fresh_link(bot_dp):
+    """Tugma orqali xodim qo'shishda eski havola muddati tugagan bo'lsa,
+    Founder yangi ishlaydigan link olishi kerak, dead-end emas."""
+    import invites
+    from db import get_connection
+    from datetime import datetime, timedelta, timezone
+
+    main, bot = bot_dp
+
+    await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="SATURN Charhiy")
+    old_token = sent[0].text.split("start=")[1].split()[0]
+
+    conn = get_connection()
+    try:
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        conn.execute("UPDATE invites SET expires_at = ? WHERE token = ?", (past, old_token))
+        conn.commit()
+    finally:
+        conn.close()
+
+    await send(main.dp, bot, FOUNDER_ID, text="👤 Xodim qo'shish")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="Kassir")
+    sent = await send(main.dp, bot, FOUNDER_ID, text="SATURN Charhiy")
+    new_token = sent[0].text.split("start=")[1].split()[0]
+
+    assert new_token != old_token
+
+
 async def test_reopening_invite_does_not_erase_active_onboarding(bot_dp):
     """Regressiya: xodim anketa davomida bir martalik invite havolasini
     qayta bossa (masalan eski xabarni topolmay), anketa hech qachon

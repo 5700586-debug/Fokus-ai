@@ -70,3 +70,55 @@ def test_branch_role_invite_stores_branch():
     claimed = invites.claim_invite(token, user_id=1)
 
     assert claimed["branch"] == "Chilonzor filiali"
+
+
+def test_expired_pending_invite_yields_fresh_token():
+    old_token = invites.create_invite("taminotchi", branch=None, created_by=1)
+
+    conn = get_connection()
+    try:
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        conn.execute("UPDATE invites SET expires_at = ? WHERE token = ?", (past, old_token))
+        conn.commit()
+    finally:
+        conn.close()
+
+    pending = invites.get_pending_invite_for_role("taminotchi")
+    assert pending is None
+
+    new_token = invites.create_invite("taminotchi", branch=None, created_by=1)
+    assert new_token != old_token
+
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT status FROM invites WHERE token = ?", (old_token,)).fetchone()
+    finally:
+        conn.close()
+    assert row["status"] == "expired"
+
+
+def test_unexpired_active_pending_returns_same_token_no_duplicate():
+    token = invites.create_invite("taminotchi", branch=None, created_by=1)
+
+    pending = invites.get_pending_invite_for_role("taminotchi")
+    assert pending is not None
+    assert pending["token"] == token
+    assert pending["status"] == "active"
+
+
+def test_unexpired_claimed_pending_returns_same_token_only_original_user():
+    token = invites.create_invite("taminotchi", branch=None, created_by=1)
+    invites.claim_invite(token, user_id=555)
+
+    pending = invites.get_pending_invite_for_role("taminotchi")
+    assert pending is not None
+    assert pending["token"] == token
+    assert pending["status"] == "claimed"
+    assert pending["claimed_by"] == 555
+
+    resumed = invites.claim_invite(token, user_id=555)
+    assert resumed is not None
+    assert resumed["claimed_by"] == 555
+
+    blocked = invites.claim_invite(token, user_id=999)
+    assert blocked is None

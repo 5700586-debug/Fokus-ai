@@ -65,6 +65,25 @@ def open_shift(
     return get_shift(shift_id)
 
 
+def get_open_test_shift(employee_id: int, shift_date: str) -> dict | None:
+    """``services/e2e_test_access.py`` uchun — FAQAT shu tester'ning
+    BUGUNGI hali OCHIQ (``status='open'``) TEST (``is_test=1``)
+    smenasi. Parametrlangan SQL; ``employee_id`` HECH QACHON yolg'iz
+    ishlatilmaydi — doim ``is_test``/``shift_date``/``status`` bilan
+    birga (real ma'lumotga tasodifiy mos kelishning oldini oladi)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM cash_shifts WHERE is_test = 1 AND employee_id = ? "
+            "AND shift_date = ? AND status = 'open'",
+            (employee_id, shift_date),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
 def close_test_shift(shift_id: int) -> bool:
     """``services/e2e_test_access.py`` uchun — FAQAT ``is_test = 1``
     smenani yopadi (ikkinchi shart DB darajasidagi ``WHERE``da), real

@@ -7,11 +7,13 @@ real-handler-reuse yo'lini va DB darajasidagi izolyatsiyani tekshiradi.
 
 import pytest
 
+import company_time
 import roles
 from config import FOUNDER_ID
 from repositories import cash_shifts as cash_shifts_repo
+from repositories import shift_deficiencies as shift_deficiencies_repo
 from repositories import supplier_purchases as supplier_purchases_repo
-from services import shift_deficiency
+from services import e2e_test_access, shift_deficiency
 from tests.bot_harness import send, send_callback, texts
 
 pytestmark = pytest.mark.anyio
@@ -193,3 +195,140 @@ def test_cleanup_with_non_tester_id_deletes_nothing():
 
     outcome = e2e_test_access.cleanup_test_run(111222333, test_run_id)
     assert outcome == {"items_deleted": 0, "shifts_deleted": 0}
+
+
+# --------------------------------------------- interrupted-run tuzatishi --
+# DB — yagona haqiqat manbai (FSM faqat vaqtinchalik UI holati). Bu
+# bo'lim ``/sinovsmena`` ikkinchi marta bosilganda yoki FSM
+# yo'qolganda (bot qayta ishga tushgani kabi) yugurish "yetim"
+# qolmasligini, hech qachon yangi ajratilgan ``test_run_id``
+# o'ylab topilmasligini tekshiradi.
+
+
+def test_sinovsmena_twice_returns_same_shift_and_run_id():
+    first_shift, first_run = e2e_test_access.start_test_shift(_TESTER_ID)
+    second_shift, second_run = e2e_test_access.start_test_shift(_TESTER_ID)
+
+    assert second_shift["id"] == first_shift["id"]
+    assert second_run == first_run
+
+
+async def test_sinovsmena_resumes_persisted_run_after_fsm_loss(bot_dp):
+    from aiogram.fsm.storage.base import StorageKey
+
+    main, bot = bot_dp
+    await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    # Ro'yxatni to'liq tugatmasdan — FSM hali oraliq ("Pomidor" nomi
+    # kutilmoqda) holatda, keyin bot qayta ishga tushgani kabi FSM
+    # butunlay tozalanadi.
+    await send(main.dp, bot, _TESTER_ID, text="Chala qator nomi")
+
+    key = StorageKey(user_id=_TESTER_ID, chat_id=_TESTER_ID, bot_id=bot.id)
+    await main.dp.storage.set_data(key, {})
+    await main.dp.storage.set_state(key, None)
+
+    sent = await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    assert "TEST smena boshlandi" in " ".join(t for t in texts(sent) if t)
+
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
+    await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+
+    # Faqat BITTA test smena mavjud bo'lishi kerak (ikkinchisi
+    # YARATILMAGAN), va item'lar shu YAGONA smenaning persistlangan
+    # test_run_id'siga tegishli.
+    today = company_time.today().isoformat()
+    shift = cash_shifts_repo.get_open_test_shift(_TESTER_ID, today)
+    assert shift is not None
+    items = shift_deficiencies_repo.get_test_market_items(shift["test_run_id"])
+    assert {i["product_name"] for i in items} == {"Pomidor", "Karam"}
+
+
+async def test_sinovtugat_resolves_from_db_after_fsm_loss_and_cleans_exact_run(bot_dp):
+    from aiogram.fsm.storage.base import StorageKey
+
+    main, bot = bot_dp
+    real_shift = _open_real_shift(6, "Filial-1", "2026-01-05")
+    shift_deficiency.add_market_item(real_shift["id"], 6, "Behi", 2, "kg")
+
+    await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
+    await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+
+    today = company_time.today().isoformat()
+    shift_before = cash_shifts_repo.get_open_test_shift(_TESTER_ID, today)
+    test_run_id = shift_before["test_run_id"]
+
+    # Bot qayta ishga tushgani/FSM yo'qolgani simulyatsiyasi.
+    key = StorageKey(user_id=_TESTER_ID, chat_id=_TESTER_ID, bot_id=bot.id)
+    await main.dp.storage.set_data(key, {})
+    await main.dp.storage.set_state(key, None)
+
+    sent = await send(main.dp, bot, _TESTER_ID, text="/sinovtugat")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "yakunlandi va tozalandi" in combined
+    assert "2 pozitsiya" in combined
+
+    # 4-band: aynan shu test_run_id uchun endi hech qanday qator yo'q.
+    assert shift_deficiencies_repo.get_test_market_items(test_run_id) == []
+    assert cash_shifts_repo.get_open_test_shift(_TESTER_ID, today) is None
+
+    # 5-band: parallel real smena/pozitsiya tegilmagan.
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Behi"]["total_quantity"] == 2
+
+
+def test_start_test_shift_fails_safely_on_missing_test_run_id_never_invents_one():
+    """Kutilmagan/buzilgan DB holati: ``is_test=1`` ochiq smena bor,
+    lekin ``test_run_id`` bo'sh — hech qachon yangi ID o'ylab
+    topilmaydi, aniq TEST xatosi ko'tariladi."""
+    today = company_time.today().isoformat()
+    cash_shifts_repo.open_shift(_TESTER_ID, "E2E-TEST", today, opening_balance=0, tolerance=0, is_test=True)
+
+    with pytest.raises(e2e_test_access.TestRunStateError):
+        e2e_test_access.start_test_shift(_TESTER_ID)
+
+
+async def test_sinovsmena_reports_clear_error_on_corrupted_test_run_state(bot_dp):
+    main, bot = bot_dp
+    today = company_time.today().isoformat()
+    cash_shifts_repo.open_shift(_TESTER_ID, "E2E-TEST", today, opening_balance=0, tolerance=0, is_test=True)
+
+    sent = await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "TEST xatosi" in combined
+    assert "TEST smena boshlandi" not in combined
+
+
+async def test_other_telegram_id_cannot_read_resume_or_clean_testers_run(bot_dp):
+    main, bot = bot_dp
+    other_id = 555444333
+
+    await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
+    await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+
+    today = company_time.today().isoformat()
+    tester_shift = cash_shifts_repo.get_open_test_shift(_TESTER_ID, today)
+    test_run_id = tester_shift["test_run_id"]
+
+    # Boshqa ID uchun test rejimiga kirish/davom ettirish/tozalash —
+    # hammasi rad etiladi yoki hech narsaga ta'sir qilmaydi.
+    assert e2e_test_access.start_test_shift(other_id) is None
+    assert e2e_test_access.finish_active_test_run(other_id) == {
+        "items_deleted": 0, "shifts_deleted": 0, "found": False,
+    }
+    assert e2e_test_access.cleanup_test_run(other_id, test_run_id) == {
+        "items_deleted": 0, "shifts_deleted": 0,
+    }
+
+    sent = await send(main.dp, bot, other_id, text="/sinovsmena")
+    assert "TEST smena boshlandi" not in " ".join(t for t in texts(sent) if t)
+
+    sent = await send(main.dp, bot, other_id, text="/xarid")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Pomidor" not in combined
+    assert "Karam" not in combined
+
+    # Tester'ning o'z yugurishi tegilmagan holda qoladi.
+    items = shift_deficiencies_repo.get_test_market_items(test_run_id)
+    assert {i["product_name"] for i in items} == {"Pomidor", "Karam"}

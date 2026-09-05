@@ -1142,7 +1142,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_E2E_TEST_CASH_SHIFT):
             return
 
-        result = e2e_test_access.start_test_shift(message.from_user.id)
+        # DB — yagona haqiqat manbai: ``start_test_shift`` har doim
+        # BUGUNGI ochiq TEST smenani DB'dan qidiradi va topilsa ANIQ
+        # o'sha shift_id/test_run_id'ni qaytaradi (FSM yo'qolgan bo'lsa
+        # ham) — hech qachon yangi, "yetim" test_run_id yaratmaydi.
+        try:
+            result = e2e_test_access.start_test_shift(message.from_user.id)
+        except e2e_test_access.TestRunStateError as error:
+            await message.answer(f"❌ TEST xatosi: {error}")
+            return
         if result is None:
             return
         shift, test_run_id = result
@@ -1164,18 +1172,23 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             return
 
         tester_id = message.from_user.id
-        data = await state.get_data()
-        shift_id = data.get("shift_id")
-        test_run_id = data.get("e2e_test_run_id")
-
-        if shift_id is not None and test_run_id:
-            e2e_test_access.finish_test_shift(tester_id, shift_id)
-
-        result = {"items_deleted": 0, "shifts_deleted": 0}
-        if test_run_id:
-            result = e2e_test_access.cleanup_test_run(tester_id, test_run_id)
+        # FSM'ga umuman tayanmaydi — DB'dagi bugungi ochiq TEST
+        # smenani to'g'ridan-to'g'ri topib yakunlaydi/tozalaydi, shuning
+        # uchun bot qayta ishga tushgan yoki FSM tozalangan holatda ham
+        # ishlaydi. FSM faqat DB tozalash MUVAFFAQIYATLI tugagandan
+        # keyin tozalanadi.
+        try:
+            result = e2e_test_access.finish_active_test_run(tester_id)
+        except e2e_test_access.TestRunStateError as error:
+            await message.answer(f"❌ TEST xatosi: {error}")
+            return
 
         await state.clear()
+
+        if not result["found"]:
+            await message.answer("ℹ️ Faol TEST smena topilmadi.")
+            return
+
         await message.answer(
             "🧪 TEST smena yakunlandi va tozalandi "
             f"(o'chirilgan: {result['items_deleted']} pozitsiya, {result['shifts_deleted']} smena)."

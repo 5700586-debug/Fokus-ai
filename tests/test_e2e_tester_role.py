@@ -101,3 +101,42 @@ async def test_other_user_cannot_view_test_run_via_xarid(bot_dp):
     sent = await send(main.dp, bot, _OTHER_USER_ID, text="/xarid")
     combined = " ".join(t for t in texts(sent) if t)
     assert "TEST" not in combined
+
+
+def test_no_parallel_e2e_test_flow_remains_in_cash_shift_bot():
+    """Tuzatish: fake parallel oqim butunlay olib tashlangan — faqat
+    REAL ``DeficiencyStates``/``csdef_list_*`` handlerlari qoladi,
+    ``/xarid`` uchun ikkinchi (dublikat) handler yo'q."""
+    import inspect
+
+    import cash_shift_bot
+
+    assert not hasattr(cash_shift_bot, "E2ETestStates")
+    assert not hasattr(cash_shift_bot, "_advance_e2e_test_list")
+    assert not hasattr(cash_shift_bot, "_process_e2e_test_list")
+
+    source = inspect.getsource(cash_shift_bot)
+    assert "e2etest_list_confirm" not in source
+    assert "e2etest_list_edit" not in source
+    assert 'Command("xarid")' not in source
+
+
+def test_main_py_handler_registration_order_matches_commit_9f84a6b():
+    """Tuzatish: ro'yxatdan o'tkazish tartibi aynan
+    ``9f84a6b600be153d9840bb5425eb4f06ecd4583c``dagi kabi (E2E test
+    ``Command("xarid")`` interceptori uchun qilingan qayta tartiblash
+    butunlay bekor qilingan)."""
+    import inspect
+    import re
+
+    import main
+
+    source = inspect.getsource(main)
+    calls = re.findall(r"^(\w+)\.register\(dp", source, re.MULTILINE)
+
+    expected = [
+        "onboarding", "approval", "performance_bot", "cash_shift_bot",
+        "inventory_bot", "calibration_bot", "discipline_bot", "supplier_chat_bot",
+        "saturn_group_bot", "recruiting_bot", "nazoratchi_bot",
+    ]
+    assert calls == expected

@@ -29,7 +29,7 @@ from openai import AsyncOpenAI
 from config import FOUNDER_ID
 from employees import STATUS_APPROVED, get_profile, list_approved_by_branch
 from providers.file_storage import get_file_storage_provider
-from roles import E2E_TESTER_TELEGRAM_ID, is_e2e_tester
+from roles import is_e2e_tester
 from services import (
     cash_expense,
     cash_shift,
@@ -179,15 +179,6 @@ class DeficiencyStates(StatesGroup):
     item_name = State()
     item_amount = State()
     yesterday_missing_numbers = State()
-    list_clarify = State()
-
-
-class E2ETestStates(StatesGroup):
-    """``/sinovsmena`` orqali boshlangan, real oqimdan BUTUNLAY
-    mustaqil, izolyatsiyalangan test ro'yxati holati (qarang
-    ``services/e2e_test_access.py``)."""
-
-    market_list = State()
     list_clarify = State()
 
 
@@ -426,54 +417,6 @@ async def _process_deficiency_list(
     results = await deficiency_list_ai.parse_shopping_list(openai_client, "\n".join(lines))
     await state.update_data(deficiency_list_items=results)
     await _advance_deficiency_list(message, state, data["shift_id"])
-
-
-# --------------------------------------------- E2E test (Sinovchi) ro'yxati --
-# Real ``DeficiencyStates`` oqimidan BUTUNLAY mustaqil — faqat
-# ``services/e2e_test_access.py`` orqali, izolyatsiyalangan
-# (``is_test=1``) qatorlarga yozadi. Qarang shu modul docstringi.
-
-
-def _e2e_test_list_confirm_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="e2etest_list_confirm"),
-        InlineKeyboardButton(text="✏️ Tuzatish", callback_data="e2etest_list_edit"),
-    ]])
-
-
-async def _advance_e2e_test_list(reply_target: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    items = data.get("e2e_test_list_items") or []
-    index = next((i for i, item in enumerate(items) if item["parsed"] is None), None)
-
-    if index is None:
-        await state.set_state(None)
-        lines = [
-            f"{i + 1}. {item['parsed']['product_name']} — "
-            f"{_format_deficiency_qty(item['parsed']['quantity'])} {item['parsed']['unit']}"
-            for i, item in enumerate(items)
-        ]
-        await reply_target.answer(
-            "🧪 TEST ro'yxati tayyor:\n\n" + "\n".join(lines) + "\n\nTasdiqlaysizmi?",
-            reply_markup=_e2e_test_list_confirm_kb(),
-        )
-        return
-
-    await state.update_data(e2e_test_list_unclear_index=index)
-    await state.set_state(E2ETestStates.list_clarify)
-    await reply_target.answer(
-        f"❓ Bu qatorni tushunmadim: \"{items[index]['raw_line']}\"\n"
-        "Iltimos mahsulot, miqdor va birlikni shu formatda qayta yozing "
-        "(masalan: Pomidor 10 kg):"
-    )
-
-
-async def _process_e2e_test_list(
-    message: Message, state: FSMContext, openai_client: AsyncOpenAI, lines: list[str]
-) -> None:
-    results = await deficiency_list_ai.parse_shopping_list(openai_client, "\n".join(lines))
-    await state.update_data(e2e_test_list_items=results)
-    await _advance_e2e_test_list(message, state)
 
 
 def _deficiency_yesterday_confirm_kb() -> InlineKeyboardMarkup:
@@ -1117,8 +1060,18 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
             parsed_items = [item["parsed"] for item in items]
 
+            # E2E test (Sinovchi) izolyatsiyasi: FAQAT
+            # ``roles.E2E_TESTER_TELEGRAM_ID`` uchun, va FAQAT
+            # ``/sinovsmena`` shu state'ga yozgan ``e2e_test_run_id``
+            # mavjud bo'lsa — real kassir tasdiqlashi bundan hech qanday
+            # ta'sirlanmaydi (test_run_id har doim ``None``/bo'sh).
+            test_run_id = data.get("e2e_test_run_id") if is_e2e_tester(user_id) else None
+
             try:
-                added_ids = shift_deficiency.add_items_bulk(shift["id"], user_id, category, parsed_items)
+                added_ids = shift_deficiency.add_items_bulk(
+                    shift["id"], user_id, category, parsed_items,
+                    is_test=bool(test_run_id), test_run_id=test_run_id,
+                )
             except Exception as error:  # noqa: BLE001
                 print(f"Bozor ro'yxatini saqlashda xato (shift_id={shift['id']}): {error!r}")
                 added_ids = None
@@ -1138,6 +1091,16 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 pass
 
             await callback.answer()
+
+            if test_run_id:
+                # Test tasdiqlash hech kimga (Founder/Nazoratchi/xodim/
+                # ta'minotchi) bildirishnoma yubormaydi — faqat
+                # tasdiqlovchining o'ziga qisqa javob, real "Yana
+                # qo'shish/Tugatish" ketma-ketligiga (kompaniya
+                # buyurtmasi/kunlik hisobot) kirmaydi.
+                await callback.message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
+                return
+
             sent = await callback.message.answer(
                 f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
             )
@@ -1162,9 +1125,17 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     # ----------------------------------------------- E2E test (Sinovchi) --
     # Faqat ``roles.E2E_TESTER_TELEGRAM_ID`` uchun — boshqa hech kim
     # (Founder ham) ``ACTION_E2E_*`` ruxsatiga ega emas (qarang
-    # ``services/permissions.py``). Real kassir/ta'minotchi oqimiga
-    # umuman tegmaydi, izolyatsiya uchun qarang
-    # ``services/e2e_test_access.py``.
+    # ``services/permissions.py``). Bu ikkita buyruq HECH QANDAY o'z
+    # parser/tasdiqlash mantig'ini takrorlamaydi — FSM holatini aynan
+    # REAL ``DeficiencyStates.item_name`` oqimi kutgan shartnoma
+    # (``shift_id``, ``deficiency_category``) bilan to'ldiradi, xolos.
+    # Shundan keyingi BARCHA ishlov (parse/aniqlashtirish/tasdiqlash)
+    # yuqoridagi o'zgarishsiz real handlerlar orqali ketadi — qarang
+    # ``deficiency_item_name``, ``_process_deficiency_list``,
+    # ``_advance_deficiency_list``, ``deficiency_list_clarify``,
+    # ``deficiency_list_confirm``, ``deficiency_list_edit``. Izolyatsiya
+    # (``is_test``/``test_run_id``) ``deficiency_list_confirm`` ichida
+    # qo'shilgan (qarang shu handlerdagi izoh).
 
     @dp.message(Command("sinovsmena"))
     async def e2e_test_start_shift(message: Message, state: FSMContext) -> None:
@@ -1177,108 +1148,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         shift, test_run_id = result
 
         await state.update_data(
-            e2e_test_shift_id=shift["id"], e2e_test_run_id=test_run_id, e2e_test_list_items=None,
+            shift_id=shift["id"],
+            deficiency_category=shift_deficiency.CATEGORY_MARKET,
+            e2e_test_run_id=test_run_id,
         )
-        await state.set_state(E2ETestStates.market_list)
+        await state.set_state(DeficiencyStates.item_name)
         await message.answer(
             "🧪 TEST smena boshlandi (real ma'lumotga ta'sir qilmaydi).\n"
             "Bozor ro'yxatini yozing (bir yoki bir necha qator):"
         )
-
-    @dp.message(StateFilter(E2ETestStates.market_list))
-    async def e2e_test_market_list(message: Message, state: FSMContext) -> None:
-        if not is_e2e_tester(message.from_user.id):
-            return
-
-        lines = deficiency_list_ai.split_lines(message.text or "")
-        if not lines:
-            await message.answer("❌ Bozor ro'yxatini yozing.")
-            return
-
-        await _process_e2e_test_list(message, state, openai_client, lines)
-
-    @dp.message(StateFilter(E2ETestStates.list_clarify))
-    async def e2e_test_list_clarify(message: Message, state: FSMContext) -> None:
-        if not is_e2e_tester(message.from_user.id):
-            return
-
-        data = await state.get_data()
-        items = data.get("e2e_test_list_items") or []
-        index = data.get("e2e_test_list_unclear_index")
-        if index is None or index >= len(items):
-            await state.clear()
-            await message.answer("❌ Bekor qilindi.")
-            return
-
-        parsed = deficiency_list_ai.parse_line_deterministic(message.text or "")
-        if parsed is None:
-            await message.answer("❌ Masalan: Pomidor 10 kg — shu formatda qayta yozing:")
-            return
-
-        items[index]["parsed"] = parsed
-        await state.update_data(e2e_test_list_items=items)
-        await _advance_e2e_test_list(message, state)
-
-    @dp.callback_query(F.data == "e2etest_list_confirm")
-    async def e2e_test_list_confirm(callback: CallbackQuery, state: FSMContext) -> None:
-        tester_id = callback.from_user.id
-        if not is_e2e_tester(tester_id):
-            await callback.answer()
-            return
-
-        if tester_id in _PENDING_DEFICIENCY_LIST_CONFIRMATIONS:
-            await callback.answer()
-            return
-        _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.add(tester_id)
-
-        try:
-            data = await state.get_data()
-            items = data.get("e2e_test_list_items")
-            shift_id = data.get("e2e_test_shift_id")
-            test_run_id = data.get("e2e_test_run_id")
-            if not items or shift_id is None or not test_run_id:
-                await callback.answer()
-                return
-
-            parsed_items = [item["parsed"] for item in items]
-
-            try:
-                added_ids = e2e_test_access.add_test_market_items(
-                    tester_id, shift_id, test_run_id, parsed_items
-                )
-            except Exception as error:  # noqa: BLE001
-                print(f"E2E test ro'yxatini saqlashda xato (shift_id={shift_id}): {error!r}")
-                added_ids = None
-
-            if not added_ids:
-                await callback.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.", show_alert=True)
-                return
-
-            await state.update_data(e2e_test_list_items=None)
-            try:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            except TelegramBadRequest:
-                pass
-
-            await callback.answer()
-            await callback.message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
-        finally:
-            _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.discard(tester_id)
-
-    @dp.callback_query(F.data == "e2etest_list_edit")
-    async def e2e_test_list_edit(callback: CallbackQuery, state: FSMContext) -> None:
-        if not is_e2e_tester(callback.from_user.id):
-            await callback.answer()
-            return
-
-        await state.update_data(e2e_test_list_items=None, e2e_test_list_unclear_index=None)
-        await state.set_state(E2ETestStates.market_list)
-        try:
-            await callback.message.edit_reply_markup(reply_markup=None)
-        except TelegramBadRequest:
-            pass
-        await callback.message.answer("✏️ TEST ro'yxatini qaytadan yozing:")
-        await callback.answer()
 
     @dp.message(Command("sinovtugat"))
     async def e2e_test_finish(message: Message, state: FSMContext) -> None:
@@ -1287,10 +1165,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         tester_id = message.from_user.id
         data = await state.get_data()
-        shift_id = data.get("e2e_test_shift_id")
+        shift_id = data.get("shift_id")
         test_run_id = data.get("e2e_test_run_id")
 
-        if shift_id is not None:
+        if shift_id is not None and test_run_id:
             e2e_test_access.finish_test_shift(tester_id, shift_id)
 
         result = {"items_deleted": 0, "shifts_deleted": 0}
@@ -1302,34 +1180,6 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             "🧪 TEST smena yakunlandi va tozalandi "
             f"(o'chirilgan: {result['items_deleted']} pozitsiya, {result['shifts_deleted']} smena)."
         )
-
-    # ``Command("xarid")`` uchun BIRINCHI ro'yxatdan o'tgan handler —
-    # aiogram filtri mos kelmasa (tester bo'lmasa) avtomatik keyingi
-    # ``Command("xarid")`` handleriga (``performance_bot.py``, real
-    # ta'minotchi oqimi) o'tkazadi. Shuning uchun ``main.py``da
-    # ``cash_shift_bot.register`` ``performance_bot.register``dan
-    # OLDIN chaqirilishi SHART (qarang ``main.py`` izohi).
-    @dp.message(Command("xarid"), F.from_user.id == E2E_TESTER_TELEGRAM_ID)
-    async def e2e_test_view_xarid(message: Message, state: FSMContext) -> None:
-        if not await permissions.ensure_permission(message, permissions.ACTION_E2E_VIEW_TEST_RUN):
-            return
-
-        data = await state.get_data()
-        test_run_id = data.get("e2e_test_run_id")
-        if not test_run_id:
-            await message.answer("ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.")
-            return
-
-        items = e2e_test_access.get_test_run_market_items(message.from_user.id, test_run_id)
-        if not items:
-            await message.answer("ℹ️ Bu TEST yugurish uchun ochiq bozorlik yo'q.")
-            return
-
-        lines = [
-            f"{item['product_name']} — kerak: {_format_deficiency_qty(item['quantity'])} {item['unit']}"
-            for item in items
-        ]
-        await message.answer("🧪 TEST /xarid ro'yxati:\n\n" + "\n".join(lines))
 
     @dp.message(StateFilter(DeficiencyStates.item_amount))
     async def deficiency_item_amount(message: Message, state: FSMContext) -> None:

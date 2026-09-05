@@ -1040,26 +1040,12 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.callback_query(F.data == "csdef_list_confirm")
     async def deficiency_list_confirm(callback: CallbackQuery, state: FSMContext) -> None:
-        # 1-band: callback DARHOL, boshqa hech qanday ish (DB o'qish/
-        # yozishdan) OLDIN tasdiqlanadi. Telegram ``answerCallbackQuery``
-        # ni kech chaqirsangiz "query is too old and response timeout
-        # expired or query ID is invalid" (``TelegramBadRequest``) bilan
-        # rad etadi — production'da DB saqlash (potentsial sekin
-        # so'rov) tugagandan KEYIN chaqirilganda sodir bo'lgan haqiqiy
-        # xato aynan shu edi. Bu tasdiqlash HECH QACHON muvaffaqiyat
-        # xabari sifatida ishlatilmaydi — faqat Telegram mijozining
-        # "yuklanmoqda" indikatorini to'xtatadi; allaqachon eskirgan
-        # bo'lsa ham global xato handleriga chiqmasligi kerak.
-        try:
-            await callback.answer()
-        except TelegramBadRequest:
-            pass
-
         user_id = callback.from_user.id
         # Atomic band qilish: awaitdan OLDIN, sinxron tekshir+qo'sh (qarang
         # ``_PENDING_DEFICIENCY_LIST_CONFIRMATIONS`` izohi) — bir vaqtda
         # kelgan ikkinchi confirm shu yerda darhol to'xtaydi.
         if user_id in _PENDING_DEFICIENCY_LIST_CONFIRMATIONS:
+            await callback.answer()
             return
         _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.add(user_id)
 
@@ -1069,6 +1055,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             shift = cash_shift.get_shift(data.get("shift_id"))
             category = data.get("deficiency_category")
             if not items or shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+                await callback.answer()
                 return
 
             parsed_items = [item["parsed"] for item in items]
@@ -1089,29 +1076,27 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 print(f"Bozor ro'yxatini saqlashda xato (shift_id={shift['id']}): {error!r}")
                 added_ids = None
 
+            if not added_ids:
+                # 7-band: DB yozuvi muvaffaqiyatsiz bo'lsa, ro'yxat va
+                # tugmalar SAQLANIB QOLADI — kassir qayta urinib ko'ra oladi.
+                await callback.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.", show_alert=True)
+                return
+
+            # 5-band: FSM ro'yxati va tugmalar FAQAT DB tranzaksiyasi
+            # MUVAFFAQIYATLI tugagandan KEYIN tozalanadi/olib tashlanadi.
+            await state.update_data(deficiency_list_items=None)
+
             # ``callback.message`` real Telegramda har doim to'liq
             # ``Message`` bo'lavermaydi — Bot API uni ``None`` yoki
             # ``InaccessibleMessage`` qilib ham qaytarishi mumkin
             # (``aiogram.types.CallbackQuery.message`` rasman
             # ``Optional[Message | InaccessibleMessage]``), ikkalasida
-            # ham ``edit_reply_markup`` yo'q.
+            # ham ``edit_reply_markup`` yo'q. DB yozuvi ALLAQACHON
+            # muvaffaqiyatli tugagani uchun bu yerda shartsiz chaqiruv
+            # (avvalgi kod) foydalanuvchini umumiy xato handleriga olib
+            # borardi — endi mavjudligi ANIQ tekshiriladi.
             message = callback.message
             message_available = isinstance(message, Message)
-
-            if not added_ids:
-                # 5-band: DB yozuvi muvaffaqiyatsiz bo'lsa, hech qachon
-                # muvaffaqiyat xabari ko'rsatilmaydi — ro'yxat va
-                # tugmalar SAQLANIB QOLADI (kassir qayta urinib ko'ra
-                # oladi). Callback allaqachon (1-bandda) tasdiqlangani
-                # uchun bu yerda ``message.answer`` (oddiy xabar,
-                # eskirish muddati yo'q) ishlatiladi.
-                if message_available:
-                    await message.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.")
-                return
-
-            # FSM ro'yxati va tugmalar FAQAT DB tranzaksiyasi
-            # MUVAFFAQIYATLI tugagandan KEYIN tozalanadi/olib tashlanadi.
-            await state.update_data(deficiency_list_items=None)
 
             if message_available:
                 try:
@@ -1121,12 +1106,14 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
             if test_run_id:
                 # Test tasdiqlash hech kimga (Founder/Nazoratchi/xodim/
-                # ta'minotchi) bildirishnoma yubormaydi — muvaffaqiyat
-                # xabari oddiy ``message.answer`` orqali, real "Yana
-                # qo'shish/Tugatish" ketma-ketligiga kirmaydi.
-                if message_available:
-                    await message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
+                # ta'minotchi) bildirishnoma yubormaydi — natija
+                # ``callback.answer`` orqali, ``callback.message``
+                # mavjud emasligidan qat'i nazar yetkaziladi (real
+                # "Yana qo'shish/Tugatish" ketma-ketligiga kirmaydi).
+                await callback.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.", show_alert=True)
                 return
+
+            await callback.answer()
 
             if message_available:
                 sent = await message.answer(

@@ -52,11 +52,19 @@ def add_market_item(shift_id: int, employee_id: int, product_name: str, quantity
     return _add_item(shift_id, employee_id, CATEGORY_MARKET, product_name, quantity, unit)
 
 
-def add_items_bulk(shift_id: int, employee_id: int, category: str, items: list[dict]) -> list[int]:
+def add_items_bulk(
+    shift_id: int, employee_id: int, category: str, items: list[dict],
+    is_test: bool = False, test_run_id: str | None = None,
+) -> list[int]:
     """Ko'p qatorli bozor ro'yxati tasdiqlanganda ishlatiladi — BARCHA
     pozitsiyalar bitta tranzaksiyada, aynan bir marta yoziladi.
     Fail-safe: bironta pozitsiya yaroqsiz bo'lsa (nom bo'sh, birlik
-    noma'lum yoki miqdor musbat emas), HECH NARSA yozilmaydi."""
+    noma'lum yoki miqdor musbat emas), HECH NARSA yozilmaydi.
+
+    ``is_test``/``test_run_id`` — FAQAT ``roles.E2E_TESTER_TELEGRAM_ID``
+    uchun (qarang ``cash_shift_bot.py``dagi ``deficiency_list_confirm``);
+    real chaqiruvchilar bu parametrlarni bermaydi, standart qiymat
+    mavjud xatti-harakatni AYNAN saqlaydi."""
     shift = cash_shift.get_shift(shift_id)
     if shift is None or category not in KNOWN_CATEGORIES:
         return []
@@ -74,7 +82,8 @@ def add_items_bulk(shift_id: int, employee_id: int, category: str, items: list[d
         return []
 
     return repo.add_items_bulk(
-        shift_id, employee_id, shift.get("branch"), category, valid_items, shift["shift_date"]
+        shift_id, employee_id, shift.get("branch"), category, valid_items, shift["shift_date"],
+        is_test=is_test, test_run_id=test_run_id,
     )
 
 
@@ -147,6 +156,33 @@ def get_daily_market_shortage() -> list[dict]:
     "by_branch": {branch: {"quantity": float, "item_ids": [int, ...]}}}.
     """
     items = repo.get_open_market_items_through(company_time.today().isoformat())
+
+    grouped: dict[tuple[str, str], dict] = {}
+    for item in items:
+        key = (item["product_name"], item["unit"])
+        bucket = grouped.setdefault(
+            key,
+            {"product_name": item["product_name"], "unit": item["unit"], "total_quantity": 0.0, "by_branch": {}},
+        )
+        bucket["total_quantity"] += item["quantity"]
+        branch = item.get("branch") or "-"
+        branch_bucket = bucket["by_branch"].setdefault(branch, {"quantity": 0.0, "item_ids": []})
+        branch_bucket["quantity"] += item["quantity"]
+        branch_bucket["item_ids"].append(item["id"])
+
+    return list(grouped.values())
+
+
+def get_test_market_shortage(test_run_id: str) -> list[dict]:
+    """``roles.E2E_TESTER_TELEGRAM_ID`` uchun — ``get_daily_market_
+    shortage()`` bilan bir xil shaklda, lekin FAQAT aynan shu
+    ``test_run_id``ga tegishli (``is_test=1``) pozitsiyalar. Real
+    ma'lumot yoki boshqa test yugurishlari hech qachon aralashmaydi
+    (qarang ``repositories.shift_deficiencies.get_test_market_items``)."""
+    if not test_run_id:
+        return []
+
+    items = repo.get_test_market_items(test_run_id)
 
     grouped: dict[tuple[str, str], dict] = {}
     for item in items:

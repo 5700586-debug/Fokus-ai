@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS shift_deficiency_items (
     status TEXT NOT NULL DEFAULT 'open',
     source_date TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    resolved_at TEXT
+    resolved_at TEXT,
+    -- E2E test avtomatizatsiyasi uchun izolyatsiya belgisi (qarang
+    -- ``services/e2e_test_access.py``) — real (``is_test=0``)
+    -- so'rovlar/hisobotlar bu bilan hech qachon aralashmaydi.
+    is_test INTEGER NOT NULL DEFAULT 0,
+    test_run_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS shift_deficiency_progress (

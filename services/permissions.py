@@ -37,7 +37,7 @@ import time
 from aiogram.types import CallbackQuery, Message
 
 from employees import get_profile
-from roles import get_role
+from roles import get_role, is_e2e_tester
 from services import audit, messages
 
 ACTION_SCORE_EMPLOYEE = "score_employee"
@@ -124,6 +124,17 @@ ACTION_MANAGE_VACANCIES = "manage_vacancies"
 # muammolari ko'rinishi).
 ACTION_VIEW_FOUNDER_TODAY_PROBLEMS = "view_founder_today_problems"
 
+# cash_shift_bot.py — E2E test avtomatizatsiyasi (``services/
+# e2e_test_access.py``). QATTIQ cheklangan: FAQAT
+# ``roles.E2E_TESTER_TELEGRAM_ID`` (pastdagi ``has_permission()``dagi
+# maxsus tekshiruv) — hech qanday ROLE_PERMISSIONS yozuvi yo'q, shuning
+# uchun Founder bypass ham BULARGA taalluqli emas (``roles.py``dagi
+# "bitta qattiq kodlangan ID" talabi qat'iy saqlanishi uchun ataylab).
+ACTION_E2E_TEST_CASH_SHIFT = "e2e_test_cash_shift"
+ACTION_E2E_VIEW_TEST_RUN = "e2e_view_test_run"
+
+_E2E_TESTER_ONLY_ACTIONS = frozenset({ACTION_E2E_TEST_CASH_SHIFT, ACTION_E2E_VIEW_TEST_RUN})
+
 # Founder-only amallar (masalan /setrule, /processmonth, /invite) shu
 # ro'yxatga kiritilmaydi — ularga faqat Founder ruxsatli (pastdagi
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol
@@ -170,6 +181,9 @@ def has_permission(user_id: int, action: str) -> bool:
     standart holatda RAD ETILADI (default-deny): ``.get(role, set())``
     bo'sh to'plam qaytaradi, ``in`` tekshiruvi ``False`` beradi.
     """
+    if action in _E2E_TESTER_ONLY_ACTIONS:
+        return is_e2e_tester(user_id)
+
     role = get_role(user_id)
     if role is None:
         return False

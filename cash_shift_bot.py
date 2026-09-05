@@ -29,11 +29,13 @@ from openai import AsyncOpenAI
 from config import FOUNDER_ID
 from employees import STATUS_APPROVED, get_profile, list_approved_by_branch
 from providers.file_storage import get_file_storage_provider
+from roles import is_e2e_tester
 from services import (
     cash_expense,
     cash_shift,
     chat_cleanup,
     deficiency_list_ai,
+    e2e_test_access,
     permissions,
     shift_daily_report,
     shift_deficiency,
@@ -1058,8 +1060,18 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
             parsed_items = [item["parsed"] for item in items]
 
+            # E2E test (Sinovchi) izolyatsiyasi: FAQAT
+            # ``roles.E2E_TESTER_TELEGRAM_ID`` uchun, va FAQAT
+            # ``/sinovsmena`` shu state'ga yozgan ``e2e_test_run_id``
+            # mavjud bo'lsa — real kassir tasdiqlashi bundan hech qanday
+            # ta'sirlanmaydi (test_run_id har doim ``None``/bo'sh).
+            test_run_id = data.get("e2e_test_run_id") if is_e2e_tester(user_id) else None
+
             try:
-                added_ids = shift_deficiency.add_items_bulk(shift["id"], user_id, category, parsed_items)
+                added_ids = shift_deficiency.add_items_bulk(
+                    shift["id"], user_id, category, parsed_items,
+                    is_test=bool(test_run_id), test_run_id=test_run_id,
+                )
             except Exception as error:  # noqa: BLE001
                 print(f"Bozor ro'yxatini saqlashda xato (shift_id={shift['id']}): {error!r}")
                 added_ids = None
@@ -1079,6 +1091,16 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 pass
 
             await callback.answer()
+
+            if test_run_id:
+                # Test tasdiqlash hech kimga (Founder/Nazoratchi/xodim/
+                # ta'minotchi) bildirishnoma yubormaydi — faqat
+                # tasdiqlovchining o'ziga qisqa javob, real "Yana
+                # qo'shish/Tugatish" ketma-ketligiga (kompaniya
+                # buyurtmasi/kunlik hisobot) kirmaydi.
+                await callback.message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
+                return
+
             sent = await callback.message.answer(
                 f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
             )
@@ -1099,6 +1121,78 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         sent = await callback.message.answer("✏️ Ro'yxatni qaytadan yozing:")
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
         await callback.answer()
+
+    # ----------------------------------------------- E2E test (Sinovchi) --
+    # Faqat ``roles.E2E_TESTER_TELEGRAM_ID`` uchun — boshqa hech kim
+    # (Founder ham) ``ACTION_E2E_*`` ruxsatiga ega emas (qarang
+    # ``services/permissions.py``). Bu ikkita buyruq HECH QANDAY o'z
+    # parser/tasdiqlash mantig'ini takrorlamaydi — FSM holatini aynan
+    # REAL ``DeficiencyStates.item_name`` oqimi kutgan shartnoma
+    # (``shift_id``, ``deficiency_category``) bilan to'ldiradi, xolos.
+    # Shundan keyingi BARCHA ishlov (parse/aniqlashtirish/tasdiqlash)
+    # yuqoridagi o'zgarishsiz real handlerlar orqali ketadi — qarang
+    # ``deficiency_item_name``, ``_process_deficiency_list``,
+    # ``_advance_deficiency_list``, ``deficiency_list_clarify``,
+    # ``deficiency_list_confirm``, ``deficiency_list_edit``. Izolyatsiya
+    # (``is_test``/``test_run_id``) ``deficiency_list_confirm`` ichida
+    # qo'shilgan (qarang shu handlerdagi izoh).
+
+    @dp.message(Command("sinovsmena"))
+    async def e2e_test_start_shift(message: Message, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_E2E_TEST_CASH_SHIFT):
+            return
+
+        # DB — yagona haqiqat manbai: ``start_test_shift`` har doim
+        # BUGUNGI ochiq TEST smenani DB'dan qidiradi va topilsa ANIQ
+        # o'sha shift_id/test_run_id'ni qaytaradi (FSM yo'qolgan bo'lsa
+        # ham) — hech qachon yangi, "yetim" test_run_id yaratmaydi.
+        try:
+            result = e2e_test_access.start_test_shift(message.from_user.id)
+        except e2e_test_access.TestRunStateError as error:
+            await message.answer(f"❌ TEST xatosi: {error}")
+            return
+        if result is None:
+            return
+        shift, test_run_id = result
+
+        await state.update_data(
+            shift_id=shift["id"],
+            deficiency_category=shift_deficiency.CATEGORY_MARKET,
+            e2e_test_run_id=test_run_id,
+        )
+        await state.set_state(DeficiencyStates.item_name)
+        await message.answer(
+            "🧪 TEST smena boshlandi (real ma'lumotga ta'sir qilmaydi).\n"
+            "Bozor ro'yxatini yozing (bir yoki bir necha qator):"
+        )
+
+    @dp.message(Command("sinovtugat"))
+    async def e2e_test_finish(message: Message, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_E2E_TEST_CASH_SHIFT):
+            return
+
+        tester_id = message.from_user.id
+        # FSM'ga umuman tayanmaydi — DB'dagi bugungi ochiq TEST
+        # smenani to'g'ridan-to'g'ri topib yakunlaydi/tozalaydi, shuning
+        # uchun bot qayta ishga tushgan yoki FSM tozalangan holatda ham
+        # ishlaydi. FSM faqat DB tozalash MUVAFFAQIYATLI tugagandan
+        # keyin tozalanadi.
+        try:
+            result = e2e_test_access.finish_active_test_run(tester_id)
+        except e2e_test_access.TestRunStateError as error:
+            await message.answer(f"❌ TEST xatosi: {error}")
+            return
+
+        await state.clear()
+
+        if not result["found"]:
+            await message.answer("ℹ️ Faol TEST smena topilmadi.")
+            return
+
+        await message.answer(
+            "🧪 TEST smena yakunlandi va tozalandi "
+            f"(o'chirilgan: {result['items_deleted']} pozitsiya, {result['shifts_deleted']} smena)."
+        )
 
     @dp.message(StateFilter(DeficiencyStates.item_amount))
     async def deficiency_item_amount(message: Message, state: FSMContext) -> None:

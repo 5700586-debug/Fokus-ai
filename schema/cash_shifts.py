@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS cash_shifts (
     closed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    -- E2E test avtomatizatsiyasi uchun izolyatsiya belgisi (qarang
+    -- ``services/e2e_test_access.py``) — ``is_test=0`` bo'lgan real
+    -- smenalarga hech qanday ta'siri yo'q, standart qiymat shuni
+    -- ta'minlaydi.
+    is_test INTEGER NOT NULL DEFAULT 0,
+    test_run_id TEXT,
     UNIQUE(employee_id, shift_date)
 );
 

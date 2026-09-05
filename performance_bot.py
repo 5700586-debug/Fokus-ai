@@ -32,7 +32,7 @@ from config import RECRUITING_BRANCH_NAMES
 from db import IntegrityError
 from repositories import supplier_purchases as supplier_purchases_repo
 from repositories import vehicles as vehicles_repo
-from roles import is_authorized
+from roles import is_authorized, is_e2e_tester
 from services import driver_checks, employee_dashboard, market_observation, permissions, star_engine, supervisor_scoring
 from services import attendance as attendance_service
 from services import meal_plan as meal_plan_service
@@ -784,12 +784,47 @@ def register(dp: Dispatcher, openai_client) -> None:
             product["last_price"] = last["unit_price"] if last else None
         return products
 
+    def _load_test_products_with_price(test_run_id: str) -> list[dict]:
+        products = shift_deficiency.get_test_market_shortage(test_run_id)
+        for product in products:
+            last = supplier_purchases_repo.get_price_history(product["product_name"], product["unit"])
+            product["last_price"] = last["unit_price"] if last else None
+        return products
+
     @dp.message(Command("xarid"))
     async def supplier_purchase_list(message: Message, state: FSMContext) -> None:
-        if not await permissions.ensure_permission(message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE):
+        if not await permissions.ensure_any_permission(
+            message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE, permissions.ACTION_E2E_VIEW_TEST_RUN
+        ):
             return
 
+        tester = is_e2e_tester(message.from_user.id)
+        # E2E test (Sinovchi) — bu yerda FAQAT o'qish: ro'yxat izolyatsiya
+        # qilingan (is_test=1 + aynan shu test_run_id), va state'dagi
+        # /sinovsmena/sinovtugat uchun kerakli kalitlar (shift_id,
+        # e2e_test_run_id) tozalanmasdan saqlanadi. Real ta'minotchi
+        # oqimi butunlay o'zgarishsiz.
+        preserved = {}
+        if tester:
+            existing_data = await state.get_data()
+            for key in ("shift_id", "deficiency_category", "e2e_test_run_id"):
+                if key in existing_data:
+                    preserved[key] = existing_data[key]
+
         await state.clear()
+
+        if tester:
+            test_run_id = preserved.get("e2e_test_run_id")
+            if not test_run_id:
+                await message.answer("ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.")
+                return
+            products = _load_test_products_with_price(test_run_id)
+            await state.update_data(
+                supplier_products=products, purchased_by=message.from_user.id, session_total=0.0, **preserved,
+            )
+            await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
+            return
+
         products = _load_products_with_price()
         await state.update_data(supplier_products=products, purchased_by=message.from_user.id, session_total=0.0)
 

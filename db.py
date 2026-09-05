@@ -124,6 +124,14 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("cash_shifts", "discrepancy_reason_text", "TEXT"),
     ("company_rules", "default_penalty_amount", "INTEGER"),
     ("employee_scheduled_shifts", "schedule_mode", "TEXT"),
+    # E2E test avtomatizatsiyasi uchun izolyatsiya belgisi (qarang
+    # ``services/e2e_test_access.py``) — productionda allaqachon
+    # mavjud jadvalga qo'shiladi, standart qiymat real qatorlarga
+    # hech qanday ta'sir qilmaydi.
+    ("cash_shifts", "is_test", "INTEGER NOT NULL DEFAULT 0"),
+    ("cash_shifts", "test_run_id", "TEXT"),
+    ("shift_deficiency_items", "is_test", "INTEGER NOT NULL DEFAULT 0"),
+    ("shift_deficiency_items", "test_run_id", "TEXT"),
 ]
 
 # Telegram user/chat ID'lari 32-bit INTEGER chegarasidan katta bo'lishi

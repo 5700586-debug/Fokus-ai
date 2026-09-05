@@ -66,13 +66,30 @@ async def test_real_confirm_handler_tags_test_rows_and_excludes_from_real_view(b
 
 
 async def test_duplicate_confirm_does_not_duplicate_test_rows(bot_dp):
+    import company_time
+
     main, bot = bot_dp
     await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
-    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg")
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
 
-    await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
-    sent = await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
-    assert "qo'shildi" not in " ".join(t for t in texts(sent) if t)
+    first = await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+    assert "qo'shildi" in " ".join(t for t in texts(first) if t)
+
+    second = await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+    assert "qo'shildi" not in " ".join(t for t in texts(second) if t)
+
+    # Ikkinchi (dublikat) confirm hech qanday qo'shimcha qator
+    # yozmagan bo'lishi kerak — test smenasidagi item'lar soni
+    # aynan 2 ta (Pomidor, Karam) bo'lib qolishi shart.
+    test_shift = cash_shifts_repo.get_open_shift(_TESTER_ID, company_time.today().isoformat())
+    from repositories import shift_deficiencies as shift_deficiencies_repo
+
+    all_items = shift_deficiencies_repo.get_open_market_items_through(
+        company_time.today().isoformat(), is_test=True
+    )
+    tester_items = [item for item in all_items if item["shift_id"] == test_shift["id"]]
+    assert {item["product_name"] for item in tester_items} == {"Pomidor", "Karam"}
+    assert len(tester_items) == 2
 
 
 async def test_existing_xarid_shows_only_testers_exact_run(bot_dp):
@@ -82,7 +99,11 @@ async def test_existing_xarid_shows_only_testers_exact_run(bot_dp):
     shift_deficiency.add_market_item(real_shift["id"], 2, "Bodring", 6, "kg")
 
     await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
-    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona")
+    # 1 qatorli kirim REAL bitta-mahsulot oqimini (alohida miqdor
+    # so'rovi) ishga tushiradi, ko'p qatorli AI ro'yxati EMAS — shu
+    # sabab bu yerda ATAYLAB 2 qatorli kirim ishlatiladi (real
+    # ``_process_deficiency_list``/``csdef_list_confirm`` yo'li).
+    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona\nYana bir mahsulot 1 dona")
     await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
 
     tester_view = " ".join(t for t in texts(await send(main.dp, bot, _TESTER_ID, text="/xarid")) if t)
@@ -97,7 +118,7 @@ async def test_existing_xarid_shows_only_testers_exact_run(bot_dp):
 async def test_tester_cannot_record_real_supplier_purchase(bot_dp):
     main, bot = bot_dp
     await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
-    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona")
+    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona\nYana bir mahsulot 1 dona")
     await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
 
     await send(main.dp, bot, _TESTER_ID, text="/xarid")
@@ -117,7 +138,7 @@ async def test_sinovtugat_cleanup_does_not_delete_real_rows(bot_dp):
     shift_deficiency.add_market_item(real_shift["id"], 3, "Sabzi", 4, "kg")
 
     await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
-    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona")
+    await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona\nYana bir mahsulot 1 dona")
     await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
 
     await send(main.dp, bot, _TESTER_ID, text="/sinovtugat")

@@ -33,7 +33,7 @@ from db import IntegrityError
 from repositories import supplier_purchases as supplier_purchases_repo
 from repositories import vehicles as vehicles_repo
 from roles import is_authorized, is_e2e_tester
-from services import driver_checks, employee_dashboard, market_observation, permissions, star_engine, supervisor_scoring
+from services import driver_checks, employee_dashboard, latency_probe, market_observation, permissions, star_engine, supervisor_scoring
 from services import attendance as attendance_service
 from services import meal_plan as meal_plan_service
 from services import rules as rules_service
@@ -793,6 +793,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.message(Command("xarid"))
     async def supplier_purchase_list(message: Message, state: FSMContext) -> None:
+        latency_probe.mark_handler_entry("xarid")
         if not await permissions.ensure_any_permission(
             message, permissions.ACTION_RECORD_SUPPLIER_PURCHASE, permissions.ACTION_E2E_VIEW_TEST_RUN
         ):
@@ -816,19 +817,22 @@ def register(dp: Dispatcher, openai_client) -> None:
         if tester:
             test_run_id = preserved.get("e2e_test_run_id")
             if not test_run_id:
-                await message.answer("ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.")
+                with latency_probe.time_telegram_send():
+                    await message.answer("ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.")
                 return
             products = _load_test_products_with_price(test_run_id)
             await state.update_data(
                 supplier_products=products, purchased_by=message.from_user.id, session_total=0.0, **preserved,
             )
-            await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
+            with latency_probe.time_telegram_send():
+                await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
             return
 
         products = _load_products_with_price()
         await state.update_data(supplier_products=products, purchased_by=message.from_user.id, session_total=0.0)
 
-        await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
+        with latency_probe.time_telegram_send():
+            await message.answer(_supplier_summary_text(products), reply_markup=_supplier_products_kb(products))
 
     @dp.callback_query(F.data.startswith("sup_pick:"))
     async def supplier_purchase_pick(callback: CallbackQuery, state: FSMContext) -> None:

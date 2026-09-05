@@ -57,7 +57,7 @@ import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_ADDRESSES, RECRUITING_BRANCH_NAMES  # noqa: E402
 from repositories import recruiting as recruiting_repo  # noqa: E402
-from services import founder_today_problems, messages, permissions  # noqa: E402
+from services import founder_today_problems, latency_probe, messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -335,6 +335,33 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
         return
 
 
+class _LatencyProbeMiddleware(BaseMiddleware):
+    """Vaqtinchalik, faqat sinovchi (``roles.E2E_TESTER_TELEGRAM_ID``)
+    uchun ishlaydigan vaqt o'lchash zondi (qarang
+    ``services/latency_probe.py``) — ATAYLAB boshqa ikkita
+    ``dp.update.outer_middleware``dan (pastda) OLDIN ro'yxatdan
+    o'tadi, shuning uchun ENG TASHQI qatlam bo'ladi va ularning o'z
+    ishlov vaqti ham "dispatcher entry"dan keyingi umumiy vaqtga
+    kiradi — bu real production kechikishini to'liq aks ettirish
+    uchun ATAYLAB shunday. Boshqa har qanday foydalanuvchi uchun
+    ``latency_probe.begin_update`` zudlik bilan hech narsa qilmasdan
+    qaytadi — log yozilmaydi, xatti-harakat o'zgarmaydi.
+    """
+
+    async def __call__(self, handler, event, data: dict):
+        message: Message | None = event.message
+        callback = event.callback_query
+        user = message.from_user if message is not None else (
+            callback.from_user if callback is not None else None
+        )
+        latency_probe.begin_update(user.id if user is not None else None)
+        try:
+            return await handler(event, data)
+        finally:
+            latency_probe.end_update()
+
+
+dp.update.outer_middleware(_LatencyProbeMiddleware())
 dp.update.outer_middleware(_SandboxPreviewMiddleware())
 dp.update.outer_middleware(_ClearStaleStateMiddleware())
 

@@ -117,7 +117,16 @@ class _PgCursorResult:
 
 class PgConnection:
     def __init__(self, dsn: str):
-        self._conn = psycopg2.connect(dsn, cursor_factory=psycopg2.extras.RealDictCursor)
+        # Lazy import: ``services.latency_probe`` -> ``roles`` -> import
+        # vaqtida ``db.get_connection()``ni chaqiradi (``allowed_users``
+        # yuklash uchun) -- modul darajasida import qilinsa, bu fayl
+        # hali to'liq yuklanmagan paytda o'ziga qaytib chaqirilib,
+        # dumaloq import xatosini keltirib chiqarardi (xuddi ``db.py``
+        # ``PgConnection``ni shu sababdan LOKAL import qilgani kabi).
+        from services import latency_probe
+
+        with latency_probe.time_db_connect():
+            self._conn = psycopg2.connect(dsn, cursor_factory=psycopg2.extras.RealDictCursor)
 
     # sqlite3.Connection'da hech qanday amal bermaydi (Postgres FK'ni
     # doim majburlaydi) — chaqiruvchi tomon (``db.get_connection()``)
@@ -131,15 +140,19 @@ class PgConnection:
         pass
 
     def execute(self, sql: str, params=()) -> _PgCursorResult:
+        from services import latency_probe
+
         translated, _stripped_fk = _translate_statement(sql)
         cursor = self._conn.cursor()
-        cursor.execute(translated, params)
+        with latency_probe.time_db_query():
+            cursor.execute(translated, params)
 
         lastrowid = None
         table_match = _INSERT_TABLE_RE.match(sql.strip())
         if table_match and table_match.group(1).lower() in _SERIAL_PK_TABLES:
             lastval_cursor = self._conn.cursor()
-            lastval_cursor.execute("SELECT lastval() AS lastval")
+            with latency_probe.time_db_query():
+                lastval_cursor.execute("SELECT lastval() AS lastval")
             row = lastval_cursor.fetchone()
             lastrowid = row["lastval"] if row else None
 
@@ -170,7 +183,10 @@ class PgConnection:
             )
 
     def commit(self) -> None:
-        self._conn.commit()
+        from services import latency_probe
+
+        with latency_probe.time_db_query():
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()

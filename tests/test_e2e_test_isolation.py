@@ -226,6 +226,68 @@ async def test_confirm_with_inaccessible_callback_message_does_not_crash(bot_dp,
     assert {i["product_name"] for i in items} == {"Pomidor", "Karam"}
 
 
+async def test_confirm_survives_expired_callback_after_slow_db_save(bot_dp, monkeypatch, capsys):
+    """Ikkinchi, ALOHIDA production reproduksiyasi: ``callback.message``
+    bu safar TO'LIQ va mavjud ``Message`` (yuqoridagi
+    ``InaccessibleMessage``/``None`` bilan aralashtirilmasin) — muammo
+    ``callback.answer()``ning DB saqlashdan KEYIN, sekin so'rovdan
+    keyin chaqirilishida: Telegram uni "query is too old and response
+    timeout expired or query ID is invalid" (``TelegramBadRequest``)
+    bilan rad etadi. Bu yerda DB saqlash sun'iy sekinlashtiriladi va
+    ``callback.answer()`` FAQAT shu sekinlashuv boshlangandan KEYIN
+    chaqirilsa aynan shu xatoni ko'taradi -- eski (DB'dan KEYIN
+    tasdiqlovchi) kod bunga chidamaydi, yangi (DARHOL tasdiqlovchi)
+    kod chidashi kerak."""
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import AnswerCallbackQuery
+
+    from services import shift_deficiency as shift_deficiency_module
+
+    main, bot = bot_dp
+    bot.db_save_started = False
+    original_call = type(bot).__call__
+
+    async def _call_with_expiring_ack(self, method, request_timeout=None):
+        if isinstance(method, AnswerCallbackQuery) and self.db_save_started:
+            raise TelegramBadRequest(
+                method=method,
+                message=(
+                    "Bad Request: query is too old and response timeout expired "
+                    "or query ID is invalid"
+                ),
+            )
+        return await original_call(self, method, request_timeout)
+
+    monkeypatch.setattr(type(bot), "__call__", _call_with_expiring_ack)
+
+    original_add_items_bulk = shift_deficiency_module.add_items_bulk
+
+    def _slow_add_items_bulk(*args, **kwargs):
+        bot.db_save_started = True
+        return original_add_items_bulk(*args, **kwargs)
+
+    monkeypatch.setattr(shift_deficiency_module, "add_items_bulk", _slow_add_items_bulk)
+
+    await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
+
+    bot.sent = []
+    sent = await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+
+    captured = capsys.readouterr()
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Kutilmagan xatolik" not in combined, (
+        f"aiogram global error handler ishga tushdi -- captured stdout: {captured.out!r}"
+    )
+    assert "qo'shildi" in combined
+
+    today = company_time.today().isoformat()
+    shift = cash_shifts_repo.get_open_test_shift(_TESTER_ID, today)
+    assert shift is not None
+    items = shift_deficiencies_repo.get_test_market_items(shift["test_run_id"])
+    assert {i["product_name"] for i in items} == {"Pomidor", "Karam"}
+
+
 def test_cleanup_with_non_tester_id_deletes_nothing():
     from services import e2e_test_access
 

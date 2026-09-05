@@ -11,6 +11,7 @@ import re
 
 import company_time
 from aiogram import Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -54,6 +55,17 @@ _SKIP_TEXT = "➖ O'tkazib yuborish"
 # himoya (foydalanuvchi ID bo'yicha).
 _PENDING_EXPENSE_SUBMISSIONS: set[int] = set()
 _PENDING_CLOSE_SUBMISSIONS: set[int] = set()
+# aiogram yangilanishlarni HAR BIRINI alohida asyncio task sifatida
+# concurrent ishga tushiradi (ketma-ket EMAS) — shuning uchun bitta
+# foydalanuvchidan deyarli bir vaqtda kelgan ikkita "✅ Tasdiqlash"
+# bosilishi (ikki marta bosish yoki Telegram qayta yuborishi) ikkalasi
+# ham ``await state.get_data()``dagi tekshiruvdan hali biri ro'yxatni
+# tozalamasdan turib o'tib ketishi mumkin edi — natijada ro'yxat ikki
+# marta yozilardi va/yoki allaqachon olib tashlangan tugmani ikkinchi
+# marta o'chirishga urinish Telegram'ning "message is not modified"
+# xatosini chiqarardi (``⚠️ Kutilmagan xatolik``). Yuqoridagi ikkita
+# to'plam bilan bir xil uslub — sinxron tekshir+qo'sh (awaitdan OLDIN).
+_PENDING_DEFICIENCY_LIST_CONFIRMATIONS: set[int] = set()
 
 _CATEGORY_LABELS = {
     "taxi": "🚕 Taxi",
@@ -1026,28 +1038,53 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.callback_query(F.data == "csdef_list_confirm")
     async def deficiency_list_confirm(callback: CallbackQuery, state: FSMContext) -> None:
-        data = await state.get_data()
-        items = data.get("deficiency_list_items")
-        shift = cash_shift.get_shift(data.get("shift_id"))
-        category = data.get("deficiency_category")
-        if not items or shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+        user_id = callback.from_user.id
+        # Atomic band qilish: awaitdan OLDIN, sinxron tekshir+qo'sh (qarang
+        # ``_PENDING_DEFICIENCY_LIST_CONFIRMATIONS`` izohi) — bir vaqtda
+        # kelgan ikkinchi confirm shu yerda darhol to'xtaydi.
+        if user_id in _PENDING_DEFICIENCY_LIST_CONFIRMATIONS:
             await callback.answer()
             return
+        _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.add(user_id)
 
-        parsed_items = [item["parsed"] for item in items]
-        # Takroriy tugma bosilishidan himoya: state'dagi ro'yxat DB
-        # yozuvidan OLDIN tozalanadi, shuning uchun ikkinchi urinish
-        # yuqoridagi ``if not items`` tekshiruvida darhol to'xtaydi.
-        await state.update_data(deficiency_list_items=None)
-        await callback.message.edit_reply_markup(reply_markup=None)
+        try:
+            data = await state.get_data()
+            items = data.get("deficiency_list_items")
+            shift = cash_shift.get_shift(data.get("shift_id"))
+            category = data.get("deficiency_category")
+            if not items or shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
+                await callback.answer()
+                return
 
-        added_ids = shift_deficiency.add_items_bulk(shift["id"], callback.from_user.id, category, parsed_items)
+            parsed_items = [item["parsed"] for item in items]
 
-        await callback.answer()
-        sent = await callback.message.answer(
-            f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
-        )
-        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+            try:
+                added_ids = shift_deficiency.add_items_bulk(shift["id"], user_id, category, parsed_items)
+            except Exception as error:  # noqa: BLE001
+                print(f"Bozor ro'yxatini saqlashda xato (shift_id={shift['id']}): {error!r}")
+                added_ids = None
+
+            if not added_ids:
+                # 7-band: DB yozuvi muvaffaqiyatsiz bo'lsa, ro'yxat va
+                # tugmalar SAQLANIB QOLADI — kassir qayta urinib ko'ra oladi.
+                await callback.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.", show_alert=True)
+                return
+
+            # 5-band: FSM ro'yxati va tugmalar FAQAT DB tranzaksiyasi
+            # MUVAFFAQIYATLI tugagandan KEYIN tozalanadi/olib tashlanadi.
+            await state.update_data(deficiency_list_items=None)
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
+
+            await callback.answer()
+            sent = await callback.message.answer(
+                f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
+            )
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+        finally:
+            _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.discard(user_id)
 
     @dp.callback_query(F.data == "csdef_list_edit")
     async def deficiency_list_edit(callback: CallbackQuery, state: FSMContext) -> None:

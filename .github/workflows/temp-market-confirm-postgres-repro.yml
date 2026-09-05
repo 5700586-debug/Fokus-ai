@@ -1,4 +1,4 @@
-name: Temp market confirm crash repro (Postgres)
+name: Temp market confirm crash fix verify (Postgres)
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  repro:
+  verify:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -37,11 +37,15 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python -m pytest -v tests/test_shift_deficiency_bot_flow.py -k multiline | tee test_output.log
-      - run: cp test_output.log CI_FAILURE_OUTPUT.txt
-      - run: |
+          python -m pytest -v tests/test_shift_deficiency_bot_flow.py tests/test_supplier_purchase_listing.py | tee test_output.log
+      - if: steps.test_run.outcome == 'failure'
+        run: cp test_output.log CI_FAILURE_OUTPUT.txt
+      - if: steps.test_run.outcome == 'failure'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CI_FAILURE_OUTPUT.txt
-          git commit -m "chore: record market confirm postgres repro output"
+          git commit -m "chore: record market confirm postgres fix verify failure output"
           git push origin HEAD:fix/market-list-confirm-crash
+      - if: steps.test_run.outcome == 'failure'
+        run: exit 1

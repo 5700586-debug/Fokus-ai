@@ -42,6 +42,25 @@ ROLES = {
 # har birida faqat bitta xodim bo'lishi mumkin.
 SINGLE_SLOT_ROLES = {"nazoratchi", "haydovchi", "taminotchi", "moliyachi"}
 
+# E2E test avtomatizatsiyasi (real Telegram robot) uchun statik
+# ("virtual") rol — ``ROLES``/``allowed_users``/``employees``
+# mexanizmidan BUTUNLAY MUSTAQIL, bitta qattiq kodlangan Telegram
+# ID'ga bog'langan. Hech qachon ``/invite``, ``/setrole`` yoki boshqa
+# hech qanday ommaviy buyruq orqali tayinlanmaydi/o'zgartirilmaydi;
+# ``set_role``/``_USERS``ga umuman kirmaydi, shuning uchun xodim
+# ro'yxatlarida (``list_users``, ``list_approved_by_branch``) hech
+# qachon ko'rinmaydi va ``get_role()`` bu ID uchun ``None`` qaytaradi
+# (Founder bo'la olmaydi — ``FOUNDER_ID`` bilan hech qachon
+# taqqoslanmaydi). Ruxsatlar ``services/permissions.py``da alohida,
+# tor amal to'plamiga cheklangan.
+E2E_TESTER_ROLE_KEY = "e2e_tester"
+E2E_TESTER_DISPLAY_NAME = "🧪 Sinovchi"
+E2E_TESTER_TELEGRAM_ID = 7952886089
+
+
+def is_e2e_tester(user_id: int) -> bool:
+    return user_id == E2E_TESTER_TELEGRAM_ID
+
 _ALLOWED_USERS_FILE = os.path.join(
     os.getenv("FOKUS_DATA_DIR") or os.path.dirname(os.path.abspath(__file__)),
     "allowed_users_test.json" if ENVIRONMENT == "test" else "allowed_users.json",

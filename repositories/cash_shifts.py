@@ -30,10 +30,15 @@ def get_open_shift(employee_id: int, shift_date: str) -> dict | None:
 
 def open_shift(
     employee_id: int, branch: str | None, shift_date: str, opening_balance: int, tolerance: int,
-    received_cash_balance: int | None = None,
+    received_cash_balance: int | None = None, is_test: bool = False, test_run_id: str | None = None,
 ) -> dict:
     """``employee_id``+``shift_date`` uchun smena allaqachon mavjud bo'lsa,
     yangisini yaratmasdan mavjudini qaytaradi (duplicate open'dan himoya).
+
+    ``is_test``/``test_run_id`` — FAQAT ``services/e2e_test_access.py``
+    uchun (qarang shu modul docstringi); real chaqiruvchilar bu
+    parametrlarni bermaydi, standart qiymat (``False``/``None``)
+    mavjud xatti-harakatni AYNAN saqlaydi.
     """
     existing = get_open_shift(employee_id, shift_date)
     if existing is not None:
@@ -45,9 +50,12 @@ def open_shift(
         cursor = conn.execute(
             "INSERT INTO cash_shifts "
             "(employee_id, branch, shift_date, opening_balance, received_cash_balance, tolerance, status, "
-            "opened_at, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
-            (employee_id, branch, shift_date, opening_balance, received_cash_balance, tolerance, now, now, now),
+            "opened_at, created_at, updated_at, is_test, test_run_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)",
+            (
+                employee_id, branch, shift_date, opening_balance, received_cash_balance, tolerance,
+                now, now, now, int(is_test), test_run_id,
+            ),
         )
         conn.commit()
         shift_id = cursor.lastrowid
@@ -55,6 +63,53 @@ def open_shift(
         conn.close()
 
     return get_shift(shift_id)
+
+
+def close_test_shift(shift_id: int) -> bool:
+    """``services/e2e_test_access.py`` uchun — FAQAT ``is_test = 1``
+    smenani yopadi (ikkinchi shart DB darajasidagi ``WHERE``da), real
+    smenaga hech qachon tegmaydi."""
+    conn = get_connection()
+    try:
+        now = _now()
+        cursor = conn.execute(
+            "UPDATE cash_shifts SET status = 'closed', closed_at = ?, updated_at = ? "
+            "WHERE id = ? AND is_test = 1",
+            (now, now, shift_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_test_shifts_for_run(test_run_id: str) -> int:
+    """``services/e2e_test_access.py`` uchun tozalash — FAQAT
+    ``is_test = 1`` VA aynan shu ``test_run_id``ga tegishli qatorlar
+    (ikkala shart ham DB darajasida), real ma'lumotga hech qachon
+    tegmaydi. Chaqiruvchi bundan OLDIN tegishli
+    ``shift_deficiency_items`` qatorlarini o'chirishi kerak (FK).
+
+    Bir kunda bir nechta test yugurish AYNAN shu smena qatorini qayta
+    ishlatishi mumkin (``cash_shifts.UNIQUE(employee_id, shift_date)``)
+    — agar boshqa (hali tozalanmagan) yugurish item'lari hamon shu
+    qatorga FK orqali bog'liq bo'lsa, o'chirish xavfsiz tarzda
+    o'tkazib yuboriladi (xato ko'tarilmaydi, real ma'lumotga hech
+    qanday ta'sir yo'q)."""
+    from db import IntegrityError
+
+    conn = get_connection()
+    try:
+        try:
+            cursor = conn.execute(
+                "DELETE FROM cash_shifts WHERE is_test = 1 AND test_run_id = ?", (test_run_id,)
+            )
+            conn.commit()
+            return cursor.rowcount
+        except IntegrityError:
+            return 0
+    finally:
+        conn.close()
 
 
 def get_shift(shift_id: int) -> dict | None:

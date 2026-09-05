@@ -800,8 +800,15 @@ dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
 
 onboarding.register(dp)
 approval.register(dp)
-performance_bot.register(dp, openai_client)
+# cash_shift_bot ATAYLAB performance_bot'dan OLDIN ro'yxatdan
+# o'tkaziladi: cash_shift_bot.py'dagi E2E test (Sinovchi) uchun
+# ``Command("xarid")`` interceptori faqat ``roles.E2E_TESTER_TELEGRAM_ID``
+# uchun mos keladi (aiogram filtri) va boshqa hamma uchun avtomatik
+# keyingi ``Command("xarid")`` handleriga (performance_bot.py, real
+# ta'minotchi oqimi, o'zgarishsiz) o'tkazadi — shuning uchun tartib
+# muhim (qarang cash_shift_bot.py'dagi izoh).
 cash_shift_bot.register(dp, openai_client)
+performance_bot.register(dp, openai_client)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)

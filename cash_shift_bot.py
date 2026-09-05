@@ -1085,26 +1085,41 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             # 5-band: FSM ro'yxati va tugmalar FAQAT DB tranzaksiyasi
             # MUVAFFAQIYATLI tugagandan KEYIN tozalanadi/olib tashlanadi.
             await state.update_data(deficiency_list_items=None)
-            try:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            except TelegramBadRequest:
-                pass
 
-            await callback.answer()
+            # ``callback.message`` real Telegramda har doim to'liq
+            # ``Message`` bo'lavermaydi — Bot API uni ``None`` yoki
+            # ``InaccessibleMessage`` qilib ham qaytarishi mumkin
+            # (``aiogram.types.CallbackQuery.message`` rasman
+            # ``Optional[Message | InaccessibleMessage]``), ikkalasida
+            # ham ``edit_reply_markup`` yo'q. DB yozuvi ALLAQACHON
+            # muvaffaqiyatli tugagani uchun bu yerda shartsiz chaqiruv
+            # (avvalgi kod) foydalanuvchini umumiy xato handleriga olib
+            # borardi — endi mavjudligi ANIQ tekshiriladi.
+            message = callback.message
+            message_available = isinstance(message, Message)
+
+            if message_available:
+                try:
+                    await message.edit_reply_markup(reply_markup=None)
+                except TelegramBadRequest:
+                    pass
 
             if test_run_id:
                 # Test tasdiqlash hech kimga (Founder/Nazoratchi/xodim/
-                # ta'minotchi) bildirishnoma yubormaydi — faqat
-                # tasdiqlovchining o'ziga qisqa javob, real "Yana
-                # qo'shish/Tugatish" ketma-ketligiga (kompaniya
-                # buyurtmasi/kunlik hisobot) kirmaydi.
-                await callback.message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
+                # ta'minotchi) bildirishnoma yubormaydi — natija
+                # ``callback.answer`` orqali, ``callback.message``
+                # mavjud emasligidan qat'i nazar yetkaziladi (real
+                # "Yana qo'shish/Tugatish" ketma-ketligiga kirmaydi).
+                await callback.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.", show_alert=True)
                 return
 
-            sent = await callback.message.answer(
-                f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
-            )
-            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
+            await callback.answer()
+
+            if message_available:
+                sent = await message.answer(
+                    f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
+                )
+                chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
         finally:
             _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.discard(user_id)
 

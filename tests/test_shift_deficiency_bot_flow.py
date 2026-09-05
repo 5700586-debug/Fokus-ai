@@ -299,6 +299,42 @@ async def test_multiline_list_confirm_twice_does_not_duplicate(bot_dp):
     assert products["Karam"]["total_quantity"] == 2
 
 
+async def test_multiline_list_confirm_db_failure_preserves_list_for_retry(bot_dp, monkeypatch):
+    """7-band: DB yozuvi muvaffaqiyatsiz bo'lsa, ro'yxat/tugma yo'qolmaydi
+    va kassir qayta urinib ko'rganda hech narsa yo'qotilmasdan saqlanadi
+    (dublikat ham hosil bo'lmaydi)."""
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send(main.dp, bot, 111, text="Pomidor 10 kg\nKaram 2 dona")
+
+    from services import shift_deficiency as shift_deficiency_module
+
+    original_add_items_bulk = shift_deficiency_module.add_items_bulk
+    call_count = 0
+
+    def _fails_once(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("DB xatosi")
+        return original_add_items_bulk(*args, **kwargs)
+
+    monkeypatch.setattr(shift_deficiency_module, "add_items_bulk", _fails_once)
+
+    sent = await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    assert "xatolik" in " ".join(t for t in texts(sent) if t).lower()
+    assert shift_deficiency.get_daily_market_shortage() == []
+
+    sent = await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    assert "2 ta mahsulot qo'shildi" in " ".join(t for t in texts(sent) if t)
+
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Pomidor"]["total_quantity"] == 10
+    assert products["Karam"]["total_quantity"] == 2
+
+
 async def test_multiline_list_edit_button_lets_user_retype(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)

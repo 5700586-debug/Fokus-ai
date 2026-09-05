@@ -36,14 +36,23 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run focused expired-callback regression test
         run: |
-          python -m pytest -q \
+          set +e
+          python -m pytest -v \
             tests/test_e2e_test_isolation.py::test_confirm_survives_expired_callback_after_slow_db_save \
-            tests/test_shift_deficiency_bot_flow.py::test_multiline_list_confirm_db_failure_preserves_list_for_retry
+            tests/test_shift_deficiency_bot_flow.py::test_multiline_list_confirm_db_failure_preserves_list_for_retry \
+            > pytest_output.txt 2>&1
+          status=$?
+          {
+            echo '## pytest output'
+            echo '```'
+            cat pytest_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - name: Upload failure output
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: pytest-output
-          path: |
-            **/*.log
+          path: pytest_output.txt
           if-no-files-found: ignore

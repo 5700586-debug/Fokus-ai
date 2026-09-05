@@ -186,6 +186,46 @@ def test_cleanup_with_wrong_run_id_never_touches_real_data():
     assert products["Karam"]["total_quantity"] == 6
 
 
+async def test_confirm_with_inaccessible_callback_message_does_not_crash(bot_dp, capsys):
+    """Production robot tomonidan aniqlangan reproduksiya: real
+    Telegram'da ``CallbackQuery.message`` har doim to'liq ``Message``
+    bo'lavermaydi (``None`` yoki ``InaccessibleMessage`` ham bo'lishi
+    mumkin — Bot API kafolati), lekin ``deficiency_list_confirm`` DB
+    yozuvidan KEYIN uni shartsiz ``edit_reply_markup``/``answer``
+    orqali chaqiradi. Bu testda ``callback.message=None`` bilan aynan
+    shu holat qayta hosil qilinadi -- DB yozuvi baribir bajarilishi
+    (aynan 2 ta pozitsiya), lekin foydalanuvchiga umumiy
+    "Kutilmagan xatolik" ko'rinmasligi kerak."""
+    from aiogram.types import CallbackQuery, Update
+    from aiogram.types import User as TgUser
+
+    main, bot = bot_dp
+    await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+    await send(main.dp, bot, _TESTER_ID, text="Pomidor 10 kg\nKaram 2 dona")
+
+    user = TgUser(id=_TESTER_ID, is_bot=False, first_name="Test")
+    callback = CallbackQuery(
+        id="1", from_user=user, chat_instance="ci", data="csdef_list_confirm", message=None,
+    )
+    update = Update(update_id=1, callback_query=callback)
+    bot.sent = []
+    await main.dp.feed_update(bot, update)
+
+    captured = capsys.readouterr()
+    combined = " ".join(t for t in texts(bot.sent) if t)
+    assert "Kutilmagan xatolik" not in combined, (
+        f"aiogram global error handler ishga tushdi -- captured stdout: {captured.out!r}"
+    )
+
+    # DB yozuvi BARIBIR bajarilgan bo'lishi kerak (aynan 2 ta pozitsiya)
+    # -- muammo faqat POST-SAVE javob berishda, saqlashning o'zida emas.
+    today = company_time.today().isoformat()
+    shift = cash_shifts_repo.get_open_test_shift(_TESTER_ID, today)
+    assert shift is not None
+    items = shift_deficiencies_repo.get_test_market_items(shift["test_run_id"])
+    assert {i["product_name"] for i in items} == {"Pomidor", "Karam"}
+
+
 def test_cleanup_with_non_tester_id_deletes_nothing():
     from services import e2e_test_access
 

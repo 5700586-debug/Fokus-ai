@@ -1,0 +1,109 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.12.14/x64/bin/python
+cachedir: .pytest_cache
+rootdir: /home/runner/work/Fokus-ai/Fokus-ai
+plugins: anyio-4.15.1
+collecting ... collected 78 items
+
+tests/test_e2e_tester_role.py::test_only_tester_id_gets_e2e_test_permissions PASSED [  1%]
+tests/test_e2e_tester_role.py::test_founder_does_not_get_e2e_test_permissions_either PASSED [  2%]
+tests/test_e2e_tester_role.py::test_tester_never_becomes_founder_or_admin PASSED [  3%]
+tests/test_e2e_tester_role.py::test_is_e2e_tester_only_matches_exact_id PASSED [  5%]
+tests/test_e2e_tester_role.py::test_tester_absent_from_role_user_list PASSED [  6%]
+tests/test_e2e_tester_role.py::test_tester_has_no_employee_profile PASSED [  7%]
+tests/test_e2e_tester_role.py::test_tester_absent_from_approved_branch_lists PASSED [  8%]
+tests/test_e2e_tester_role.py::test_other_user_cannot_start_test_shift PASSED [ 10%]
+tests/test_e2e_tester_role.py::test_founder_cannot_start_test_shift PASSED [ 11%]
+tests/test_e2e_tester_role.py::test_tester_can_start_test_shift PASSED   [ 12%]
+tests/test_e2e_tester_role.py::test_other_user_cannot_view_test_run_via_xarid PASSED [ 14%]
+tests/test_e2e_tester_role.py::test_no_parallel_e2e_test_flow_remains_in_cash_shift_bot PASSED [ 15%]
+tests/test_e2e_tester_role.py::test_main_py_handler_registration_order_matches_commit_9f84a6b PASSED [ 16%]
+tests/test_e2e_test_isolation.py::test_sinovsmena_enters_real_deficiency_states_flow PASSED [ 17%]
+tests/test_e2e_test_isolation.py::test_real_confirm_handler_tags_test_rows_and_excludes_from_real_view PASSED [ 19%]
+tests/test_e2e_test_isolation.py::test_duplicate_confirm_does_not_duplicate_test_rows PASSED [ 20%]
+tests/test_e2e_test_isolation.py::test_existing_xarid_shows_only_testers_exact_run FAILED [ 21%]
+tests/test_e2e_test_isolation.py::test_tester_cannot_record_real_supplier_purchase PASSED [ 23%]
+tests/test_e2e_test_isolation.py::test_sinovtugat_cleanup_does_not_delete_real_rows PASSED [ 24%]
+tests/test_e2e_test_isolation.py::test_repo_defaults_exclude_test_rows_from_real_queries PASSED [ 25%]
+tests/test_e2e_test_isolation.py::test_cleanup_with_wrong_run_id_never_touches_real_data PASSED [ 26%]
+tests/test_e2e_test_isolation.py::test_cleanup_with_non_tester_id_deletes_nothing PASSED [ 28%]
+tests/test_e2e_isolation_db_upgrade.py::test_e2e_isolation_columns_added_to_old_schema_without_touching_real_rows SKIPPED [ 29%]
+tests/test_e2e_isolation_db_upgrade.py::test_e2e_isolation_columns_migration_runs_twice_without_error SKIPPED [ 30%]
+tests/test_db_migration.py::test_additive_columns_are_added_to_old_schema SKIPPED [ 32%]
+tests/test_db_migration.py::test_additive_column_migration_runs_twice_without_error SKIPPED [ 33%]
+tests/test_db_migration.py::test_postgres_bigint_migration_widens_telegram_identity_columns SKIPPED [ 34%]
+tests/test_db_migration.py::test_single_slot_role_unique_index_exists_after_init SKIPPED [ 35%]
+tests/test_db_migration.py::test_single_slot_role_unique_index_rejects_duplicate_role_key SKIPPED [ 37%]
+tests/test_db_migration.py::test_single_slot_role_unique_index_allows_different_single_slot_roles SKIPPED [ 38%]
+tests/test_shift_deficiency_bot_flow.py::test_closeshift_starts_market_step_instead_of_photo PASSED [ 39%]
+tests/test_shift_deficiency_bot_flow.py::test_market_none_then_company_step_shown PASSED [ 41%]
+tests/test_shift_deficiency_bot_flow.py::test_full_gate_with_no_prior_items_reaches_photo_prompt PASSED [ 42%]
+tests/test_shift_deficiency_bot_flow.py::test_add_market_item_then_finish_moves_to_company_step PASSED [ 43%]
+tests/test_shift_deficiency_bot_flow.py::test_invalid_quantity_format_is_rejected_and_reprompted PASSED [ 44%]
+tests/test_shift_deficiency_bot_flow.py::test_yesterday_list_excludes_other_branch_and_todays_other_shift PASSED [ 46%]
+tests/test_shift_deficiency_bot_flow.py::test_yesterday_review_confirm_keeps_still_missing_open PASSED [ 47%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_all_deterministic_no_ai_call PASSED [ 48%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_unclear_lines_use_single_batched_ai_call PASSED [ 50%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_ai_uncertain_line_asks_manual_clarification PASSED [ 51%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_ai_failure_preserves_list_and_requests_manual_clarification PASSED [ 52%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_confirm_twice_does_not_duplicate PASSED [ 53%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_confirm_db_failure_preserves_list_for_retry PASSED [ 55%]
+tests/test_shift_deficiency_bot_flow.py::test_multiline_list_edit_button_lets_user_retype PASSED [ 56%]
+tests/test_shift_deficiency_bot_flow.py::test_single_product_flow_still_works_unchanged PASSED [ 57%]
+tests/test_shift_deficiency_bot_flow.py::test_full_closeshift_still_succeeds_after_clearing_deficiency_gate PASSED [ 58%]
+tests/test_supplier_purchase_listing.py::test_add_purchase_and_get_price_history_round_trip PASSED [ 60%]
+tests/test_supplier_purchase_listing.py::test_get_price_history_none_for_never_purchased_product PASSED [ 61%]
+tests/test_supplier_purchase_listing.py::test_get_price_history_returns_most_recent PASSED [ 62%]
+tests/test_supplier_purchase_listing.py::test_get_price_history_scoped_to_unit PASSED [ 64%]
+tests/test_supplier_purchase_listing.py::test_daily_market_shortage_aggregates_across_branches_by_product_and_unit PASSED [ 65%]
+tests/test_supplier_purchase_listing.py::test_daily_market_shortage_excludes_arrived_items PASSED [ 66%]
+tests/test_supplier_purchase_listing.py::test_daily_market_shortage_includes_previous_days_still_open_items PASSED [ 67%]
+tests/test_supplier_purchase_listing.py::test_daily_market_shortage_excludes_company_category PASSED [ 69%]
+tests/test_supplier_purchase_listing.py::test_confirmed_multiline_list_items_appear_once_in_market_shortage_and_xarid PASSED [ 70%]
+tests/test_supplier_purchase_entry.py::test_should_check_price_increase_true_at_20_percent_threshold PASSED [ 71%]
+tests/test_supplier_purchase_entry.py::test_should_check_price_increase_false_below_threshold PASSED [ 73%]
+tests/test_supplier_purchase_entry.py::test_should_check_price_increase_false_on_decrease PASSED [ 74%]
+tests/test_supplier_purchase_entry.py::test_should_check_price_increase_false_on_unchanged PASSED [ 75%]
+tests/test_supplier_purchase_entry.py::test_should_check_price_increase_false_when_no_history PASSED [ 76%]
+tests/test_supplier_purchase_entry.py::test_check_price_spike_true_when_ai_flags PASSED [ 78%]
+tests/test_supplier_purchase_entry.py::test_check_price_spike_false_when_ai_says_no PASSED [ 79%]
+tests/test_supplier_purchase_entry.py::test_check_price_spike_fail_safe_on_error PASSED [ 80%]
+tests/test_supplier_purchase_entry.py::test_check_price_spike_fail_safe_on_ambiguous_response PASSED [ 82%]
+tests/test_supplier_purchase_entry.py::test_record_purchase_accepts_quantity_above_any_requested_amount PASSED [ 83%]
+tests/test_supplier_purchase_entry.py::test_record_purchase_rejects_non_positive_quantity PASSED [ 84%]
+tests/test_supplier_purchase_entry.py::test_record_purchase_rejects_unknown_unit PASSED [ 85%]
+tests/test_supplier_purchase_entry.py::test_xarid_accepts_real_quantity_above_requested_and_shows_total PASSED [ 87%]
+tests/test_supplier_purchase_entry.py::test_xarid_unchanged_price_button_reuses_last_price PASSED [ 88%]
+tests/test_supplier_purchase_entry.py::test_xarid_new_price_below_threshold_does_not_call_ai PASSED [ 89%]
+tests/test_supplier_purchase_entry.py::test_xarid_price_decrease_does_not_call_ai PASSED [ 91%]
+tests/test_supplier_purchase_entry.py::test_xarid_price_spike_asks_question_and_saves_reason PASSED [ 92%]
+tests/test_supplier_purchase_entry.py::test_xarid_ai_failure_is_fail_safe PASSED [ 93%]
+tests/test_supplier_purchase_entry.py::test_xarid_add_ad_hoc_product_not_in_original_list PASSED [ 94%]
+tests/test_supplier_purchase_entry.py::test_xarid_ad_hoc_product_reuses_price_history_if_previously_bought PASSED [ 96%]
+tests/test_supplier_purchase_entry.py::test_natijam_shows_market_only_stats_for_supplier PASSED [ 97%]
+tests/test_supplier_purchase_entry.py::test_natijam_visible_to_nazoratchi_too PASSED [ 98%]
+tests/test_supplier_purchase_entry.py::test_natijam_denied_for_unrelated_role PASSED [100%]
+
+=================================== FAILURES ===================================
+_______________ test_existing_xarid_shows_only_testers_exact_run _______________
+
+bot_dp = (<module 'main' from '/home/runner/work/Fokus-ai/Fokus-ai/main.py'>, <tests.bot_harness.RecordingBot object at 0x7f614f7ac2f0>)
+
+    async def test_existing_xarid_shows_only_testers_exact_run(bot_dp):
+        main, bot = bot_dp
+        _make_taminotchi(777)
+        real_shift = _open_real_shift(2, "Filial-1", "2026-01-05")
+        shift_deficiency.add_market_item(real_shift["id"], 2, "Bodring", 6, "kg")
+    
+        await send(main.dp, bot, _TESTER_ID, text="/sinovsmena")
+        await send(main.dp, bot, _TESTER_ID, text="Sinov mahsuloti 3 dona")
+        await send_callback(main.dp, bot, _TESTER_ID, data="csdef_list_confirm", target_chat_id=_TESTER_ID)
+    
+        tester_view = " ".join(t for t in texts(await send(main.dp, bot, _TESTER_ID, text="/xarid")) if t)
+>       assert "Sinov mahsuloti" in tester_view
+E       AssertionError: assert 'Sinov mahsuloti' in 'ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.'
+
+tests/test_e2e_test_isolation.py:89: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_e2e_test_isolation.py::test_existing_xarid_shows_only_testers_exact_run - AssertionError: assert 'Sinov mahsuloti' in 'ℹ️ Faol TEST yugurish topilmadi. Avval /sinovsmena bilan boshlang.'
+=================== 1 failed, 69 passed, 8 skipped in 54.99s ===================

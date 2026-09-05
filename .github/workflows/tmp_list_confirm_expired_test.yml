@@ -48,6 +48,10 @@ jobs:
             cat pytest_output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ $status -ne 0 ]; then
+            tail -c 900 pytest_output.txt | tr '\n' '~' > /tmp/tail.txt
+            echo "::error::$(cat /tmp/tail.txt)"
+          fi
           exit $status
       - name: Upload failure output
         if: failure()

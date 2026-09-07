@@ -36,6 +36,7 @@ from services import (
     chat_cleanup,
     deficiency_list_ai,
     e2e_test_access,
+    latency_probe,
     permissions,
     shift_daily_report,
     shift_deficiency,
@@ -393,10 +394,11 @@ async def _advance_deficiency_list(reply_target: Message, state: FSMContext, shi
             f"{_format_deficiency_qty(item['parsed']['quantity'])} {item['parsed']['unit']}"
             for i, item in enumerate(items)
         ]
-        sent = await reply_target.answer(
-            "📋 Ro'yxat tayyor:\n\n" + "\n".join(lines) + "\n\nTasdiqlaysizmi?",
-            reply_markup=_deficiency_list_confirm_kb(),
-        )
+        with latency_probe.time_telegram_send():
+            sent = await reply_target.answer(
+                "📋 Ro'yxat tayyor:\n\n" + "\n".join(lines) + "\n\nTasdiqlaysizmi?",
+                reply_markup=_deficiency_list_confirm_kb(),
+            )
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
         return
 
@@ -999,6 +1001,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(StateFilter(DeficiencyStates.item_name))
     async def deficiency_item_name(message: Message, state: FSMContext) -> None:
+        latency_probe.mark_handler_entry("market_list_submit")
         text = message.text or ""
         lines = deficiency_list_ai.split_lines(text)
 
@@ -1050,8 +1053,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         # xabari sifatida ishlatilmaydi — faqat Telegram mijozining
         # "yuklanmoqda" indikatorini to'xtatadi; allaqachon eskirgan
         # bo'lsa ham global xato handleriga chiqmasligi kerak.
+        latency_probe.mark_handler_entry("list_confirm")
         try:
-            await callback.answer()
+            with latency_probe.time_telegram_send():
+                await callback.answer()
         except TelegramBadRequest:
             pass
 
@@ -1106,7 +1111,8 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 # uchun bu yerda ``message.answer`` (oddiy xabar,
                 # eskirish muddati yo'q) ishlatiladi.
                 if message_available:
-                    await message.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.")
+                    with latency_probe.time_telegram_send():
+                        await message.answer("❌ Saqlashda xatolik, qayta urinib ko'ring.")
                 return
 
             # FSM ro'yxati va tugmalar FAQAT DB tranzaksiyasi
@@ -1115,7 +1121,8 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
             if message_available:
                 try:
-                    await message.edit_reply_markup(reply_markup=None)
+                    with latency_probe.time_telegram_send():
+                        await message.edit_reply_markup(reply_markup=None)
                 except TelegramBadRequest:
                     pass
 
@@ -1125,13 +1132,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 # xabari oddiy ``message.answer`` orqali, real "Yana
                 # qo'shish/Tugatish" ketma-ketligiga kirmaydi.
                 if message_available:
-                    await message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
+                    with latency_probe.time_telegram_send():
+                        await message.answer(f"✅ TEST: {len(added_ids)} ta mahsulot qo'shildi.")
                 return
 
             if message_available:
-                sent = await message.answer(
-                    f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
-                )
+                with latency_probe.time_telegram_send():
+                    sent = await message.answer(
+                        f"✅ {len(added_ids)} ta mahsulot qo'shildi.", reply_markup=_deficiency_more_kb()
+                    )
                 chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
         finally:
             _PENDING_DEFICIENCY_LIST_CONFIRMATIONS.discard(user_id)
@@ -1167,6 +1176,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(Command("sinovsmena"))
     async def e2e_test_start_shift(message: Message, state: FSMContext) -> None:
+        latency_probe.mark_handler_entry("sinovsmena")
         if not await permissions.ensure_permission(message, permissions.ACTION_E2E_TEST_CASH_SHIFT):
             return
 
@@ -1177,7 +1187,8 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         try:
             result = e2e_test_access.start_test_shift(message.from_user.id)
         except e2e_test_access.TestRunStateError as error:
-            await message.answer(f"❌ TEST xatosi: {error}")
+            with latency_probe.time_telegram_send():
+                await message.answer(f"❌ TEST xatosi: {error}")
             return
         if result is None:
             return
@@ -1189,13 +1200,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             e2e_test_run_id=test_run_id,
         )
         await state.set_state(DeficiencyStates.item_name)
-        await message.answer(
-            "🧪 TEST smena boshlandi (real ma'lumotga ta'sir qilmaydi).\n"
-            "Bozor ro'yxatini yozing (bir yoki bir necha qator):"
-        )
+        with latency_probe.time_telegram_send():
+            await message.answer(
+                "🧪 TEST smena boshlandi (real ma'lumotga ta'sir qilmaydi).\n"
+                "Bozor ro'yxatini yozing (bir yoki bir necha qator):"
+            )
 
     @dp.message(Command("sinovtugat"))
     async def e2e_test_finish(message: Message, state: FSMContext) -> None:
+        latency_probe.mark_handler_entry("sinovtugat")
         if not await permissions.ensure_permission(message, permissions.ACTION_E2E_TEST_CASH_SHIFT):
             return
 
@@ -1208,19 +1221,22 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         try:
             result = e2e_test_access.finish_active_test_run(tester_id)
         except e2e_test_access.TestRunStateError as error:
-            await message.answer(f"❌ TEST xatosi: {error}")
+            with latency_probe.time_telegram_send():
+                await message.answer(f"❌ TEST xatosi: {error}")
             return
 
         await state.clear()
 
         if not result["found"]:
-            await message.answer("ℹ️ Faol TEST smena topilmadi.")
+            with latency_probe.time_telegram_send():
+                await message.answer("ℹ️ Faol TEST smena topilmadi.")
             return
 
-        await message.answer(
-            "🧪 TEST smena yakunlandi va tozalandi "
-            f"(o'chirilgan: {result['items_deleted']} pozitsiya, {result['shifts_deleted']} smena)."
-        )
+        with latency_probe.time_telegram_send():
+            await message.answer(
+                "🧪 TEST smena yakunlandi va tozalandi "
+                f"(o'chirilgan: {result['items_deleted']} pozitsiya, {result['shifts_deleted']} smena)."
+            )
 
     @dp.message(StateFilter(DeficiencyStates.item_amount))
     async def deficiency_item_amount(message: Message, state: FSMContext) -> None:

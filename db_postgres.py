@@ -16,11 +16,60 @@ ishlatiladigan naqshlar uchun mo'ljallangan — umumiy SQL parser emas.
 """
 
 import re
+import threading
+import uuid
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 from schema import SCHEMA_STATEMENTS
+
+# Har bir ``PgConnection`` chaqiruvi avval to'g'ridan-to'g'ri
+# ``psycopg2.connect()`` ochardi -- production'da bitta buyruq 6-11
+# marta yangi FIZIK ulanish ochib, ``LATENCY_PROBE`` bo'yicha
+# eng katta o'lchangan kechikish shu edi (qarang I/S "POSTGRES
+# CONNECTION POOL" vazifasi). Endi DSN bo'yicha bitta jarayon-lokal
+# ``ThreadedConnectionPool`` LAZY (birinchi haqiqiy DB ishlatilganda,
+# modul import vaqtida EMAS) yaratiladi va fizik ulanishlar shu
+# to'plamdan QAYTA ISHLATILADI.
+_MIN_POOL_SIZE = 1
+_MAX_POOL_SIZE = 5
+
+_pools: dict[str, "psycopg2.pool.ThreadedConnectionPool"] = {}
+_pools_lock = threading.Lock()
+
+
+def _get_pool(dsn: str) -> "psycopg2.pool.ThreadedConnectionPool":
+    pool_obj = _pools.get(dsn)
+    if pool_obj is not None:
+        return pool_obj
+    with _pools_lock:
+        pool_obj = _pools.get(dsn)
+        if pool_obj is None:
+            # ``cursor_factory`` shu yerda uzatiladi -- pool yaratgan
+            # HAR BIR fizik ulanish ``RealDictCursor``ni saqlab qoladi,
+            # ``PgConnection`` alohida uni qayta o'rnatishi shart emas.
+            pool_obj = psycopg2.pool.ThreadedConnectionPool(
+                _MIN_POOL_SIZE, _MAX_POOL_SIZE, dsn, cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            _pools[dsn] = pool_obj
+    return pool_obj
+
+
+def close_all_pools() -> None:
+    """Ilova to'xtaganda (graceful shutdown) barcha ochiq pool
+    ulanishlarini yopadi -- qarang ``main.py``dagi ``finally`` bloki.
+    Qayta chaqirish xavfsiz (bo'sh reestr uchun hech narsa qilmaydi)."""
+    with _pools_lock:
+        pools = list(_pools.items())
+        _pools.clear()
+    for dsn, pool_obj in pools:
+        try:
+            pool_obj.closeall()
+        except Exception:  # noqa: BLE001
+            pass
+
 
 _PLACEHOLDER_RE = re.compile(r"\?")
 _AUTOINCREMENT_RE = re.compile(r"INTEGER PRIMARY KEY AUTOINCREMENT", re.IGNORECASE)
@@ -125,8 +174,22 @@ class PgConnection:
         # ``PgConnection``ni shu sababdan LOKAL import qilgani kabi).
         from services import latency_probe
 
+        self._closed = False
+        # ``ThreadedConnectionPool``ning standart kaliti (``key=None``)
+        # chaqiruvchi OS THREAD identifikatoriga asoslanadi -- bu ilova
+        # to'liq bitta asyncio event loop'da (bitta thread) ishlagani
+        # uchun, agar biror joyda ikkita ulanish BIR VAQTDA (masalan
+        # ichki chaqiruv tashqi ulanish yopilmasdan turib) ochilsa,
+        # standart kalit ikkalasiga ХУДДИ SHU fizik ulanishni qaytarib
+        # yuborardi (noto'g'ri umumiy tranzaksiya). Shuning uchun har
+        # bir ``PgConnection`` instansiyasi o'zining NOYOB kalitini
+        # oladi -- pool ichida fizik ulanishlar qayta ishlatiladi, lekin
+        # har bir mantiqiy checkout mustaqil hisoblanadi (avvalgi
+        # to'g'ridan-to'g'ri ``psycopg2.connect()``dagi kabi).
+        self._pool_key = uuid.uuid4()
+        self._pool = _get_pool(dsn)
         with latency_probe.time_db_connect():
-            self._conn = psycopg2.connect(dsn, cursor_factory=psycopg2.extras.RealDictCursor)
+            self._conn = self._pool.getconn(self._pool_key)
 
     # sqlite3.Connection'da hech qanday amal bermaydi (Postgres FK'ni
     # doim majburlaydi) — chaqiruvchi tomon (``db.get_connection()``)
@@ -189,4 +252,42 @@ class PgConnection:
             self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
+        # Idempotent: chaqiruvchi kod (masalan ikkinchi marta bosilgan
+        # tugma yo'lidagi ``finally``) ba'zan ``close()``ni ikki marta
+        # chaqirishi mumkin -- ikkinchisi hech narsa qilmaydi.
+        if self._closed:
+            return
+        self._closed = True
+
+        conn = self._conn
+        try:
+            if conn.closed:
+                # Fizik ulanish allaqachon uzilgan/buzilgan -- pool'ga
+                # QAYTA ISHLATISH uchun emas, BUTUNLAY tashlab yuborish
+                # uchun beriladi (``close=True``), aks holda keyingi
+                # ``getconn()`` o'lik ulanishni qaytarib yuborardi.
+                self._pool.putconn(conn, key=self._pool_key, close=True)
+                return
+
+            try:
+                # Tugallanmagan/muvaffaqiyatsiz tranzaksiya keyingi
+                # foydalanuvchiga sizib o'tmasin -- ``commit()``
+                # chaqirilmagan har qanday o'zgarish shu yerda bekor
+                # qilinadi (mavjud xatti-harakat: chaqiruvchi kod
+                # tranzaksiyani xohlasa ANIQ ``commit()`` chaqiradi).
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                # Rollback o'zi yiqilsa (masalan server aloqani kutilmagan
+                # tarzda uzgan bo'lsa) -- ulanish ishonchsiz, tashlab
+                # yuboriladi.
+                self._pool.putconn(conn, key=self._pool_key, close=True)
+                return
+
+            self._pool.putconn(conn, key=self._pool_key)
+        except Exception:  # noqa: BLE001
+            # So'nggi zaxira: checkout qilingan ulanish HECH QACHON
+            # pool hisobida "sizib qolmasligi" kerak.
+            try:
+                self._pool.putconn(conn, key=self._pool_key, close=True)
+            except Exception:  # noqa: BLE001
+                pass

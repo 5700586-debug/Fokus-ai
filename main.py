@@ -136,7 +136,24 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
         message: Message | None = getattr(event, "message", None)
         text = getattr(message, "text", None) or ""
         state: FSMContext | None = data.get("state")
-        current_state = await state.get_state() if state is not None else None
+
+        # Aiogram'ning O'ZINING FSM-kontekst middleware'i (bu ikkita
+        # ``dp.update.outer_middleware``dan ham OLDIN ishlaydi, qarang
+        # ``_SandboxPreviewMiddleware`` docstringi) ``data["raw_state"]``ni
+        # ALLAQACHON bitta ``state.get_state()`` chaqiruvi bilan to'ldirib
+        # qo'ygan bo'ladi (aiogram/fsm/middleware.py). Shu keshlangan
+        # qiymat qayta ishlatiladi — PostgreSQL FSM storage'ga
+        # (``storage.py`` -> ``db.get_connection()``) HAR bir Update
+        # uchun qo'shimcha so'rov yubormasdan. Kalit mutlaqo yo'q bo'lgan
+        # kamdan-kam moslik holati (masalan qo'lda tuzilgan ``data``)
+        # uchungina zaxira sifatida ANIQ BIR MARTA to'g'ridan-to'g'ri
+        # so'raladi.
+        if "raw_state" in data:
+            current_state = data["raw_state"]
+        elif state is not None:
+            current_state = await state.get_state()
+        else:
+            current_state = None
 
         # Bir martalik onboarding havolasini anketa davomida qayta bosish
         # anketani o'chirmasin. Xodim mavjud FSM ma'lumoti va joriy
@@ -168,11 +185,9 @@ class _ClearStaleStateMiddleware(BaseMiddleware):
             or text in _TOP_LEVEL_NAV_TEXTS
         )
 
-        if looks_like_escape:
-            state: FSMContext | None = data.get("state")
-            if state is not None and await state.get_state() is not None:
-                await state.clear()
-                data["raw_state"] = None
+        if looks_like_escape and state is not None and current_state is not None:
+            await state.clear()
+            data["raw_state"] = None
 
         return await handler(event, data)
 
@@ -211,6 +226,18 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
             callback.from_user if callback is not None else None
         )
         if user is None:
+            return await handler(event, data)
+
+        # Preview (Rol testi) FAQAT ``ENVIRONMENT=test``da va FAQAT
+        # Founder uchun mavjud (qarang pastdagi ``_ROLE_TEST_ENTRY_TEXT``
+        # tekshiruvi va sinf docstringi) — boshqa HAR QANDAY Update
+        # (production'dagi har bir foydalanuvchi, test muhitidagi
+        # Founder bo'lmagan har bir xodim) uchun shu yerda ZUDLIK bilan
+        # pastga o'tkaziladi, ``state.get_data()`` chaqirilmasdan — bu
+        # PostgreSQL FSM storage'ga (``storage.py`` -> ``db.get_
+        # connection()``) HAR bir Update uchun keraksiz qo'shimcha
+        # so'rov edi.
+        if ENVIRONMENT != "test" or user.id != FOUNDER_ID:
             return await handler(event, data)
 
         state: FSMContext | None = data.get("state")

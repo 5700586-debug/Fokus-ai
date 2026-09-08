@@ -232,6 +232,19 @@ def get_connection():
     return conn
 
 
+def close_all_pools() -> None:
+    """Ilova to'xtaganda (graceful shutdown, qarang ``main.py``)
+    chaqiriladi. SQLite rejimida yoki hali birorta Postgres ulanishi
+    ochilmagan bo'lsa hech narsa qilmaydi -- ``db_postgres`` faqat
+    kerak bo'lgandagina (Postgres yoqilgan bo'lsa) import qilinadi."""
+    if not _DATABASE_URL:
+        return
+
+    from db_postgres import close_all_pools as _close_all_pools
+
+    _close_all_pools()
+
+
 def _ensure_additive_columns(conn) -> None:
     if _DATABASE_URL:
         for table, column, coltype in _ADDITIVE_COLUMNS:

@@ -28,7 +28,7 @@ from openai import AsyncOpenAI
 # hali yaratilmagan jadvalga so'rov yuboriladi.
 load_dotenv()
 
-from db import init_db  # noqa: E402
+from db import close_all_pools, init_db  # noqa: E402
 
 try:
     init_db()
@@ -1943,6 +1943,7 @@ async def main() -> None:
         discipline_scheduler.shutdown(wait=False)
         saturn_group_scheduler.shutdown(wait=False)
         recruiting_retention_scheduler.shutdown(wait=False)
+        close_all_pools()
         await bot.session.close()
 
 

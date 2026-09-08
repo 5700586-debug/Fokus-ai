@@ -49,6 +49,43 @@ def get_price_history(product_name: str, unit: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_price_history_batch(product_keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """``get_price_history()``ning ko'p mahsulotli, N+1'siz varianti --
+    ``/xarid`` ro'yxatini yuklashda har bir mahsulot uchun alohida
+    so'rov o'rniga, berilgan barcha (product_name, unit) juftliklari
+    uchun eng oxirgi xarid qatorini BITTA ulanish va BITTA SELECT bilan
+    qaytaradi. ``ROW_NUMBER() OVER (PARTITION BY ...)`` SQLite (3.25+)
+    va Postgres'da bir xil sintaksis -- alohida dialekt tarjimasi shart
+    emas. Mahsulot nomi/birlik HECH QACHON SQL matniga interpolatsiya
+    qilinmaydi -- faqat parametrlashtirilgan ``?`` o'rin
+    egallovchilar orqali. Tarixi yo'q juftlik natija xaritasida umuman
+    bo'lmaydi (chaqiruvchi ``.get(key)`` orqali ``None``ga tushadi).
+    """
+    unique_keys = list(dict.fromkeys(product_keys))
+    if not unique_keys:
+        return {}
+
+    placeholders = ", ".join("(?, ?)" for _ in unique_keys)
+    params: list[str] = [value for pair in unique_keys for value in pair]
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM ("
+            "  SELECT *, ROW_NUMBER() OVER ("
+            "    PARTITION BY product_name, unit ORDER BY purchase_date DESC, id DESC"
+            "  ) AS rn "
+            "  FROM supplier_purchases "
+            f"  WHERE (product_name, unit) IN ({placeholders})"
+            ") ranked WHERE rn = 1",
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return {(row["product_name"], row["unit"]): dict(row) for row in rows}
+
+
 def add_allocation(purchase_id: int, branch: str, quantity: float) -> int:
     conn = get_connection()
     try:

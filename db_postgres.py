@@ -17,7 +17,6 @@ ishlatiladigan naqshlar uchun mo'ljallangan — umumiy SQL parser emas.
 
 import re
 import threading
-import uuid
 
 import psycopg2
 import psycopg2.extras
@@ -175,21 +174,18 @@ class PgConnection:
         from services import latency_probe
 
         self._closed = False
-        # ``ThreadedConnectionPool``ning standart kaliti (``key=None``)
-        # chaqiruvchi OS THREAD identifikatoriga asoslanadi -- bu ilova
-        # to'liq bitta asyncio event loop'da (bitta thread) ishlagani
-        # uchun, agar biror joyda ikkita ulanish BIR VAQTDA (masalan
-        # ichki chaqiruv tashqi ulanish yopilmasdan turib) ochilsa,
-        # standart kalit ikkalasiga ХУДДИ SHU fizik ulanishni qaytarib
-        # yuborardi (noto'g'ri umumiy tranzaksiya). Shuning uchun har
-        # bir ``PgConnection`` instansiyasi o'zining NOYOB kalitini
-        # oladi -- pool ichida fizik ulanishlar qayta ishlatiladi, lekin
-        # har bir mantiqiy checkout mustaqil hisoblanadi (avvalgi
-        # to'g'ridan-to'g'ri ``psycopg2.connect()``dagi kabi).
-        self._pool_key = uuid.uuid4()
+        # ``key=None`` -- ``AbstractConnectionPool._getkey()`` HAR BIR
+        # ``getconn()`` chaqiruvi uchun o'zi yangi, noyob raqamli kalit
+        # yaratadi (oddiy o'suvchi hisoblagich, OS thread identifikatori
+        # EMAS -- psycopg2/pool.py: ``self._keys += 1; return
+        # self._keys``), shuning uchun bir vaqtning o'zida (yoki
+        # ichma-ich) ochilgan ikkita ulanish hech qachon bitta fizik
+        # ulanishga to'qnashmaydi. ``putconn()`` ham ``key=None`` bilan
+        # xavfsiz -- ichki ``_rused`` (``id(conn) -> key``) teskari
+        # xaritasi orqali qaysi kalit ekanini o'zi topadi.
         self._pool = _get_pool(dsn)
         with latency_probe.time_db_connect():
-            self._conn = self._pool.getconn(self._pool_key)
+            self._conn = self._pool.getconn()
 
     # sqlite3.Connection'da hech qanday amal bermaydi (Postgres FK'ni
     # doim majburlaydi) — chaqiruvchi tomon (``db.get_connection()``)
@@ -266,7 +262,9 @@ class PgConnection:
                 # QAYTA ISHLATISH uchun emas, BUTUNLAY tashlab yuborish
                 # uchun beriladi (``close=True``), aks holda keyingi
                 # ``getconn()`` o'lik ulanishni qaytarib yuborardi.
-                self._pool.putconn(conn, key=self._pool_key, close=True)
+                # ``key`` uzatilmaydi -- pool o'zining ``_rused``
+                # (``id(conn) -> key``) teskari xaritasidan topadi.
+                self._pool.putconn(conn, close=True)
                 return
 
             try:
@@ -280,14 +278,14 @@ class PgConnection:
                 # Rollback o'zi yiqilsa (masalan server aloqani kutilmagan
                 # tarzda uzgan bo'lsa) -- ulanish ishonchsiz, tashlab
                 # yuboriladi.
-                self._pool.putconn(conn, key=self._pool_key, close=True)
+                self._pool.putconn(conn, close=True)
                 return
 
-            self._pool.putconn(conn, key=self._pool_key)
+            self._pool.putconn(conn)
         except Exception:  # noqa: BLE001
             # So'nggi zaxira: checkout qilingan ulanish HECH QACHON
             # pool hisobida "sizib qolmasligi" kerak.
             try:
-                self._pool.putconn(conn, key=self._pool_key, close=True)
+                self._pool.putconn(conn, close=True)
             except Exception:  # noqa: BLE001
                 pass

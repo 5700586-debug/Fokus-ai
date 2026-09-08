@@ -109,7 +109,7 @@ def test_double_close_is_harmless():
 def test_exception_between_get_and_close_cannot_leak_checked_out_connection():
     conn = db.get_connection()
     pool_obj = conn._pool
-    key = conn._pool_key
+    physical_id = id(conn._conn)
 
     try:
         try:
@@ -119,7 +119,28 @@ def test_exception_between_get_and_close_cannot_leak_checked_out_connection():
     except RuntimeError:
         pass
 
-    assert key not in pool_obj._used, "checkout qilingan ulanish pool hisobida sizib qolgan"
+    # ``_rused`` -- pool ichidagi ``id(conn) -> key`` teskari xaritasi
+    # (qarang psycopg2/pool.py). Agar checkout hali ham "ochiq" hisoblansa,
+    # bu fizik ulanish shu xaritada qolgan bo'lardi.
+    assert physical_id not in pool_obj._rused, "checkout qilingan ulanish pool hisobida sizib qolgan"
+
+
+def test_simultaneous_checkouts_receive_different_physical_connections():
+    """``getconn()``ning avtomatik yaratilgan kaliti (psycopg2/pool.py
+    ``_getkey()`` -- oddiy o'suvchi hisoblagich, kalit ATAYLAB
+    uzatilmasa ham) ikkita BIR VAQTDA ochiq ``PgConnection`` hech qachon
+    bitta xuddi shu fizik ulanishga (demak bitta umumiy tranzaksiyaga)
+    to'qnashmasligini ta'minlaydi -- ikkinchisi birinchisi YOPILMASDAN
+    turib ochiladi."""
+    conn_a = db.get_connection()
+    conn_b = db.get_connection()
+    try:
+        assert id(conn_a._conn) != id(conn_b._conn), (
+            "bir vaqtda ochilgan ikkita ulanish bitta xuddi shu fizik ulanishni olib qo'ydi"
+        )
+    finally:
+        conn_a.close()
+        conn_b.close()
 
 
 def test_different_dsns_get_independent_pools(monkeypatch):

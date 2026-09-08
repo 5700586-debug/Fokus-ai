@@ -779,15 +779,27 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     def _load_products_with_price() -> list[dict]:
         products = shift_deficiency.get_daily_market_shortage()
+        # N+1 o'rniga: har bir mahsulot uchun alohida ``get_price_history``
+        # chaqirish o'rniga, butun ro'yxat uchun BITTA batch so'rov --
+        # ``/xarid`` production'da eng katta o'lchangan DB yo'li edi
+        # (qarang ``services/latency_probe.py``, ``db_query_ms``/
+        # ``db_connections``). Mahsulot tartibi va boshqa maydonlar
+        # o'zgarishsiz -- faqat ``last_price`` ustidan yozib qo'yiladi.
+        price_history = supplier_purchases_repo.get_price_history_batch(
+            [(product["product_name"], product["unit"]) for product in products]
+        )
         for product in products:
-            last = supplier_purchases_repo.get_price_history(product["product_name"], product["unit"])
+            last = price_history.get((product["product_name"], product["unit"]))
             product["last_price"] = last["unit_price"] if last else None
         return products
 
     def _load_test_products_with_price(test_run_id: str) -> list[dict]:
         products = shift_deficiency.get_test_market_shortage(test_run_id)
+        price_history = supplier_purchases_repo.get_price_history_batch(
+            [(product["product_name"], product["unit"]) for product in products]
+        )
         for product in products:
-            last = supplier_purchases_repo.get_price_history(product["product_name"], product["unit"])
+            last = price_history.get((product["product_name"], product["unit"]))
             product["last_price"] = last["unit_price"] if last else None
         return products
 

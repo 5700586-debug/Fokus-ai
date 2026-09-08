@@ -186,7 +186,8 @@ def end_update() -> None:
             f"db_connections={state.db_connections} "
             f"db_queries={state.db_queries} "
             f"telegram_send_ms={_ms(state.telegram_send_total)} "
-            f"handler_total_ms={handler_total_ms}"
+            f"handler_total_ms={handler_total_ms}",
+            flush=True,
         )
     except Exception:  # noqa: BLE001
         pass

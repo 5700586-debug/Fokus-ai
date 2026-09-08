@@ -58,6 +58,33 @@ def test_probe_user_id_constant_matches_roles_e2e_tester_id():
     assert latency_probe._PROBE_USER_ID == roles.E2E_TESTER_TELEGRAM_ID
 
 
+def test_end_update_print_requests_immediate_flush(monkeypatch):
+    """Render kabi buferlangan muhitlarda ``LATENCY_PROBE`` qatori
+    Python'ning ichki stdout buferida "qotib" qolmasligi kerak.
+    Oddiy ``capsys`` orqali chiqish KO'RINISHI buferlash real ravishda
+    darhol tozalanganini ISBOTLAMAYDI (``capsys`` pytest ichida
+    ``sys.stdout``ni almashtiradi, OS pipe buferlash bilan bog'liq
+    emas) — shuning uchun bu yerda ``builtins.print``ning O'ZI
+    ushlanadi va ``LATENCY_PROBE`` chaqiruvi ANIQ ``flush=True`` kalit
+    so'zi bilan qilinganini tekshiradi. Bir yo'la ``end_update()`` bir
+    o'lchangan Update uchun ANIQ bitta ``LATENCY_PROBE`` qatori
+    chiqarishini ham tasdiqlaydi."""
+    from services import latency_probe
+
+    calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    latency_probe.begin_update(latency_probe._PROBE_USER_ID)
+    latency_probe.mark_handler_entry("sinovsmena")
+    latency_probe.end_update()
+
+    probe_calls = [(args, kwargs) for args, kwargs in calls if args and str(args[0]).startswith("LATENCY_PROBE")]
+    assert len(probe_calls) == 1, f"bitta o'lchangan Update uchun aynan bitta LATENCY_PROBE qatori kutilgan edi, topildi: {len(probe_calls)}"
+
+    _, print_kwargs = probe_calls[0]
+    assert print_kwargs.get("flush") is True, "LATENCY_PROBE print() chaqiruvida flush=True yo'q"
+
+
 async def test_non_tester_produces_no_latency_probe_logs(bot_dp, capsys):
     main, bot = bot_dp
     _make_taminotchi(999999001)

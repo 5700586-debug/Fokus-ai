@@ -234,6 +234,8 @@ async def test_shortage_over_tolerance_notifies_only_branch_supervisor_and_finan
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -259,6 +261,8 @@ async def test_shortage_within_tolerance_sends_no_supervisor_notification(bot_dp
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -281,6 +285,8 @@ async def test_shortage_notification_respects_branch_isolation(bot_dp):
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")

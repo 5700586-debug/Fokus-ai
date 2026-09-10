@@ -1,12 +1,16 @@
 """Kassir kunlik smena nazorati — bot komandalari.
 
 ``services/cash_shift.py`` va ``services/cash_expense.py`` biznes
-logikani ushlab turadi, bu modul faqat Telegram interfeysi. Rasmdan
-raqam avtomatik o'qilmaydi (``providers/vision_extraction_provider.py``
-hali Null) — kassir savdo/xarajat/qoldiq raqamlarini har doim qo'lda
-kiritadi, rasmlar faqat hujjat sifatida ilova qilinadi.
+logikani ushlab turadi, bu modul faqat Telegram interfeysi.
+``config.VISION_EXTRACTION_ENABLED`` yoqilgan bo'lsa, savdo/kassa
+rasmlaridan asosiy summalar ``providers/vision_extraction_provider.py``
+orqali avtomatik o'qiladi — kassir faqat AI tushunmagan qatorni qo'lda
+kiritadi. O'chirilgan bo'lsa yoki AI xato/timeout bersa, avvalgi to'liq
+qo'lda kiritish oqimi o'zgarishsiz ishlayveradi.
 """
 
+import asyncio
+import base64
 import re
 
 import company_time
@@ -29,6 +33,11 @@ from openai import AsyncOpenAI
 from config import FOUNDER_ID
 from employees import STATUS_APPROVED, get_profile, list_approved_by_branch
 from providers.file_storage import get_file_storage_provider
+from providers.vision_extraction_provider import (
+    CASH_SHIFT_CASH_REPORT,
+    CASH_SHIFT_SALES_REPORT,
+    get_vision_extraction_provider,
+)
 from roles import is_e2e_tester
 from services import (
     cash_expense,
@@ -167,6 +176,7 @@ class CloseShiftStates(StatesGroup):
     confirm_handover_start = State()
     actual_cash_balance = State()
     confirm_actual_balance = State()
+    ai_unclear_field = State()
 
 
 class ExpenseStates(StatesGroup):
@@ -202,6 +212,128 @@ def _format_signed_amount(value: int) -> str:
 
 def _format_amount(value: int) -> str:
     return f"{value:,}".replace(",", " ")
+
+
+# AI orqali oldindan to'ldirilishi mumkin bo'lgan aynan shu 4 ta maydon —
+# mavjud qo'lda kiritish zanjiridagi bilan bir xil kalitlar
+# (``closeshift_cash_sales``/``card_sales``/``other_payments``/
+# ``actual_cash_balance``), shuning uchun ``submit_close_attempt``
+# chaqiruvi o'zgarishsiz qoladi.
+_AI_FIELD_ORDER = ["cash_sales", "card_sales", "other_payments", "actual_cash_balance"]
+_AI_FIELD_LABELS = {
+    "cash_sales": "Bugungi naqd savdo",
+    "card_sales": "Bugungi karta savdo",
+    "other_payments": "Boshqa to'lovlar",
+    "actual_cash_balance": "Kassadagi haqiqiy naqd qoldiq",
+}
+_VISION_EXTRACTION_TIMEOUT_SECONDS = 20
+
+
+def _ai_summary_confirm_kb() -> InlineKeyboardMarkup:
+    # Aynan ``csui_close_amount_ok``/``csui_close_amount_retry`` — mavjud
+    # ``closeshift_amount_confirmed``/``closeshift_amount_retry``
+    # handlerlarini o'zgarishsiz qayta ishlatish uchun, faqat tugma matni
+    # AI-xulosa ekraniga mos ("Tasdiqlash"/"Tuzatish").
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="csui_close_amount_ok"),
+        InlineKeyboardButton(text="✏️ Tuzatish", callback_data="csui_close_amount_retry"),
+    ]])
+
+
+async def _download_photo_data_uri(bot, file_id: str) -> str | None:
+    """Telegram ``file_id``ni vision API tushunadigan ``data:`` URI'ga
+    aylantiradi — shunda ``VisionExtractionProvider`` Telegramdan
+    butunlay mustaqil qoladi (faqat rasm manzili sifatida qabul qiladi)."""
+    try:
+        file = await bot.get_file(file_id)
+        buffer = await bot.download_file(file.file_path)
+        encoded = base64.b64encode(buffer.read()).decode("ascii")
+    except Exception as error:  # noqa: BLE001
+        print(f"Rasm yuklab olishda xato (vision extraction): {error!r}")
+        return None
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+async def _extract_cash_shift_fields(
+    bot, openai_client: AsyncOpenAI, sales_file_id: str, cash_file_id: str
+) -> dict[str, int] | None:
+    """AI o'qishga urinadi. ``None`` — AI butunlay ishlamadi/o'chirilgan
+    (chaqiruvchi mavjud qo'lda kiritish oqimidan foydalanishi kerak,
+    PHASE2 #11). Bo'sh yoki to'liq bo'lmagan dict — AI ishladi, lekin
+    ba'zi/barcha maydonlarni "unclear" deb hisoblади (chaqiruvchi faqat
+    o'sha maydonlarni so'raydi, PHASE2 #9/#10)."""
+    provider = get_vision_extraction_provider(openai_client)
+    if not provider.is_enabled():
+        return None
+
+    try:
+        sales_uri = await _download_photo_data_uri(bot, sales_file_id)
+        cash_uri = await _download_photo_data_uri(bot, cash_file_id)
+        if sales_uri is None or cash_uri is None:
+            return None
+
+        sales_result, cash_result = await asyncio.wait_for(
+            asyncio.gather(
+                provider.extract(sales_uri, CASH_SHIFT_SALES_REPORT),
+                provider.extract(cash_uri, CASH_SHIFT_CASH_REPORT),
+            ),
+            timeout=_VISION_EXTRACTION_TIMEOUT_SECONDS,
+        )
+    except Exception as error:  # noqa: BLE001
+        print(f"Vision extraction xatosi (cash_shift): {error!r}")
+        return None
+
+    if not sales_result.confident and not cash_result.confident:
+        return None
+
+    # Ikki rasm orasida bog'liq qiymat ziddiyati (PHASE2 #9, oxirgi
+    # shart) — bir xil maydon ikkala rasmdan turlicha o'qilsa, ikkalasi
+    # ham unclear hisoblanadi.
+    merged: dict[str, str] = {}
+    conflicts: set[str] = set()
+    for result in (sales_result, cash_result):
+        for key, value in result.values.items():
+            if key in merged and merged[key] != value:
+                conflicts.add(key)
+            else:
+                merged[key] = value
+    for key in conflicts:
+        merged.pop(key, None)
+
+    clear_fields: dict[str, int] = {}
+    for field in _AI_FIELD_ORDER:
+        if field not in merged:
+            continue
+        amount = _parse_amount(merged[field])
+        if amount is not None and amount >= 0:
+            clear_fields[field] = amount
+
+    return clear_fields
+
+
+async def _ask_next_ai_field_or_summary(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    queue = list(data.get("_ai_unclear_queue") or [])
+
+    if queue:
+        await state.set_state(CloseShiftStates.ai_unclear_field)
+        field = queue[0]
+        sent = await message.answer(
+            f"⚠️ {_AI_FIELD_LABELS[field]} summasini tushunmadim. Faqat shu summani yozing."
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        return
+
+    await state.set_state(CloseShiftStates.confirm_actual_balance)
+    data = await state.get_data()
+    summary = "\n".join(
+        f"• {_AI_FIELD_LABELS[field]}: {_format_amount(data[field])} so'm" for field in _AI_FIELD_ORDER
+    )
+    sent = await message.answer(
+        f"🤖 AI o'qigan qiymatlar:\n\n{summary}\n\nTo'g'rimi?",
+        reply_markup=_ai_summary_confirm_kb(),
+    )
+    chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
 
 def _confirm_handover_start_kb() -> InlineKeyboardMarkup:
@@ -276,6 +408,31 @@ async def _send_shift_for_review(message: Message, shift: dict) -> None:
 
     for recipient_id in recipients:
         await message.bot.send_message(recipient_id, text, reply_markup=_review_keyboard(shift["id"]))
+
+
+async def _notify_branch_shortage(message: Message, shift: dict) -> None:
+    """QARORLAR #1/#2 (Founder tasdig'i): oddiy kamomad
+    ``cash_shift.tolerance``dan oshsa — FAQAT shu kamomad chiqqan
+    filialga biriktirilgan ``savdo_boshligi`` va global ``moliyachi``
+    xabardor qilinadi. Founder/nazoratchi bu yerga UMUMAN kirmaydi —
+    ular faqat retry tugab ``NEEDS_SUPERVISOR_APPROVAL`` bo'lganda,
+    mavjud ``_send_shift_for_review`` orqali (QARORLAR #5)."""
+    card = _format_shift_summary(shift)
+    text = "🟠 Kassa farqi tolerance'dan oshdi — filial rahbari tekshiruvi kerak.\n\n" + card
+
+    recipients: set[int] = set()
+    for employee in list_approved_by_branch(shift["branch"]):
+        if employee.get("role_key") == "savdo_boshligi":
+            recipients.add(employee["user_id"])
+
+    from roles import find_user_by_role
+
+    moliyachi_id = find_user_by_role("moliyachi")
+    if moliyachi_id is not None:
+        recipients.add(moliyachi_id)
+
+    for recipient_id in recipients:
+        await message.bot.send_message(recipient_id, text)
 
 
 async def _send_discrepancy_alert(
@@ -1537,13 +1694,47 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         cash_shifts_repo.set_cash_report_photo(data["shift_id"], file_id)
 
-        await state.set_state(CloseShiftStates.cash_sales)
-        sent = await message.answer("Bugungi naqd savdo summasini kiriting:")
-        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        shift = cash_shift.get_shift(data["shift_id"])
+        sales_file_id = shift.get("sales_report_photo_ref") if shift else None
+
+        extracted = None
+        if sales_file_id:
+            extracted = await _extract_cash_shift_fields(
+                message.bot, openai_client, sales_file_id, file_id
+            )
+
+        if extracted is None:
+            # AI o'chirilgan/butunlay ishlamadi — mavjud qo'lda kiritish
+            # oqimi AYNAN o'zgarishsiz davom etadi (PHASE2 #11).
+            await state.set_state(CloseShiftStates.cash_sales)
+            sent = await message.answer("Bugungi naqd savdo summasini kiriting:")
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+            return
+
+        await state.update_data(**extracted)
+        unclear_queue = [field for field in _AI_FIELD_ORDER if field not in extracted]
+        await state.update_data(_ai_unclear_queue=unclear_queue)
+        await _ask_next_ai_field_or_summary(message, state)
 
     @dp.message(StateFilter(CloseShiftStates.cash_photo))
     async def closeshift_cash_photo_missing(message: Message) -> None:
         await message.answer("❌ Iltimos, rasmni surat (photo) sifatida yuboring.")
+
+    @dp.message(StateFilter(CloseShiftStates.ai_unclear_field))
+    async def closeshift_ai_unclear_field(message: Message, state: FSMContext) -> None:
+        amount = _parse_amount(message.text or "")
+        if amount is None or amount < 0:
+            await message.answer("❌ Faqat musbat raqam kiriting.")
+            return
+
+        data = await state.get_data()
+        queue = list(data.get("_ai_unclear_queue") or [])
+        if not queue:
+            await state.set_state(CloseShiftStates.cash_sales)
+            return
+        field = queue.pop(0)
+        await state.update_data(**{field: amount}, _ai_unclear_queue=queue)
+        await _ask_next_ai_field_or_summary(message, state)
 
     @dp.message(StateFilter(CloseShiftStates.cash_sales))
     async def closeshift_cash_sales(message: Message, state: FSMContext) -> None:
@@ -1659,16 +1850,24 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 await callback.answer()
                 return
 
+            shift = cash_shift.get_shift(shift_id)
+
             if result.needs_supervisor:
                 await state.clear()
-                shift = cash_shift.get_shift(shift_id)
                 sent = await callback.message.answer(
                     "🔴 Farq hali yopilmadi. Smena Nazoratchi/Founder tekshiruviga yuborildi."
                 )
                 chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
                 await _send_shift_for_review(callback.message, shift)
+                await _notify_branch_shortage(callback.message, shift)
                 await callback.answer()
                 return
+
+            # QARORLAR #2: oddiy kamomad (retry hali qolgan) ham filial
+            # rahbari + moliyachini xabardor qiladi — mavjud
+            # ``result.finalized``/``needs_supervisor`` (allaqachon
+            # hisoblangan) shoxlari asosida, yangi taqqoslash yozilmadi.
+            await _notify_branch_shortage(callback.message, shift)
 
             await state.set_state(CloseShiftStates.cash_sales)
             sent = await callback.message.answer(

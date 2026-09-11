@@ -176,7 +176,7 @@ async def test_expense_requires_open_shift(bot_dp):
     _make_kassir(111)
 
     sent = await send(main.dp, bot, 111, text="/expense")
-    assert "avval /openshift" in sent[0].text.lower()
+    assert "🟢 Smenani boshlash" in sent[0].text
 
 
 async def test_expense_full_flow_no_anomaly(bot_dp):
@@ -262,6 +262,8 @@ async def test_closeshift_shows_confirm_amount_buttons(bot_dp):
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -366,6 +368,8 @@ async def test_closeshift_recheck_then_success(bot_dp):
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -389,6 +393,8 @@ async def test_closeshift_escalates_to_supervisor_after_retry_limit(bot_dp):
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")
@@ -423,6 +429,8 @@ async def test_supervisor_approve_finalizes_and_notifies_kassir(bot_dp):
     for i in range(3):
         await send(main.dp, bot, 111, text="/closeshift")
         if i == 0:
+            await _clear_deficiency_gate(main, bot, 111)
+            await _clear_daily_report_gate(main, bot, 111)
             await send(main.dp, bot, 111, photo_file_id="sales_photo")
             await send(main.dp, bot, 111, photo_file_id="cash_photo")
         await send(main.dp, bot, 111, text="100000")
@@ -481,6 +489,8 @@ async def test_non_supervisor_cannot_approve(bot_dp):
     for i in range(3):
         await send(main.dp, bot, 111, text="/closeshift")
         if i == 0:
+            await _clear_deficiency_gate(main, bot, 111)
+            await _clear_daily_report_gate(main, bot, 111)
             await send(main.dp, bot, 111, photo_file_id="sales_photo")
             await send(main.dp, bot, 111, photo_file_id="cash_photo")
         await send(main.dp, bot, 111, text="100000")
@@ -961,6 +971,8 @@ async def test_kassir_choice_buttons_are_two_per_row(bot_dp):
     await _open_shift(main, bot, 111, "0")
 
     await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
     await send(main.dp, bot, 111, photo_file_id="sales_photo")
     await send(main.dp, bot, 111, photo_file_id="cash_photo")
     await send(main.dp, bot, 111, text="100000")

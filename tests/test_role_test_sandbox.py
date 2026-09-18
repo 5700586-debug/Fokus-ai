@@ -27,17 +27,59 @@ async def test_role_test_button_does_nothing_for_ordinary_user(bot_dp, monkeypat
     assert sent == []
 
 
-async def test_founder_sees_role_test_button_only_in_test_environment(bot_dp, monkeypatch):
+async def test_founder_sees_role_test_button_in_both_environments(bot_dp, monkeypatch):
+    """Preview endi Founderga production botda ham ko'rinadi — ko'rinish
+    ``ENVIRONMENT``ga emas, faqat Founder ID'ga bog'langan."""
     main, bot = bot_dp
 
+    assert main.ENVIRONMENT != "test"
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
-    assert "🧪 Rol testi" not in buttons
+    assert "🧪 Rol testi" in buttons
 
     monkeypatch.setattr(main, "ENVIRONMENT", "test")
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
     assert "🧪 Rol testi" in buttons
+
+
+async def test_non_founder_never_sees_role_test_button(bot_dp, monkeypatch):
+    main, _bot = bot_dp
+    _set_role(111, "kassir")
+    _set_role(222, "nazoratchi")
+
+    for environment in ("production", "test"):
+        monkeypatch.setattr(main, "ENVIRONMENT", environment)
+        for user_id in (111, 222):
+            buttons = [
+                btn.text
+                for row in main.build_menu(user_id).keyboard
+                for btn in row
+            ]
+            assert "🧪 Rol testi" not in buttons
+
+
+async def test_role_test_does_nothing_for_ordinary_user_in_production(bot_dp):
+    main, bot = bot_dp
+    assert main.ENVIRONMENT != "test"
+    _set_role(111, "kassir")
+
+    sent = await send(main.dp, bot, 111, text="🧪 Rol testi")
+
+    assert sent == []
+
+
+async def test_entering_sandbox_clears_pre_existing_fsm_state(bot_dp):
+    main, bot = bot_dp
+    context = main.dp.fsm.get_context(bot, chat_id=FOUNDER_ID, user_id=FOUNDER_ID)
+    await context.set_state("SomeRealFlow:step_2")
+    await context.update_data(leftover="real-flow-value")
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="🧪 Rol testi")
+
+    assert "TEST SANDBOX" in sent[0].text
+    assert await context.get_state() is None
+    assert await context.get_data() == {"preview_picking": True}
 
 
 async def test_founder_can_open_role_picker_in_test_environment(bot_dp, monkeypatch):

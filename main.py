@@ -198,6 +198,17 @@ _PREVIEW_BANNER = "⚠️ TEST SANDBOX REJIMI\nBazaga hech narsa yozilmaydi.\n\n
 _PREVIEW_BLOCKED_TEXT = "🧪 Test rejimi — bu amal bazaga yozilmadi."
 
 
+def _sandbox_enabled(user_id: int) -> bool:
+    """'🧪 Rol testi' preview FAQAT Founder uchun — muhitdan qat'i nazar.
+
+    ``ENVIRONMENT``ga ATAYLAB bog'lanmagan: preview production botda ham
+    Founderga ko'rinadi, lekin baribir faqat o'qish rejimida qoladi
+    (``_SandboxPreviewMiddleware`` haqiqiy handlerlarni umuman
+    chaqirmaydi). Boshqa hech bir foydalanuvchi uchun ochilmaydi.
+    """
+    return user_id == FOUNDER_ID
+
+
 class _SandboxPreviewMiddleware(BaseMiddleware):
     """Founder uchun '🧪 Rol testi' — boshqa rol menyusini xavfsiz
     ko'rib chiqish, HAQIQIY rol/DB holatiga tegmasdan.
@@ -228,16 +239,15 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        # Preview (Rol testi) FAQAT ``ENVIRONMENT=test``da va FAQAT
-        # Founder uchun mavjud (qarang pastdagi ``_ROLE_TEST_ENTRY_TEXT``
-        # tekshiruvi va sinf docstringi) — boshqa HAR QANDAY Update
-        # (production'dagi har bir foydalanuvchi, test muhitidagi
-        # Founder bo'lmagan har bir xodim) uchun shu yerda ZUDLIK bilan
-        # pastga o'tkaziladi, ``state.get_data()`` chaqirilmasdan — bu
+        # Preview (Rol testi) FAQAT Founder uchun mavjud (qarang
+        # ``_sandbox_enabled`` va pastdagi ``_ROLE_TEST_ENTRY_TEXT``
+        # tekshiruvi) — boshqa HAR QANDAY Update (har qanday boshqa
+        # foydalanuvchi) uchun shu yerda ZUDLIK bilan pastga
+        # o'tkaziladi, ``state.get_data()`` chaqirilmasdan — bu
         # PostgreSQL FSM storage'ga (``storage.py`` -> ``db.get_
         # connection()``) HAR bir Update uchun keraksiz qo'shimcha
         # so'rov edi.
-        if ENVIRONMENT != "test" or user.id != FOUNDER_ID:
+        if not _sandbox_enabled(user.id):
             return await handler(event, data)
 
         state: FSMContext | None = data.get("state")
@@ -253,9 +263,12 @@ class _SandboxPreviewMiddleware(BaseMiddleware):
             preview_role is None
             and not preview_picking
             and text == _ROLE_TEST_ENTRY_TEXT
-            and user.id == FOUNDER_ID
-            and ENVIRONMENT == "test"
+            and _sandbox_enabled(user.id)
         ):
+            # Sandboxga kirishdan OLDIN tugallanmagan HAQIQIY oqim FSM
+            # holati butunlay o'chiriladi — aks holda preview'dan
+            # chiqqandan keyin eski yarim oqim tiklanib ketardi.
+            await state.clear()
             await state.update_data(preview_picking=True)
             await message.answer(
                 f"{_PREVIEW_BANNER}Qaysi rolni sinab ko'rmoqchisiz?",
@@ -613,7 +626,7 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     """
     if get_role(user_id) == "founder":
         rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
-        if ENVIRONMENT == "test":
+        if _sandbox_enabled(user_id):
             rows.append([KeyboardButton(text=_ROLE_TEST_ENTRY_TEXT)])
         return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 

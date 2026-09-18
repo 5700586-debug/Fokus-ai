@@ -57,34 +57,44 @@ CASH_SHIFT_CASH_REPORT = "cash_shift_cash_report"
 
 _AI_MODEL = "gpt-5-mini"  # repoda allaqachon ishlatilayotgan model (services/deficiency_list_ai.py)
 
+_CASH_FIELDS = ("cash_sales", "card_sales", "other_payments", "actual_cash_balance")
+
 _SALES_REPORT_PROMPT = (
-    "Bu — kassir kunlik SAVDO HISOBOTI varag'ining fotosurati (qo'lda "
-    "yozilgan). Undan quyidagi maydonlarni o'qi: cash_sales (naqd savdo "
-    "summasi), card_sales (karta savdo summasi), other_payments (boshqa "
-    "to'lovlar summasi). Faqat quyidagi JSON formatida javob ber, boshqa "
-    "hech narsa yozma:\n"
+    "Bu — kassir kunlik SAVDO HISOBOTI varag'ining fotosurati (qo'lda yozilgan). "
+    "Rasmda aniq ko'ringan bo'lsa quyidagi maydonlarning BARCHASINI o'qi: "
+    "cash_sales (naqd/nalichka savdo), card_sales (karta/terminal/plastik savdo), "
+    "other_payments (boshqa to'lovlar) va actual_cash_balance (kassadagi pul, "
+    "qoldiq yoki oxirgi pul). actual_cash_balance faqat qoldiq ekanligi aniq "
+    "yozilgan bo'lsa olinadi; jami savdoni unga tenglashtirma. Faqat quyidagi "
+    "JSON formatida javob ber, boshqa hech narsa yozma:\n"
     '{"cash_sales": "<son yoki \\"unclear\\">", '
     '"card_sales": "<son yoki \\"unclear\\">", '
-    '"other_payments": "<son yoki \\"unclear\\">"}\n'
-    "Yozuv bo'sh, o'qilmaydigan, ikki xil o'qilishi mumkin yoki pul "
-    "formati noto'g'ri bo'lsa — o'sha maydon uchun aynan \"unclear\" "
-    "yoz. Hech qanday hisob-kitob qilma, faqat qog'ozda yozilganini o'qi."
+    '"other_payments": "<son yoki \\"unclear\\">", '
+    '"actual_cash_balance": "<son yoki \\"unclear\\">"}\n'
+    "Yozuv bo'sh, o'qilmaydigan yoki ikki xil o'qilishi mumkin bo'lsa o'sha "
+    "maydon uchun aynan \"unclear\" yoz. Rasmda yo'q qiymatni o'ylab topma "
+    "va hisob-kitob qilma."
 )
 
 _CASH_REPORT_PROMPT = (
     "Bu — kassir kunlik KASSA/XARAJAT daftari varag'ining fotosurati "
-    "(qo'lda yozilgan). Undan quyidagilarni o'qi: actual_cash_balance "
-    "(kassadagi haqiqiy naqd pul qoldig'i), expense_lines (varaqdagi har "
-    "bir xarajat qatorining summasi, ro'yxat sifatida), written_total "
-    "(agar varaqda alohida yozilgan jami xarajat bo'lsa). Faqat quyidagi "
-    "JSON formatida javob ber, boshqa hech narsa yozma:\n"
-    '{"actual_cash_balance": "<son yoki \\"unclear\\">", '
+    "(qo'lda yozilgan). Rasmda aniq ko'ringan bo'lsa quyidagi maydonlarning "
+    "BARCHASINI o'qi: cash_sales (naqd/nalichka savdo), card_sales "
+    "(karta/terminal/plastik savdo), other_payments (boshqa to'lovlar), "
+    "actual_cash_balance (kassadagi pul/qoldiq/oxirgi pul), expense_lines "
+    "(xarajat/rasxod qatorlaridagi summalar) va written_total (FAQAT \"jami "
+    "xarajat\" yoki \"jami rasxod\" deb aniq yozilgan summa; boshqa jami "
+    "savdo yoki mahsulot jami emas). Faqat quyidagi JSON formatida javob ber, "
+    "boshqa hech narsa yozma:\n"
+    '{"cash_sales": "<son yoki \\"unclear\\">", '
+    '"card_sales": "<son yoki \\"unclear\\">", '
+    '"other_payments": "<son yoki \\"unclear\\">", '
+    '"actual_cash_balance": "<son yoki \\"unclear\\">", '
     '"expense_lines": [<sonlar ro\'yxati>], '
     '"written_total": "<son yoki null>"}\n'
-    "Yozuv bo'sh, o'qilmaydigan, ikki xil o'qilishi mumkin yoki pul "
-    "formati noto'g'ri bo'lsa — \"actual_cash_balance\" uchun aynan "
-    "\"unclear\" yoz. Hech qanday hisob-kitob qilma, faqat qog'ozda "
-    "yozilganini o'qi."
+    "Yozuv bo'sh, o'qilmaydigan yoki ikki xil o'qilishi mumkin bo'lsa o'sha "
+    "maydon uchun aynan \"unclear\" yoz. Rasmda yo'q qiymatni o'ylab topma "
+    "va hisob-kitob qilma."
 )
 
 _PROMPTS = {
@@ -140,31 +150,38 @@ class OpenAIVisionExtractionProvider:
             return ExtractionResult(confident=False, values={})
 
         values: dict[str, str] = {}
+        for field in _CASH_FIELDS:
+            amount = _clean_amount(data.get(field))
+            if amount is not None:
+                values[field] = amount
 
-        if document_type == CASH_SHIFT_SALES_REPORT:
-            for field in ("cash_sales", "card_sales", "other_payments"):
-                amount = _clean_amount(data.get(field))
-                if amount is not None:
-                    values[field] = amount
-        else:
+        # Xarajat qatorlari faqat o'zaro tekshiriladi. Ularning tafovuti
+        # boshqa, mustaqil o'qilgan summalarni (ayniqsa kassa qoldig'ini)
+        # bekor qilmaydi.
+        expense_check = "not_applicable"
+        if document_type == CASH_SHIFT_CASH_REPORT:
+            expense_check = "not_available"
             expense_lines_raw = data.get("expense_lines")
             written_total = _clean_amount(data.get("written_total"))
-            lines_sum = None
             if isinstance(expense_lines_raw, list) and expense_lines_raw:
                 cleaned_lines = [_clean_amount(str(item)) for item in expense_lines_raw]
                 if all(item is not None for item in cleaned_lines):
                     lines_sum = sum(int(item) for item in cleaned_lines)
+                    if written_total is not None:
+                        expense_check = (
+                            "clear" if lines_sum == int(written_total) else "conflict"
+                        )
+                    else:
+                        expense_check = "lines_only"
 
-            # Ichki mos kelish tekshiruvi — AI hisoblamaydi, bu shunchaki
-            # o'qilgan ikkita raqamni solishtirish (kamomad formulasi
-            # EMAS). Mos kelmasa, shu varaqdan o'qilgan qoldiq ham
-            # unclear hisoblanadi (PHASE2 #9).
-            sums_consistent = (
-                lines_sum is None or written_total is None or str(lines_sum) == written_total
-            )
-            balance = _clean_amount(data.get("actual_cash_balance"))
-            if balance is not None and sums_consistent:
-                values["actual_cash_balance"] = balance
+        field_status = " ".join(
+            f"{field}={'clear' if field in values else 'unclear'}"
+            for field in _CASH_FIELDS
+        )
+        print(
+            f"VISION_CASH_READ document={document_type} {field_status} "
+            f"expense_check={expense_check}"
+        )
 
         return ExtractionResult(confident=True, values=values)
 

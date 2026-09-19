@@ -149,6 +149,31 @@ async def test_ai_asks_only_the_one_unclear_field(bot_dp, monkeypatch):
     assert any("KASSA — KUN YAKUNI" in t for t in _texts(sent))
 
 
+
+async def test_ai_can_fill_all_fields_from_cash_ledger(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    provider = _FakeVisionProvider({
+        CASH_SHIFT_SALES_REPORT: ExtractionResult(confident=True, values={}),
+        CASH_SHIFT_CASH_REPORT: ExtractionResult(
+            confident=True,
+            values={
+                "cash_sales": "100000",
+                "card_sales": "250000",
+                "other_payments": "5000",
+                "actual_cash_balance": "50000",
+            },
+        ),
+    })
+    _enable_ai(monkeypatch, provider)
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    texts = _texts(sent)
+    assert not any("tushunmadim" in text for text in texts)
+    assert any("AI o'qigan qiymatlar" in text for text in texts)
+
 async def test_ai_conflicting_cross_photo_value_becomes_unclear(bot_dp, monkeypatch):
     """PHASE2 #9 (oxirgi shart): ikki rasm bir xil maydonni turlicha
     o'qisa, o'sha maydon unclear bo'lishi kerak."""
@@ -174,18 +199,26 @@ async def test_ai_conflicting_cross_photo_value_becomes_unclear(bot_dp, monkeypa
     assert texts == ["⚠️ Bugungi naqd savdo summasini tushunmadim. Faqat shu summani yozing."]
 
 
-async def test_ai_expense_line_sum_mismatch_makes_balance_unclear(bot_dp, monkeypatch):
-    """Providerning o'zi (fake OpenAI javobi orqali) xarajat qatorlari
-    yig'indisi yozilgan jami bilan mos kelmasa, actual_cash_balance'ni
-    unclear deb belgilashini tekshiradi — AI hisob-kitob qilmaydi, bu
-    shunchaki bitta ichki mos kelish tekshiruvi."""
+async def test_ai_cash_ledger_reads_all_fields_and_expense_mismatch_keeps_balance(
+    bot_dp, monkeypatch
+):
+    """Kassa daftaridagi savdo/qoldiq maydonlari ham o'qiladi. Xarajat
+    qatorlari jami bilan yozilgan jami mos kelmasa ham mustaqil o'qilgan
+    kassa qoldig'i va savdo maydonlari bekor qilinmaydi."""
     import json
 
     from providers.vision_extraction_provider import OpenAIVisionExtractionProvider
 
     class _FakeResponse:
         output_text = json.dumps(
-            {"actual_cash_balance": "50000", "expense_lines": [10000, 10000], "written_total": "30000"}
+            {
+                "cash_sales": "100000",
+                "card_sales": "250000",
+                "other_payments": "5000",
+                "actual_cash_balance": "50000",
+                "expense_lines": [10000, 10000],
+                "written_total": "30000",
+            }
         )
 
     class _FakeResponses:
@@ -202,7 +235,12 @@ async def test_ai_expense_line_sum_mismatch_makes_balance_unclear(bot_dp, monkey
 
     result = await provider.extract("data:fake", CASH_SHIFT_CASH_REPORT)
     assert result.confident is True
-    assert "actual_cash_balance" not in result.values
+    assert result.values == {
+        "cash_sales": "100000",
+        "card_sales": "250000",
+        "other_payments": "5000",
+        "actual_cash_balance": "50000",
+    }
 
 
 async def test_ai_total_failure_falls_back_to_original_manual_flow(bot_dp, monkeypatch):

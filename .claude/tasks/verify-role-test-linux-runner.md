@@ -1,4 +1,4 @@
-Maqsad: yangi Claude Task Runner ulanishini xavfsiz tekshirish.
+Maqsad: yangi Claude Task Runner ulanishini xavfsiz qayta tekshirish.
 
 Hech qanday kod yoki konfiguratsiyani o'zgartirma.
 Hech qanday commit yoki push qilma.

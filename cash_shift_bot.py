@@ -12,6 +12,7 @@ qo'lda kiritish oqimi o'zgarishsiz ishlayveradi.
 import asyncio
 import base64
 import re
+import uuid
 
 import company_time
 from aiogram import Dispatcher, F
@@ -160,6 +161,7 @@ def _format_shift_summary(shift: dict) -> str:
 
 class OpenShiftStates(StatesGroup):
     manual_opening_balance = State()
+    confirm_previous_balance = State()
     counted_cash_balance = State()
     confirm_counted_balance = State()
     discrepancy_choice = State()
@@ -348,6 +350,16 @@ def _confirm_close_amount_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_close_amount_ok"),
         InlineKeyboardButton(text="🔄 Qayta yozaman", callback_data="csui_close_amount_retry"),
     ]])
+
+
+def _confirm_previous_balance_kb(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, mos", callback_data=f"csui_open_prev_ok:{token}"),
+        InlineKeyboardButton(text="❗ Farq bor", callback_data=f"csui_open_prev_diff:{token}"),
+    ]])
+
+
+_STALE_PREVIOUS_BALANCE_BUTTON = "Bu tugma eskirgan. Oxirgi xabardagi tugmani bosing"
 
 
 def _confirm_received_amount_kb() -> InlineKeyboardMarkup:
@@ -797,14 +809,78 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             )
             return
 
-        # Topshiruvchi kassir sanagan real kassa summasi (avvalgi yopilgan
-        # smenaning ``actual_cash_balance``i) qabul qiluvchiga HECH QACHON
-        # ko'rsatilmaydi — qabul qiluvchi kassa pulini mustaqil sanab, o'z
-        # natijasini kiritadi.
+        from repositories import cash_shifts as cash_shifts_repo
+
+        previous = cash_shifts_repo.get_last_closed_shift(branch)
+        if previous is not None and previous["actual_cash_balance"] is not None:
+            await _ask_previous_balance(message, state, previous)
+            return
+
         await state.set_state(OpenShiftStates.counted_cash_balance)
         await message.answer("💵 Kassadagi pulni o'zingiz sanang.")
-        await message.answer("Oldingi kassir yozgan summa ko'rinmaydi.")
         await message.answer("Sanagan summangizni yozing:")
+
+    async def _ask_previous_balance(message: Message, state: FSMContext, previous: dict) -> None:
+        # Har bir so'rov o'z tokenini oladi — eski xabardagi tugma (shu
+        # smena uchun takroriy /openshift'dan keyin ham) rad etiladi.
+        token = uuid.uuid4().hex[:12]
+        await state.update_data(
+            previous_balance=previous["actual_cash_balance"],
+            previous_shift_id=previous["id"],
+            prev_token=token,
+        )
+        await state.set_state(OpenShiftStates.confirm_previous_balance)
+        await message.answer(
+            f"Oldingi smenadan qoldiq: {_format_amount(previous['actual_cash_balance'])} so'm. "
+            "Pulni sanang. Mosmi?",
+            reply_markup=_confirm_previous_balance_kb(token),
+        )
+
+    @dp.callback_query(F.data.startswith("csui_open_prev_ok:"), StateFilter(OpenShiftStates.confirm_previous_balance))
+    async def openshift_previous_balance_ok(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        if callback.data.split(":", 1)[1] != data.get("prev_token"):
+            await callback.answer(_STALE_PREVIOUS_BALANCE_BUTTON, show_alert=True)
+            return
+
+        from repositories import cash_shifts as cash_shifts_repo
+
+        profile = get_profile(callback.from_user.id)
+        branch = profile.get("branch") if profile else None
+        latest = cash_shifts_repo.get_last_closed_shift(branch)
+        if (
+            latest is None
+            or latest["actual_cash_balance"] is None
+            or latest["id"] != data.get("previous_shift_id")
+            or latest["actual_cash_balance"] != data.get("previous_balance")
+        ):
+            # Oldingi smena almashgan: eski tasdiq qabul qilinmaydi, yangi
+            # qoldiq yangi token bilan qayta ko'rsatiladi.
+            await callback.message.edit_reply_markup(reply_markup=None)
+            if latest is None or latest["actual_cash_balance"] is None:
+                await state.clear()
+                await callback.message.answer("Oldingi qoldiq o'zgardi. /openshift ni qayta yuboring.")
+            else:
+                await _ask_previous_balance(callback.message, state, latest)
+            await callback.answer()
+            return
+
+        # Holat darhol almashadi — takroriy bosish bu handlerga qayta tushmaydi.
+        await state.update_data(counted_amount=data["previous_balance"])
+        await state.set_state(OpenShiftStates.confirm_counted_balance)
+        await openshift_counted_balance_confirmed(callback, state)
+
+    @dp.callback_query(F.data.startswith("csui_open_prev_diff:"), StateFilter(OpenShiftStates.confirm_previous_balance))
+    async def openshift_previous_balance_diff(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        if callback.data.split(":", 1)[1] != data.get("prev_token"):
+            await callback.answer(_STALE_PREVIOUS_BALANCE_BUTTON, show_alert=True)
+            return
+
+        await state.set_state(OpenShiftStates.counted_cash_balance)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Sanagan summangizni yozing:")
+        await callback.answer()
 
     @dp.message(StateFilter(OpenShiftStates.manual_opening_balance))
     async def openshift_manual_balance(message: Message, state: FSMContext) -> None:

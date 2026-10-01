@@ -54,9 +54,25 @@ async def _confirm_close_amount(main, bot, user_id: int, amount: str):
     return [m for m in sent if getattr(m, "text", None)]
 
 
+async def _prev_data(main, bot, user_id: int) -> dict:
+    ctx = main.dp.fsm.get_context(bot=bot, chat_id=user_id, user_id=user_id)
+    return await ctx.get_data()
+
+
+async def _click_prev(main, bot, user_id: int, action: str, token: str | None = None):
+    """``action`` — "ok"/"diff"; token berilmasa joriy FSM tokeni ishlatiladi."""
+    if token is None:
+        token = (await _prev_data(main, bot, user_id)).get("prev_token", "none")
+    return await send_callback(
+        main.dp, bot, user_id, data=f"csui_open_prev_{action}:{token}", target_chat_id=user_id
+    )
+
+
 async def _confirm_received_amount(main, bot, user_id: int, amount: str):
-    """``counted_cash_balance`` holatida: summa yoziladi, "To'g'ri"
-    bosiladi — natijadagi matnli xabarlar qaytadi."""
+    """Oldingi qoldiq tasdiqlash ekranida "Farq bor" bosiladi (boshqa
+    holatda bu bosish e'tiborsiz), summa yoziladi, "To'g'ri" bosiladi —
+    natijadagi matnli xabarlar qaytadi."""
+    await _click_prev(main, bot, user_id, "diff")
     await send(main.dp, bot, user_id, text=amount)
     sent = await send_callback(main.dp, bot, user_id, data="csui_recv_amount_ok", target_chat_id=user_id)
     return [m for m in sent if getattr(m, "text", None)]
@@ -518,36 +534,27 @@ async def test_cashsummary_self_view(bot_dp):
     assert "KASSA — KUN YAKUNI" in sent[0].text
 
 
-async def test_receiving_cashier_does_not_see_previous_real_cash_amount(bot_dp, monkeypatch):
+async def test_openshift_shows_previous_balance_and_diff_flow_keeps_both_amounts(bot_dp, monkeypatch):
     main, bot = bot_dp
     from datetime import timedelta
 
     from services import cash_shift
     _make_kassir(111)
 
-    # Topshiruvchi kassir birinchi smenani ochib-yopadi, real kassa
-    # summasi sifatida 777777 kiritadi (actual_cash_balance).
     await _open_shift(main, bot, 111, "500000")
     await _close_shift_happy_path(main, bot, 111, actual="777777")
 
-    # Ertangi kun — qabul qiluvchi (shu foydalanuvchi, ikkinchi smena)
-    # /openshift chaqiradi. Topshiruvchining 777777 summasi hech qanday
-    # xabarda ko'rinmasin, kassir mustaqil sanashga yo'naltirilsin.
     tomorrow = company_time.today() + timedelta(days=1)
     monkeypatch.setattr(company_time, "today", lambda: tomorrow)
 
     sent = await send(main.dp, bot, 111, text="/openshift")
-    joined = " ".join(m.text for m in sent)
-    assert "777777" not in joined
-    assert "o'zingiz sanang" in joined.lower()
+    assert sent[0].text == "Oldingi smenadan qoldiq: 777 777 so'm. Pulni sanang. Mosmi?"
+    buttons = sent[0].reply_markup.inline_keyboard[0]
+    assert [b.text for b in buttons] == ["✅ Ha, mos", "❗ Farq bor"]
 
     sent = await _confirm_received_amount(main, bot, 111, "333333")
-    joined = " ".join(m.text for m in sent)
-    assert "777777" not in joined
-    assert "Kassa farqi" in joined
+    assert "Kassa farqi" in " ".join(m.text for m in sent)
 
-    # Ikkala summa bazada alohida saqlanadi: opening_balance — topshiruvchi
-    # sanagan real summa, received_cash_balance — qabul qiluvchi sanagan summa.
     shift = cash_shift.get_open_shift(111, tomorrow.isoformat())
     assert shift["opening_balance"] == 777777
     assert shift["received_cash_balance"] == 333333
@@ -567,6 +574,7 @@ async def test_openshift_shows_confirm_received_amount_buttons(bot_dp, monkeypat
     monkeypatch.setattr(company_time, "today", lambda: tomorrow)
 
     await send(main.dp, bot, 111, text="/openshift")
+    await _click_prev(main, bot, 111, "diff")
     sent = await send(main.dp, bot, 111, text="600000")
 
     assert sent[0].text == "Siz sanadingiz: 600 000 so'm"
@@ -835,7 +843,7 @@ async def test_night_to_morning_handover_between_two_different_cashiers(bot_dp, 
 
     sent = await send(main.dp, bot, 222, text="/openshift")
     joined = " ".join(m.text for m in sent)
-    assert "o'zingiz sanang" in joined.lower()
+    assert "oldingi smenadan qoldiq: 600 000 so'm" in joined.lower()
 
     sent = await _confirm_received_amount(main, bot, 222, "600000")
     assert [m.text for m in sent] == ["✅ Kassa mos.", "Smena topshirildi."]
@@ -982,3 +990,162 @@ async def test_kassir_choice_buttons_are_two_per_row(bot_dp):
     rows = sent[0].reply_markup.inline_keyboard
     assert len(rows) == 1
     assert [b.text for b in rows[0]] == ["✅ Ha, topshiraman", "❌ Orqaga"]
+
+
+def _seed_closed_shift(branch: str, actual_cash_balance: int, shift_date: str, employee_id: int = 900) -> None:
+    from db import get_connection
+    from repositories import cash_shifts as cash_shifts_repo
+
+    shift = cash_shifts_repo.open_shift(employee_id, branch, shift_date, 0, 0)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE cash_shifts SET status = 'clean_closed', actual_cash_balance = ? WHERE id = ?",
+            (actual_cash_balance, shift["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _yesterday() -> str:
+    from datetime import timedelta
+
+    return (company_time.today() - timedelta(days=1)).isoformat()
+
+
+async def test_openshift_previous_balance_match_uses_existing_acceptance(bot_dp):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-1", 600000, _yesterday())
+
+    await send(main.dp, bot, 111, text="/openshift")
+    sent = await _click_prev(main, bot, 111, "ok")
+    texts = [m.text for m in sent if getattr(m, "text", None)]
+    assert texts == ["✅ Kassa mos.", "Smena topshirildi."]
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift["opening_balance"] == 600000
+    assert shift["received_cash_balance"] == 600000
+
+    # Takroriy bosish — holat tozalangan, hech narsa qayta bajarilmaydi.
+    sent = await _click_prev(main, bot, 111, "ok")
+    assert not [m for m in sent if getattr(m, "text", None)]
+
+
+async def test_openshift_previous_balance_diff_asks_counted_amount_and_checks_discrepancy(bot_dp):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-1", 600000, _yesterday())
+
+    await send(main.dp, bot, 111, text="/openshift")
+    sent = await _click_prev(main, bot, 111, "diff")
+    assert "Sanagan summangizni yozing:" in [getattr(m, "text", None) for m in sent]
+
+    await send(main.dp, bot, 111, text="580000")
+    sent = await send_callback(main.dp, bot, 111, data="csui_recv_amount_ok", target_chat_id=111)
+    assert "⚠️ Kassa farqi: -20 000 so'm" in [getattr(m, "text", None) for m in sent]
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift["opening_balance"] == 600000
+    assert shift["received_cash_balance"] == 580000
+
+
+async def test_openshift_without_previous_balance_keeps_manual_entry(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111, branch="Filial-1")
+
+    sent = await send(main.dp, bot, 111, text="/openshift")
+    assert "birinchi smenangiz" in sent[0].text
+    assert sent[0].reply_markup is None
+
+
+async def test_openshift_previous_balance_zero_is_a_real_value(bot_dp):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-1", 0, _yesterday())
+
+    sent = await send(main.dp, bot, 111, text="/openshift")
+    assert sent[0].text == "Oldingi smenadan qoldiq: 0 so'm. Pulni sanang. Mosmi?"
+
+    sent = await _click_prev(main, bot, 111, "ok")
+    texts = [m.text for m in sent if getattr(m, "text", None)]
+    assert texts == ["✅ Kassa mos.", "Smena topshirildi."]
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift["opening_balance"] == 0
+    assert shift["received_cash_balance"] == 0
+
+
+async def test_openshift_does_not_use_other_branch_previous_balance(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-2", 999999, _yesterday())
+
+    sent = await send(main.dp, bot, 111, text="/openshift")
+    joined = " ".join(m.text for m in sent if getattr(m, "text", None))
+    assert "999" not in joined
+    assert "birinchi smenangiz" in joined
+
+    _seed_closed_shift("Filial-1", 600000, _yesterday(), employee_id=901)
+    await send(main.dp, bot, 111, text="/cancel")
+    sent = await send(main.dp, bot, 111, text="/openshift")
+    joined = " ".join(m.text for m in sent if getattr(m, "text", None))
+    assert "600 000" in joined
+    assert "999" not in joined
+
+
+async def test_openshift_repeated_request_rejects_old_buttons_and_accepts_new(bot_dp):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-1", 600000, _yesterday())
+
+    await send(main.dp, bot, 111, text="/openshift")
+    old_token = (await _prev_data(main, bot, 111))["prev_token"]
+    await send(main.dp, bot, 111, text="/openshift")
+    new_token = (await _prev_data(main, bot, 111))["prev_token"]
+    assert old_token != new_token
+
+    for action in ("ok", "diff"):
+        sent = await _click_prev(main, bot, 111, action, token=old_token)
+        assert any("Bu tugma eskirgan" in str(getattr(m, "text", "")) for m in sent)
+        assert await main.dp.fsm.get_context(bot=bot, chat_id=111, user_id=111).get_state() == (
+            "OpenShiftStates:confirm_previous_balance"
+        )
+        assert cash_shift.get_open_shift(111, company_time.today().isoformat()) is None
+
+    sent = await _click_prev(main, bot, 111, "ok", token=new_token)
+    assert [m.text for m in sent if getattr(m, "text", None)] == ["✅ Kassa mos.", "Smena topshirildi."]
+
+
+async def test_openshift_previous_shift_changed_requires_new_confirmation(bot_dp):
+    main, bot = bot_dp
+    from datetime import timedelta
+
+    from services import cash_shift
+    _make_kassir(111, branch="Filial-1")
+    _seed_closed_shift("Filial-1", 600000, (company_time.today() - timedelta(days=2)).isoformat())
+
+    await send(main.dp, bot, 111, text="/openshift")
+    old_token = (await _prev_data(main, bot, 111))["prev_token"]
+
+    _seed_closed_shift("Filial-1", 450000, _yesterday(), employee_id=901)
+
+    sent = await _click_prev(main, bot, 111, "ok", token=old_token)
+    texts_ = [m.text for m in sent if getattr(m, "text", None)]
+    assert texts_ == ["Oldingi smenadan qoldiq: 450 000 so'm. Pulni sanang. Mosmi?"]
+    assert cash_shift.get_open_shift(111, company_time.today().isoformat()) is None
+
+    new_token = (await _prev_data(main, bot, 111))["prev_token"]
+    assert new_token != old_token
+    sent = await _click_prev(main, bot, 111, "ok", token=old_token)
+    assert cash_shift.get_open_shift(111, company_time.today().isoformat()) is None
+
+    sent = await _click_prev(main, bot, 111, "ok", token=new_token)
+    assert [m.text for m in sent if getattr(m, "text", None)] == ["✅ Kassa mos.", "Smena topshirildi."]
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert shift["opening_balance"] == 450000
+    assert shift["received_cash_balance"] == 450000

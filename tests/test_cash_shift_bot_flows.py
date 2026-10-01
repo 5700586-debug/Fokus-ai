@@ -1149,3 +1149,201 @@ async def test_openshift_previous_shift_changed_requires_new_confirmation(bot_dp
     shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
     assert shift["opening_balance"] == 450000
     assert shift["received_cash_balance"] == 450000
+
+
+async def _open_today_then_pass_midnight(main, bot, monkeypatch, user_id: int = 111, opening: str = "500000"):
+    from datetime import timedelta
+
+    from services import cash_shift
+
+    original_date = company_time.today().isoformat()
+    await _open_shift(main, bot, user_id, opening)
+    shift = cash_shift.get_open_shift(user_id, original_date)
+    next_day = company_time.today() + timedelta(days=1)
+    monkeypatch.setattr(company_time, "today", lambda: next_day)
+    return shift, original_date
+
+
+async def test_closeshift_after_midnight_closes_yesterdays_open_shift_keeping_id_and_date(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    from services import cash_shift
+    _make_kassir(111)
+    shift, original_date = await _open_today_then_pass_midnight(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="/closeshift")
+    assert "🟢 Smenani boshlash" not in " ".join(m.text for m in sent if getattr(m, "text", None))
+
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
+    await send(main.dp, bot, 111, photo_file_id="sales_photo")
+    await send(main.dp, bot, 111, photo_file_id="cash_photo")
+    await send(main.dp, bot, 111, text="100000")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="0")
+    await _confirm_close_amount(main, bot, 111, "600000")
+
+    closed = cash_shift.get_shift(shift["id"])
+    assert closed["shift_date"] == original_date
+    assert closed["status"] != "open"
+    assert closed["actual_cash_balance"] == 600000
+    assert cash_shift.get_open_shift(111, company_time.today().isoformat()) is None
+
+
+async def test_expense_after_midnight_is_logged_on_yesterdays_open_shift(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    from services import cash_expense
+    _make_kassir(111)
+    shift, original_date = await _open_today_then_pass_midnight(main, bot, monkeypatch)
+
+    await send(main.dp, bot, 111, text="/expense")
+    await send(main.dp, bot, 111, text="🚕 Taxi")
+    await send(main.dp, bot, 111, text="25000")
+    await send(main.dp, bot, 111, text="➖ O'tkazib yuborish")
+
+    expenses = cash_expense.get_expenses_for_shift(shift["id"])
+    assert [e["amount"] for e in expenses] == [25000]
+    assert expenses[0]["expense_date"] == original_date
+
+
+async def test_openshift_refuses_while_an_old_open_shift_exists(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    from db import get_connection
+    _make_kassir(111)
+    shift, original_date = await _open_today_then_pass_midnight(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="/openshift")
+    assert [m.text for m in sent if getattr(m, "text", None)] == ["⚠️ Avval ochiq smenangizni topshiring."]
+
+    conn = get_connection()
+    try:
+        count = conn.execute("SELECT COUNT(*) AS c FROM cash_shifts WHERE employee_id = 111").fetchone()["c"]
+    finally:
+        conn.close()
+    assert count == 1
+
+
+async def test_unclosed_shift_lookup_ignores_other_employee_branch_test_and_non_open(bot_dp):
+    main, bot = bot_dp
+    from db import get_connection
+    from repositories import cash_shifts as repo
+
+    yesterday = _yesterday()
+    repo.open_shift(111, "Filial-1", yesterday, 0, 0)
+    other_employee = repo.open_shift(222, "Filial-1", yesterday, 0, 0)
+    other_branch = repo.open_shift(333, "Filial-2", yesterday, 0, 0)
+    test_shift = repo.open_shift(444, "Filial-1", yesterday, 0, 0, is_test=True, test_run_id="t1")
+    closed = repo.open_shift(555, "Filial-1", yesterday, 0, 0)
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE cash_shifts SET status = 'clean_closed' WHERE id = ?", (closed["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+    own = repo.get_unclosed_real_shift(111, "Filial-1")
+    assert own is not None and own["employee_id"] == 111
+    assert repo.get_unclosed_real_shift(111, "Filial-2") is None
+    assert repo.get_unclosed_real_shift(333, "Filial-1") is None
+    assert repo.get_unclosed_real_shift(444, "Filial-1") is None
+    assert repo.get_unclosed_real_shift(555, "Filial-1") is None
+    assert other_employee["id"] != own["id"] and other_branch["id"] != own["id"] and test_shift["id"] != own["id"]
+
+
+async def _start_expense_on_open_shift(main, bot, user_id: int = 111):
+    from services import cash_shift
+
+    _make_kassir(user_id, branch="Filial-1")
+    await _open_shift(main, bot, user_id, "0")
+    shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
+    await send(main.dp, bot, user_id, text="/expense")
+    await send(main.dp, bot, user_id, text="🚕 Taxi")
+    return shift
+
+
+async def _set_fsm_expense_shift(main, bot, user_id: int, shift_id: int) -> None:
+    ctx = main.dp.fsm.get_context(bot=bot, chat_id=user_id, user_id=user_id)
+    await ctx.update_data(expense_shift_id=shift_id)
+
+
+def _expense_count() -> int:
+    from db import get_connection
+
+    conn = get_connection()
+    try:
+        return conn.execute("SELECT COUNT(*) AS c FROM cash_expenses").fetchone()["c"]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("kind", ["other_employee", "other_branch", "test", "closed"])
+async def test_expense_with_invalid_fsm_shift_id_writes_nothing(bot_dp, kind):
+    main, bot = bot_dp
+    from db import get_connection
+    from repositories import cash_shifts as repo
+
+    await _start_expense_on_open_shift(main, bot)
+    today = company_time.today().isoformat()
+    if kind == "other_employee":
+        bad = repo.open_shift(222, "Filial-1", today, 0, 0)
+    elif kind == "other_branch":
+        bad = repo.open_shift(333, "Filial-2", today, 0, 0)
+    elif kind == "test":
+        bad = repo.open_shift(444, "Filial-1", today, 0, 0, is_test=True, test_run_id="t1")
+    else:
+        bad = repo.open_shift(555, "Filial-1", today, 0, 0)
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE cash_shifts SET status = 'clean_closed' WHERE id = ?", (bad["id"],))
+            conn.commit()
+        finally:
+            conn.close()
+
+    await _set_fsm_expense_shift(main, bot, 111, bad["id"])
+    sent = await send(main.dp, bot, 111, text="25000")
+    assert "Ochiq smena topilmadi" in " ".join(m.text for m in sent if getattr(m, "text", None))
+    assert _expense_count() == 0
+
+
+async def test_expense_with_own_open_shift_id_still_writes(bot_dp):
+    main, bot = bot_dp
+    from services import cash_expense
+
+    shift = await _start_expense_on_open_shift(main, bot)
+    await send(main.dp, bot, 111, text="25000")
+    await send(main.dp, bot, 111, text="➖ O'tkazib yuborish")
+
+    assert cash_expense.total_expenses_for_shift(shift["id"]) == 25000
+
+
+async def test_find_working_shift_ignores_other_branch_and_test_shifts(bot_dp):
+    main, bot = bot_dp
+    import cash_shift_bot
+    from repositories import cash_shifts as repo
+
+    _make_kassir(111, branch="Filial-1")
+    today = company_time.today().isoformat()
+
+    repo.open_shift(111, "Filial-2", today, 0, 0)  # eski filialdagi smena
+    assert cash_shift_bot._find_working_shift(111) is None
+
+    own_yesterday = repo.open_shift(111, "Filial-1", _yesterday(), 0, 0)
+    assert cash_shift_bot._find_working_shift(111)["id"] == own_yesterday["id"]
+
+
+async def test_find_working_shift_prefers_yesterdays_open_over_todays_closed_row(bot_dp):
+    main, bot = bot_dp
+    import cash_shift_bot
+    from db import get_connection
+    from repositories import cash_shifts as repo
+
+    _make_kassir(111, branch="Filial-1")
+    yesterday_open = repo.open_shift(111, "Filial-1", _yesterday(), 0, 0)
+    today_row = repo.open_shift(111, "Filial-1", company_time.today().isoformat(), 0, 0)
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE cash_shifts SET status = 'clean_closed' WHERE id = ?", (today_row["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert cash_shift_bot._find_working_shift(111)["id"] == yesterday_open["id"]

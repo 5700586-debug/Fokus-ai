@@ -28,6 +28,25 @@ def get_open_shift(employee_id: int, shift_date: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_unclosed_real_shift(employee_id: int, branch: str | None) -> dict | None:
+    """Xodimning shu filialdagi hali yopilmagan (``status='open'``) REAL
+    (``is_test=0``) smenasi — sanadan qat'i nazar (yarim tundan keyin
+    kechagi smena ham topiladi). Eng oxirgisi qaytadi."""
+    branch_clause = "branch IS NULL" if branch is None else "branch = ?"
+    params = (employee_id,) if branch is None else (employee_id, branch)
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM cash_shifts WHERE employee_id = ? AND " + branch_clause +
+            " AND status = 'open' AND is_test = 0 ORDER BY shift_date DESC, id DESC LIMIT 1",
+            params,
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
 def open_shift(
     employee_id: int, branch: str | None, shift_date: str, opening_balance: int, tolerance: int,
     received_cash_balance: int | None = None, is_test: bool = False, test_run_id: str | None = None,

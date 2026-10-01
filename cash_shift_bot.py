@@ -781,6 +781,51 @@ async def _enter_daily_report_step(reply_target: Message, state: FSMContext, shi
     await _enter_close_shift_photo_flow(reply_target, state, shift)
 
 
+_EXPENSE_SHIFT_INVALID = "⚠️ Ochiq smena topilmadi. Avval 🟢 Smenani boshlash tugmasini bosing."
+
+
+def _current_branch(user_id: int) -> str | None:
+    profile = get_profile(user_id)
+    return profile.get("branch") if profile else None
+
+
+def _is_own_real_shift(shift: dict | None, user_id: int, branch: str | None) -> bool:
+    return (
+        shift is not None
+        and shift["employee_id"] == user_id
+        and shift["branch"] == branch
+        and not shift["is_test"]
+    )
+
+
+def _find_working_shift(user_id: int) -> dict | None:
+    """Avval xodimning joriy filialdagi REAL ochiq (hali topshirilmagan)
+    smenasi — sanadan qat'i nazar, shunda yarim tundan keyin ham o'sha
+    smena yopiladi/xarajat yoziladi, uning asl ``shift_date``i va ID'si
+    o'zgarmaydi. Topilmasa — bugungi o'z real smenasi (pending/approval/
+    yopilgan holat xabarlari chaqiruvchida)."""
+    branch = _current_branch(user_id)
+    unclosed = cash_shift.get_unclosed_real_shift(user_id, branch)
+    if unclosed is not None:
+        return unclosed
+    shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
+    return shift if _is_own_real_shift(shift, user_id, branch) else None
+
+
+def _expense_shift(data: dict, user_id: int) -> dict | None:
+    """Xarajat oqimi boshida tanlangan smena (ID bo'yicha). ID yaroqsiz
+    (boshqa xodim/filial, test yoki yopilgan smena) bo'lsa ``None`` —
+    hech qachon boshqa smenaga yozilmaydi. FSM'da ID umuman yo'q bo'lsa
+    (eski holat) joriy ishchi smenaga qaytadi."""
+    shift_id = data.get("expense_shift_id")
+    if shift_id is None:
+        return _find_working_shift(user_id)
+    shift = cash_shift.get_shift(shift_id)
+    if _is_own_real_shift(shift, user_id, _current_branch(user_id)) and shift["status"] == "open":
+        return shift
+    return None
+
+
 def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     # ---------------------------------------------------------- /openshift --
@@ -800,6 +845,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         profile = get_profile(user_id)
         branch = profile.get("branch") if profile else None
+
+        if cash_shift.get_unclosed_real_shift(user_id, branch) is not None:
+            await message.answer("⚠️ Avval ochiq smenangizni topshiring.")
+            return
 
         if cash_shift.is_first_ever_shift(branch):
             await state.set_state(OpenShiftStates.manual_opening_balance)
@@ -1108,11 +1157,12 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_LOG_CASH_EXPENSE):
             return
 
-        today_shift = cash_shift.get_open_shift(message.from_user.id, company_time.today().isoformat())
+        today_shift = _find_working_shift(message.from_user.id)
         if today_shift is None:
             await message.answer("⚠️ Avval 🟢 Smenani boshlash tugmasini bosing.")
             return
 
+        await state.update_data(expense_shift_id=today_shift["id"])
         await state.set_state(ExpenseStates.category)
         await message.answer("Xarajat kategoriyasini tanlang:", reply_markup=_CATEGORY_KB)
 
@@ -1137,8 +1187,13 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         data = await state.update_data(amount=amount)
         user_id = message.from_user.id
+        expense_shift = _expense_shift(data, user_id)
+        if expense_shift is None:
+            await state.clear()
+            await message.answer(_EXPENSE_SHIFT_INVALID, reply_markup=ReplyKeyboardRemove())
+            return
         is_anomaly, baseline_average = cash_expense.check_anomaly(
-            user_id, data["category"], amount, company_time.today().isoformat()
+            user_id, data["category"], amount, expense_shift["shift_date"]
         )
 
         if is_anomaly:
@@ -1182,13 +1237,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             data = await state.get_data()
             await state.clear()
 
-            today_shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
-            profile = get_profile(user_id)
-            branch = profile.get("branch") if profile else None
+            today_shift = _expense_shift(data, user_id)
+            if today_shift is None:
+                await message.answer(_EXPENSE_SHIFT_INVALID, reply_markup=ReplyKeyboardRemove())
+                return
+            branch = _current_branch(user_id)
 
             cash_expense.log_expense(
                 today_shift["id"], user_id, branch, data["category"], data["amount"],
-                description, company_time.today().isoformat(),
+                description, today_shift["shift_date"],
             )
             await message.answer(
                 f"✅ Xarajat qayd etildi: {_CATEGORY_LABELS[data['category']]} — {data['amount']} so'm.",
@@ -1205,7 +1262,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             return
 
         user_id = message.from_user.id
-        shift = cash_shift.get_open_shift(user_id, company_time.today().isoformat())
+        shift = _find_working_shift(user_id)
         if shift is None:
             await message.answer("⚠️ Avval 🟢 Smenani boshlash tugmasini bosing.")
             return

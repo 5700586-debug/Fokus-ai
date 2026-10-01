@@ -213,3 +213,7 @@ def get_shift(shift_id: int) -> dict | None:
 
 def get_open_shift(employee_id: int, shift_date: str) -> dict | None:
     return repo.get_open_shift(employee_id, shift_date)
+
+
+def get_unclosed_real_shift(employee_id: int, branch: str | None) -> dict | None:
+    return repo.get_unclosed_real_shift(employee_id, branch)

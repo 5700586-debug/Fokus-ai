@@ -73,12 +73,15 @@ _SALES_REPORT_PROMPT = (
 
 _CASH_REPORT_PROMPT = (
     "Bu — kassir kunlik KASSA/XARAJAT daftari varag'ining fotosurati "
-    "(qo'lda yozilgan). Undan quyidagilarni o'qi: actual_cash_balance "
+    "(qo'lda yozilgan). Undan quyidagilarni o'qi: cash_sales (varaqda "
+    "\"savdo\" deb aniq yozilgan summa; bo'lmasa yoki naqd savdo ekani "
+    "noaniq bo'lsa \"unclear\"), actual_cash_balance "
     "(kassadagi haqiqiy naqd pul qoldig'i), expense_lines (varaqdagi har "
     "bir xarajat qatorining summasi, ro'yxat sifatida), written_total "
     "(agar varaqda alohida yozilgan jami xarajat bo'lsa). Faqat quyidagi "
     "JSON formatida javob ber, boshqa hech narsa yozma:\n"
-    '{"actual_cash_balance": "<son yoki \\"unclear\\">", '
+    '{"cash_sales": "<son yoki \\"unclear\\">", '
+    '"actual_cash_balance": "<son yoki \\"unclear\\">", '
     '"expense_lines": [<sonlar ro\'yxati>], '
     '"written_total": "<son yoki null>"}\n'
     "Yozuv bo'sh, o'qilmaydigan, ikki xil o'qilishi mumkin yoki pul "
@@ -162,6 +165,9 @@ class OpenAIVisionExtractionProvider:
             sums_consistent = (
                 lines_sum is None or written_total is None or str(lines_sum) == written_total
             )
+            cash_sales = _clean_amount(data.get("cash_sales"))
+            if cash_sales is not None:
+                values["cash_sales"] = cash_sales
             balance = _clean_amount(data.get("actual_cash_balance"))
             if balance is not None and sums_consistent:
                 values["actual_cash_balance"] = balance

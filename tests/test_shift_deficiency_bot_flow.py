@@ -117,7 +117,9 @@ async def test_invalid_quantity_format_is_rejected_and_reprompted(bot_dp):
     await send(main.dp, bot, 111, text="/closeshift")
     await send(main.dp, bot, 111, text="Pomidor")
 
-    sent = await send(main.dp, bot, 111, text="o'n kg")
+    # So'z bilan yozilgan son ("o'n kg") endi qisman javob sifatida o'qiladi (qarang
+    # test_followup_partial_*); bu yerda haqiqatan noto'g'ri format tekshiriladi.
+    sent = await send(main.dp, bot, 111, text="juda ko'p")
     assert "❌" in " ".join(t for t in texts(sent) if t)
 
     sent = await send(main.dp, bot, 111, text="5 dona")
@@ -911,3 +913,207 @@ async def test_order_plain_quantity_answer_then_no_keeps_olma(bot_dp, monkeypatc
     sent = await send(main.dp, bot, 111, text="2. 3 dona")
     combined = _joined(sent)
     assert "Ro'yxat tayyor" in combined and "olma — 3 dona" in combined
+
+
+async def _typo_line_then_asked_for_amount(main, bot, monkeypatch, ai_payload=None, ai_error=True):
+    await _to_order_entry(main, bot, monkeypatch, ai_payload=ai_payload, ai_error=ai_error)
+    sent = await send(main.dp, bot, 111, text="Kola 2litr 20blol")
+    assert "Miqdorini kiriting" in _joined(sent)  # eski bosqichli oqimga tushdi
+
+
+def _market_products() -> dict:
+    return {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+
+
+async def test_item_amount_followup_short_answer_keeps_clean_product_name(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="20 blok")
+    assert "Kola 2 litr — 20 blok" in _joined(sent)  # hajm miqdorga aralashmadi, xato matn nomda qolmadi
+
+    products = _market_products()
+    assert list(products) == ["Kola 2 litr"]
+    assert products["Kola 2 litr"]["total_quantity"] == 20 and products["Kola 2 litr"]["unit"] == "blok"
+
+
+@pytest.mark.parametrize("corrected", ["Kola 2litr 20blok", "Kola 2lit 20 blok"])
+async def test_item_amount_followup_full_corrected_line_is_accepted(bot_dp, monkeypatch, corrected):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text=corrected)
+    combined = _joined(sent)
+    assert "1. Kola 2 litr — 20 blok" in combined and "blol" not in combined
+    assert _market_products() == {}  # tasdiqdan oldin DBga yozilmaydi
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    products = _market_products()
+    assert list(products) == ["Kola 2 litr"] and products["Kola 2 litr"]["total_quantity"] == 20
+
+
+async def test_item_amount_followup_uses_existing_ai_fallback_for_unclear_corrected_line(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    payload = [{"line": "Kola 2lit 20 blk", "product_name": "Kola 2 litr", "quantity": 20, "unit": "blok"}]
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch, ai_payload=payload, ai_error=False)
+
+    sent = await send(main.dp, bot, 111, text="Kola 2lit 20 blk")
+    assert "1. Kola 2 litr — 20 blok" in _joined(sent)
+
+
+async def test_item_amount_followup_ai_error_asks_only_what_is_missing_and_invents_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)  # AI timeout
+
+    sent = await send(main.dp, bot, 111, text="yigirma tayoq")
+    combined = _joined(sent)
+    assert "Miqdor va birlik kerak" in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}
+
+    sent = await send(main.dp, bot, 111, text="20 blok")  # aniq ma'lumot keyingi urinishda baribir ishlaydi
+    assert "Kola 2 litr — 20 blok" in _joined(sent)
+
+
+async def test_item_amount_followup_other_product_goes_through_replace_confirmation(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    combined = _joined(sent)
+    assert "almashtirasizmi?" in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}  # tasdiqlanmaguncha hech narsa yozilmaydi
+
+    sent = await send(main.dp, bot, 111, text="1. ha")
+    assert "1. Karam — 2 dona" in _joined(sent)
+
+
+async def test_item_amount_plain_product_then_quantity_still_works_as_before(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor")
+    assert "Miqdorini kiriting" in _joined(sent)
+    sent = await send(main.dp, bot, 111, text="10 kg")
+    assert "Qo'shildi" in _joined(sent)
+    assert _market_products()["Pomidor"]["total_quantity"] == 10
+
+
+async def test_followup_same_full_name_after_normalization_needs_no_replace_question(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="Kola 2lit 20 blok")  # xato token tozalanib, "2lit" -> "2 litr"
+    combined = _joined(sent)
+    assert "almashtirasizmi" not in combined
+    assert "1. Kola 2 litr — 20 blok" in combined
+
+
+@pytest.mark.parametrize(
+    "first, corrected, expected_question",
+    [
+        ("ketchup kichik", "ketchup katta 2 dona", "ketchup kattaga almashtirasizmi?"),
+        ("tuz Russ", "tuz Orzu 2 blok", "tuz orzuga almashtirasizmi?"),
+    ],
+)
+async def test_followup_different_full_name_is_not_replaced_without_confirmation(
+    bot_dp, monkeypatch, first, corrected, expected_question
+):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    sent = await send(main.dp, bot, 111, text=first)
+    assert "Miqdorini kiriting" in _joined(sent)
+
+    sent = await send(main.dp, bot, 111, text=corrected)
+    combined = _joined(sent)
+    assert expected_question in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}  # tasdiqsiz hech narsa yozilmaydi
+
+    sent = await send(main.dp, bot, 111, text="1. yo'q")  # nom o'zgarmaydi
+    assert first.lower().split()[0] in _joined(sent).lower() and "Ro'yxat tayyor" not in _joined(sent)
+
+
+async def test_followup_replacement_confirmed_with_ha_uses_new_full_line(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="tuz Russ")
+    await send(main.dp, bot, 111, text="tuz Orzu 2 blok")
+
+    sent = await send(main.dp, bot, 111, text="1. ha")
+    assert "1. tuz Orzu — 2 blok" in _joined(sent)
+
+
+@pytest.mark.parametrize("answer", ["20"])
+async def test_followup_partial_answer_with_ai_error_keeps_quantity_and_asks_only_unit(bot_dp, monkeypatch, answer):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)  # AI timeout
+
+    sent = await send(main.dp, bot, 111, text=answer)
+    combined = _joined(sent)
+    assert "1. Kola 2 litr — birlik kerak (miqdor: 20)" in combined  # 20 saqlandi, faqat birlik so'raladi
+    assert "Miqdor va birlik kerak" not in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}
+
+    sent = await send(main.dp, bot, 111, text="1. blok")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and "1. Kola 2 litr — 20 blok" in combined
+
+
+async def test_followup_unit_only_answer_asks_only_quantity(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="Pomidor")
+
+    sent = await send(main.dp, bot, 111, text="kg")
+    assert "1. Pomidor — miqdor kerak (birlik: kg)" in _joined(sent)
+    sent = await send(main.dp, bot, 111, text="1. 10")
+    assert "1. Pomidor — 10 kg" in _joined(sent)
+
+
+@pytest.mark.parametrize(
+    "answer, expected_need",
+    [
+        ("2 pishgan", "1. Pomidor — birlik kerak (miqdor: 2); “pishgan” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?"),
+        ("20 blk", "1. Pomidor — birlik kerak (miqdor: 20); “blk” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?"),
+    ],
+)
+async def test_followup_partial_answer_unknown_word_is_kept_unresolved_with_ai_error(
+    bot_dp, monkeypatch, answer, expected_need
+):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)  # AI timeout
+    await send(main.dp, bot, 111, text="Pomidor")
+
+    sent = await send(main.dp, bot, 111, text=answer)
+    combined = _joined(sent)
+    assert expected_need in combined  # miqdor saqlandi, so'z yo'qolmadi, sifat deb qabul qilinmadi
+    assert "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="1. blok")  # birlik berildi, lekin so'z hali hal bo'lmagan
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" not in combined  # noma'lum so'z hal bo'lmaguncha tasdiq chiqmaydi
+    assert "mahsulotni almashtirishmi yoki tavsif qo'shishmi?" in combined
+
+    word = answer.split()[1]
+    sent = await send(main.dp, bot, 111, text="1. yo'q")  # kassirning aniq tanlovi: so'zni tashlash
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and word not in combined
+
+
+async def test_followup_partial_answer_unknown_word_sent_to_existing_ai_classifier(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="Pomidor")
+    inputs = []
+
+    async def _quality_ai(**kwargs):
+        inputs.append(kwargs["input"])
+        return SimpleNamespace(output_text=json.dumps({"quality": "pishgan", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _quality_ai)
+    sent = await send(main.dp, bot, 111, text="2 pishgan")
+    combined = _joined(sent)
+    assert "1. Pomidor pishgan — birlik kerak (miqdor: 2)" in combined  # AI tasdiqladi: nomga qo'shildi
+    assert "Mahsulot: Pomidor" in inputs[-1] and "Javobdagi so'zlar: pishgan" in inputs[-1]
+
+    sent = await send(main.dp, bot, 111, text="1. kg")
+    assert "1. Pomidor pishgan — 2 kg" in _joined(sent)

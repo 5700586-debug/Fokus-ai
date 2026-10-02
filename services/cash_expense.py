@@ -62,5 +62,57 @@ def get_expenses_for_shift(shift_id: int) -> list[dict]:
     return repo.get_expenses_for_shift(shift_id)
 
 
+LEDGER_STATUS_MATCHED = "matched"
+LEDGER_STATUS_UNVERIFIED = "unverified"
+LEDGER_STATUS_ACCEPTED_ITEMS_SUM = "cashier_accepted_items_sum"
+LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL = "cashier_accepted_written_total"
+_SAVABLE_LEDGER_STATUSES = {
+    LEDGER_STATUS_MATCHED, LEDGER_STATUS_UNVERIFIED,
+    LEDGER_STATUS_ACCEPTED_ITEMS_SUM, LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL,
+}
+
+
+def save_ledger_items(
+    shift_id: int, items: list[dict], total_status: str = LEDGER_STATUS_MATCHED,
+    written_total: int | None = None, accepted_total: int | None = None,
+) -> int:
+    """Daftardan o'qilgan qatorlarni (``raw_name``, ``normalized_name``, ``amount``) va jami
+    holatini saqlaydi. ``normalized_name`` bo'sh bo'lsa ``raw_name`` yoziladi. Nomlar
+    jami mos kelmagani sababli HECH QACHON tashlanmaydi — holat ``total_status`` da.
+    ``accepted_total`` berilmasa qatorlar yig'indisi olinadi. Bo'sh ro'yxat eskilarini tozalaydi."""
+    if total_status not in _SAVABLE_LEDGER_STATUSES:
+        raise ValueError(f"Noma'lum ledger jami holati: {total_status}")
+
+    prepared = [
+        {
+            "raw_name": item["raw_name"],
+            "normalized_name": item.get("normalized_name") or item["raw_name"],
+            "amount": int(item["amount"]),
+        }
+        for item in items
+    ]
+    summary = None
+    if prepared:
+        items_sum = sum(item["amount"] for item in prepared)
+        summary = {
+            "total_status": total_status, "items_sum": items_sum, "written_total": written_total,
+            "accepted_total": accepted_total if accepted_total is not None else items_sum,
+        }
+    return repo.replace_ledger_expense_items(shift_id, prepared, summary)
+
+
+def get_ledger_summary(shift_id: int) -> dict | None:
+    return repo.get_ledger_expense_summary(shift_id)
+
+
+def get_ledger_items(shift_id: int) -> list[dict]:
+    return repo.get_ledger_expense_items(shift_id)
+
+
+def total_ledger_expenses(shift_id: int) -> int:
+    """Daftar xarajatlari jami — FAQAT ``amount`` yig'indisi (nomlar hisobga kirmaydi)."""
+    return sum(row["amount"] for row in repo.get_ledger_expense_items(shift_id))
+
+
 def total_expenses_for_shift(shift_id: int) -> int:
     return sum(row["amount"] for row in repo.get_expenses_for_shift(shift_id))

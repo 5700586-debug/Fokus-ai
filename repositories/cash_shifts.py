@@ -451,6 +451,61 @@ def get_expenses_for_shift(shift_id: int) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def replace_ledger_expense_items(shift_id: int, items: list[dict], summary: dict | None = None) -> int:
+    """Daftardan o'qilgan xarajat qatorlarini (va jami holati ``summary``ni) smena uchun
+    almashtiradi: smena yopish urinishi qayta bajarilsa dublikat bo'lmasligi uchun bitta
+    tranzaksiyada eskilari o'chirilib, yangilari yoziladi. Qaytadi — yozilgan qatorlar soni."""
+    now = _now()
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM cash_ledger_expense_items WHERE shift_id = ?", (shift_id,))
+        conn.execute("DELETE FROM cash_ledger_expense_summary WHERE shift_id = ?", (shift_id,))
+        for line_no, item in enumerate(items, start=1):
+            conn.execute(
+                "INSERT INTO cash_ledger_expense_items "
+                "(shift_id, line_no, raw_name, normalized_name, amount, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (shift_id, line_no, item["raw_name"], item["normalized_name"], item["amount"], now),
+            )
+        if summary is not None:
+            conn.execute(
+                "INSERT INTO cash_ledger_expense_summary "
+                "(shift_id, total_status, items_sum, written_total, accepted_total, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    shift_id, summary["total_status"], summary.get("items_sum"), summary.get("written_total"),
+                    summary.get("accepted_total"), now,
+                ),
+            )
+        conn.commit()
+        return len(items)
+    finally:
+        conn.close()
+
+
+def get_ledger_expense_items(shift_id: int) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM cash_ledger_expense_items WHERE shift_id = ? ORDER BY line_no", (shift_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_ledger_expense_summary(shift_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM cash_ledger_expense_summary WHERE shift_id = ?", (shift_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
 def get_expense_history(employee_id: int, category: str, before_date: str, limit: int = 30) -> list[dict]:
     """Baseline hisoblash uchun — ``before_date``dan oldingi (bugungisiz)
     shu xodim/kategoriya bo'yicha eng so'nggi xarajatlar.

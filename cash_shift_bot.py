@@ -179,6 +179,7 @@ class CloseShiftStates(StatesGroup):
     actual_cash_balance = State()
     confirm_actual_balance = State()
     ai_unclear_field = State()
+    ledger_total_choice = State()
 
 
 class ExpenseStates(StatesGroup):
@@ -258,7 +259,7 @@ async def _download_photo_data_uri(bot, file_id: str) -> str | None:
 
 async def _extract_cash_shift_fields(
     bot, openai_client: AsyncOpenAI, sales_file_id: str, cash_file_id: str
-) -> dict[str, int] | None:
+) -> dict | None:
     """AI o'qishga urinadi. ``None`` — AI butunlay ishlamadi/o'chirilgan
     (chaqiruvchi mavjud qo'lda kiritish oqimidan foydalanishi kerak,
     PHASE2 #11). Bo'sh yoki to'liq bo'lmagan dict — AI ishladi, lekin
@@ -310,7 +311,57 @@ async def _extract_cash_shift_fields(
         if amount is not None and amount >= 0:
             clear_fields[field] = amount
 
+    # Daftardagi xarajat qatorlari (nom + summa) DBga YOZILMAYDI — kassir "Tasdiqlash"
+    # bosguncha FSM'da vaqtincha turadi (``closeshift_amount_confirmed``). ``None`` —
+    # daftar o'qilmadi (DBga tegilmaydi); ``[]`` — o'qildi, qator yo'q (tasdiqda eskilari tozalanadi).
+    ledger_items = list(cash_result.expense_items) if cash_result.confident else None
+    written_total = cash_result.written_expense_total
+    items_sum = cash_result.expense_items_sum
+    if ledger_items is None:
+        ledger_status = None
+    elif cash_result.expense_total_mismatch and ledger_items and items_sum is not None and written_total:
+        ledger_status = _LEDGER_MISMATCH_UNRESOLVED  # kassir qaysi raqam to'g'riligini tanlaguncha yozilmaydi
+    elif items_sum is not None and written_total and items_sum == int(written_total):
+        ledger_status = cash_expense.LEDGER_STATUS_MATCHED
+    else:
+        ledger_status = cash_expense.LEDGER_STATUS_UNVERIFIED
+    clear_fields["ledger_expense_items"] = ledger_items
+    clear_fields["ledger_written_total"] = written_total
+    clear_fields["ledger_total_mismatch"] = ledger_status == _LEDGER_MISMATCH_UNRESOLVED
+    clear_fields["ledger_items_sum"] = items_sum
+    clear_fields["ledger_total_status"] = ledger_status
+
     return clear_fields
+
+
+_LEDGER_MISMATCH_UNRESOLVED = "mismatch_unresolved"
+_LEDGER_SAVABLE_STATUSES = {
+    cash_expense.LEDGER_STATUS_MATCHED, cash_expense.LEDGER_STATUS_UNVERIFIED,
+    cash_expense.LEDGER_STATUS_ACCEPTED_ITEMS_SUM, cash_expense.LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL,
+}
+_LEDGER_CLEARED = {
+    "ledger_expense_items": None, "ledger_written_total": None, "ledger_total_mismatch": False,
+    "ledger_items_sum": None, "ledger_total_status": None,
+}
+
+
+def _ledger_choice_text(extracted: dict) -> str:
+    return (
+        "⚠️ Xarajatlar jami mos kelmadi.\n"
+        f"Men qatorlarni sanasam: {_format_amount(extracted['ledger_items_sum'])} so'm\n"
+        f"Daftardagi ‘Jami xarajat’: {_format_amount(int(extracted['ledger_written_total']))} so'm\n\n"
+        "Qaysi biri to'g'ri?"
+    )
+
+
+def _ledger_choice_kb(extracted: dict) -> InlineKeyboardMarkup:
+    items_sum = _format_amount(extracted["ledger_items_sum"])
+    written = _format_amount(int(extracted["ledger_written_total"]))
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ {items_sum} to'g'ri", callback_data="csui_ledger_items")],
+        [InlineKeyboardButton(text=f"✏️ {written} to'g'ri", callback_data="csui_ledger_written")],
+        [InlineKeyboardButton(text="🔁 Qayta rasm yuborish", callback_data="csui_ledger_resend")],
+    ])
 
 
 async def _ask_next_ai_field_or_summary(message: Message, state: FSMContext) -> None:
@@ -2073,7 +2124,9 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         if extracted is None:
             # AI o'chirilgan/butunlay ishlamadi — mavjud qo'lda kiritish
-            # oqimi AYNAN o'zgarishsiz davom etadi (PHASE2 #11).
+            # oqimi AYNAN o'zgarishsiz davom etadi (PHASE2 #11). Oldingi urinishdan
+            # qolgan vaqtinchalik daftar qatorlari tozalanadi (DBga tegilmaydi).
+            await state.update_data(**_LEDGER_CLEARED)
             await state.set_state(CloseShiftStates.cash_sales)
             sent = await message.answer("Bugungi naqd savdo summasini kiriting:")
             chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
@@ -2082,7 +2135,43 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         await state.update_data(**extracted)
         unclear_queue = [field for field in _AI_FIELD_ORDER if field not in extracted]
         await state.update_data(_ai_unclear_queue=unclear_queue)
+
+        if extracted.get("ledger_total_status") == _LEDGER_MISMATCH_UNRESOLVED:
+            # Qaysi biri to'g'ri ekani taxmin qilinmaydi: kassir tanlaydi, qatorlar (nomlar)
+            # tashlanmaydi — tanlovdan keyin tasdiqda yoziladi. Tanlovgacha davom etilmaydi.
+            await state.set_state(CloseShiftStates.ledger_total_choice)
+            sent = await message.answer(_ledger_choice_text(extracted), reply_markup=_ledger_choice_kb(extracted))
+            chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+            return
         await _ask_next_ai_field_or_summary(message, state)
+
+    @dp.callback_query(F.data == "csui_ledger_items", StateFilter(CloseShiftStates.ledger_total_choice))
+    async def closeshift_ledger_items_correct(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.update_data(ledger_total_status=cash_expense.LEDGER_STATUS_ACCEPTED_ITEMS_SUM)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _ask_next_ai_field_or_summary(callback.message, state)
+
+    @dp.callback_query(F.data == "csui_ledger_written", StateFilter(CloseShiftStates.ledger_total_choice))
+    async def closeshift_ledger_written_correct(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.update_data(ledger_total_status=cash_expense.LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer()
+        await _ask_next_ai_field_or_summary(callback.message, state)
+
+    @dp.callback_query(F.data == "csui_ledger_resend", StateFilter(CloseShiftStates.ledger_total_choice))
+    async def closeshift_ledger_resend(callback: CallbackQuery, state: FSMContext) -> None:
+        # Vaqtinchalik AI natijalari tozalanadi, DBga hech narsa yozilmaydi; daftar rasmi qayta so'raladi.
+        await state.update_data(
+            **_LEDGER_CLEARED, cash_sales=None, card_sales=None, other_payments=None,
+            actual_cash_balance=None, _ai_unclear_queue=None,
+        )
+        await state.set_state(CloseShiftStates.cash_photo)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        data = await state.get_data()
+        sent = await callback.message.answer("📸 Xarajat/kassa daftari rasmini qayta yuboring:")
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
+        await callback.answer()
 
     @dp.message(StateFilter(CloseShiftStates.cash_photo))
     async def closeshift_cash_photo_missing(message: Message) -> None:
@@ -2176,6 +2265,9 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.callback_query(F.data == "csui_close_amount_retry", StateFilter(CloseShiftStates.confirm_actual_balance))
     async def closeshift_amount_retry(callback: CallbackQuery, state: FSMContext) -> None:
+        # "Tuzatish" = AI natijasiga ishonmaslik: vaqtinchalik daftar qatorlari tashlanadi,
+        # qo'lda tasdiqlangan oqim DBga eski AI qatorlarini yozmaydi (``None`` — o'qilmagan).
+        await state.update_data(**_LEDGER_CLEARED)
         await state.set_state(CloseShiftStates.actual_cash_balance)
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
@@ -2198,6 +2290,27 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             data = await state.get_data()
             shift_id = data["shift_id"]
             amount = data["actual_cash_balance"]
+
+            # Daftar xarajat qatorlari FAQAT kassir tasdiqlagach yoziladi (qayta tasdiqda
+            # eskilari dublikatsiz almashtiriladi; tasdiqlangan bo'sh ro'yxat eskilarini
+            # tozalaydi). ``None`` — daftar o'qilmagan, DBga tegilmaydi. Jami mos kelmasa
+            # qatorlar kassir qaysi raqam to'g'riligini tanlagach (status) yoziladi; tanlanmagan
+            # (``mismatch_unresolved``) holatda yozilmaydi. Xato smena yopishni to'xtatmaydi.
+            ledger_items = data.get("ledger_expense_items")
+            ledger_status = data.get("ledger_total_status")
+            if ledger_items is not None and ledger_status in _LEDGER_SAVABLE_STATUSES:
+                written_total = int(data["ledger_written_total"]) if data.get("ledger_written_total") else None
+                accepted_total = (
+                    written_total if ledger_status == cash_expense.LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL else None
+                )
+                try:
+                    cash_expense.save_ledger_items(
+                        shift_id, ledger_items, total_status=ledger_status,
+                        written_total=written_total, accepted_total=accepted_total,
+                    )
+                except Exception as error:  # noqa: BLE001
+                    print(f"Daftar xarajat qatorlarini saqlashda xato (shift_id={shift_id}): {error!r}")
+
             cash_expenses = cash_expense.total_expenses_for_shift(shift_id)
 
             result = cash_shift.submit_close_attempt(

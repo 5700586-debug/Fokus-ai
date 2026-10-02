@@ -114,3 +114,62 @@ def test_get_expense_history_excludes_today_and_orders_desc():
     history = repo.get_expense_history(1, "taxi", before_date="2026-01-02")
     assert len(history) == 1
     assert history[0]["amount"] == 60000
+
+
+def test_ledger_expense_items_replace_without_duplicates_and_total_uses_amount_only(temp_db):
+    from repositories import cash_shifts as repo
+    from services import cash_expense
+
+    shift = repo.open_shift(1, "Filial-1", "2026-10-01", 0, 20000)
+    items = [
+        {"raw_name": "abinon", "normalized_name": "Obinon", "amount": 198000},
+        {"raw_name": "Vilka", "normalized_name": "Vilka", "amount": 220000},
+    ]
+    assert cash_expense.save_ledger_items(shift["id"], items) == 2
+    assert cash_expense.save_ledger_items(shift["id"], items) == 2  # qayta urinish dublikat yaratmaydi
+
+    saved = cash_expense.get_ledger_items(shift["id"])
+    assert [(r["line_no"], r["raw_name"], r["normalized_name"], r["amount"]) for r in saved] == [
+        (1, "abinon", "Obinon", 198000), (2, "Vilka", "Vilka", 220000),
+    ]
+    assert cash_expense.total_ledger_expenses(shift["id"]) == 418000
+
+    # Nom xato o'qilsa ham jami o'zgarmaydi (faqat amount hisoblanadi).
+    cash_expense.save_ledger_items(shift["id"], [
+        {"raw_name": "???", "normalized_name": None, "amount": 198000},
+        {"raw_name": "Vilkaa", "normalized_name": "", "amount": 220000},
+    ])
+    assert cash_expense.total_ledger_expenses(shift["id"]) == 418000
+    assert [r["normalized_name"] for r in cash_expense.get_ledger_items(shift["id"])] == ["???", "Vilkaa"]
+
+
+def test_ledger_summary_status_saved_replaced_and_cleared_with_items(temp_db):
+    import pytest
+
+    from repositories import cash_shifts as repo
+    from services import cash_expense
+
+    shift = repo.open_shift(1, "Filial-1", "2026-10-01", 0, 20000)
+    items = [
+        {"raw_name": "abinon", "normalized_name": "Obinon", "amount": 198000},
+        {"raw_name": "Vilka", "normalized_name": "Vilka", "amount": 220000},
+    ]
+    cash_expense.save_ledger_items(
+        shift["id"], items, total_status=cash_expense.LEDGER_STATUS_ACCEPTED_WRITTEN_TOTAL,
+        written_total=500000, accepted_total=500000,
+    )
+    summary = cash_expense.get_ledger_summary(shift["id"])
+    assert (summary["total_status"], summary["items_sum"], summary["written_total"], summary["accepted_total"]) == (
+        "cashier_accepted_written_total", 418000, 500000, 500000,
+    )
+
+    cash_expense.save_ledger_items(shift["id"], items)  # qayta tasdiq — almashtiriladi, dublikat yo'q
+    summary = cash_expense.get_ledger_summary(shift["id"])
+    assert summary["total_status"] == "matched" and summary["accepted_total"] == 418000
+    assert len(cash_expense.get_ledger_items(shift["id"])) == 2
+
+    cash_expense.save_ledger_items(shift["id"], [])  # bo'sh tasdiqlangan natija — qatorlar va holat tozalanadi
+    assert cash_expense.get_ledger_items(shift["id"]) == [] and cash_expense.get_ledger_summary(shift["id"]) is None
+
+    with pytest.raises(ValueError):
+        cash_expense.save_ledger_items(shift["id"], items, total_status="mismatch_unresolved")

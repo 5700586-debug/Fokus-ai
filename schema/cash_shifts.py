@@ -58,6 +58,34 @@ CREATE TABLE IF NOT EXISTS cash_expenses (
     created_at TEXT NOT NULL
 );
 
+-- Kassa/xarajat daftari ("SOTIB OLISH / XARAJATLAR") rasmidan o'qilgan har bir
+-- xarajat qatori: kassir yozgan asl nom, AI standartlashtirgan nom va summa.
+-- Hisob-kitobda FAQAT ``amount`` ishlatiladi; nom xato o'qilsa ham jami buzilmaydi.
+CREATE TABLE IF NOT EXISTS cash_ledger_expense_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shift_id INTEGER NOT NULL REFERENCES cash_shifts(id),
+    line_no INTEGER NOT NULL,
+    raw_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(shift_id, line_no)
+);
+
+-- Daftar xarajat qatorlari jami holati (smena uchun bitta qator): ``total_status`` —
+-- matched (qatorlar yig'indisi = "Jami xarajat"), unverified (solishtirib bo'lmadi),
+-- cashier_accepted_items_sum / cashier_accepted_written_total (jami mos kelmadi, kassir
+-- qaysi raqam to'g'riligini o'zi tanladi). ``accepted_total`` — kassir/mos kelish bo'yicha
+-- qabul qilingan raqam. Bot qaysi raqam to'g'ri ekanini o'zi taxmin qilmaydi.
+CREATE TABLE IF NOT EXISTS cash_ledger_expense_summary (
+    shift_id INTEGER PRIMARY KEY REFERENCES cash_shifts(id),
+    total_status TEXT NOT NULL,
+    items_sum INTEGER,
+    written_total INTEGER,
+    accepted_total INTEGER,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cash_difference_reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shift_id INTEGER NOT NULL REFERENCES cash_shifts(id),

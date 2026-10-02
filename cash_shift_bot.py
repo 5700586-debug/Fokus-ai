@@ -587,17 +587,24 @@ def _name_without_typo_quantity(raw_name: str, quantity: float) -> str:
     return deficiency_list_ai.normalize_name_words(" ".join(tokens))
 
 
+def _same_product_name(left: str, right: str) -> bool:
+    def _key(name: str) -> str:
+        return " ".join(deficiency_list_ai.normalize_name_words(name).lower().split())
+
+    return _key(left) == _key(right)
+
+
 def _followup_items(raw_name: str, results: list[dict]) -> list[dict]:
-    """Miqdor so'ralgandan keyingi to'liq qator. Oldingi mahsulot bilan bir xil
-    (birinchi so'z teng) bo'lsa — tuzatilgan qator sifatida qabul qilinadi; boshqa
-    mahsulot bo'lsa — mavjud almashtirish taklifi (ha/yo'q), tasdiqsiz yozilmaydi."""
+    """Miqdor so'ralgandan keyingi to'liq qator. Eski nomdan xato miqdor tokeni
+    tozalanib, hajm/imlo normallashtirilgach TO'LIQ nom solishtiriladi: teng bo'lsa —
+    tuzatilgan qator sifatida qabul qilinadi; farq qilsa (masalan "tuz Russ" -> "tuz Orzu")
+    mavjud almashtirish taklifi (ha/yo'q), tasdiqsiz yozilmaydi."""
     if len(results) != 1:
         return results
 
-    old_name = deficiency_list_ai.normalize_name_words(raw_name)
     new = results[0]["parsed"]
-    old_head = (old_name.split() or [""])[0].lower()
-    if not old_head or new["product_name"].split()[0].lower() == old_head:
+    old_name = _name_without_typo_quantity(raw_name, new["quantity"])
+    if not old_name or _same_product_name(old_name, new["product_name"]):
         return results
 
     return [{
@@ -610,6 +617,27 @@ def _followup_items(raw_name: str, results: list[dict]) -> list[dict]:
             },
         },
     }]
+
+
+def _partial_followup_item(raw_name: str, text: str) -> dict | None:
+    """Javobda faqat qisman ma'lumot bor ("20", "blok", "20 blk"): aniq qism saqlanadi,
+    mavjud partial/clarify oqimi faqat yetishmaganini so'raydi. Miqdorning yonidagi
+    tushunilmagan so'z (birlik imlo xatosi bo'lishi mumkin) tavsif sifatida saqlanmaydi —
+    shunchaki birlik so'raladi; hech narsa to'qilmaydi."""
+    short = deficiency_list_ai.parse_short_answer(text)
+    if short is None or (short["quantity"] is None and short["unit"] is None):
+        return None
+
+    quantity = short["quantity"]
+    name = (
+        _name_without_typo_quantity(raw_name, quantity)
+        if quantity is not None else deficiency_list_ai.normalize_name_words(raw_name)
+    )
+    item = {"raw_line": raw_name, "parsed": None, "partial": {"product_name": name, "quantity": None, "unit": None}}
+    answer = text
+    if short["unit"] is None and short["unknown"] and not short["quality"]:
+        answer = _format_deficiency_qty(quantity)
+    return item if deficiency_list_ai.apply_short_answer(item, answer) else None
 
 
 def _deficiency_need(item: dict) -> str:
@@ -1720,6 +1748,11 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             if results and all(item["parsed"] is not None for item in results):
                 items = _followup_items(raw_name, results)
                 await state.update_data(deficiency_list_items=items)
+                await _advance_deficiency_list(message, state, data["shift_id"])
+                return
+            partial_item = _partial_followup_item(raw_name, text)
+            if partial_item is not None:
+                await state.update_data(deficiency_list_items=[partial_item])
                 await _advance_deficiency_list(message, state, data["shift_id"])
                 return
             await message.answer(

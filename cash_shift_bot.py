@@ -576,6 +576,42 @@ async def _advance_deficiency_list(reply_target: Message, state: FSMContext, shi
     chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
 
 
+def _name_without_typo_quantity(raw_name: str, quantity: float) -> str:
+    """"Kola 2litr 20blol" + javobdagi 20 -> "Kola 2 litr": oxirgi token javob
+    miqdori bilan boshlanib harflar bilan davom etsa (xato yozilgan miqdor/birlik)
+    nomdan olib tashlanadi; boshqa hech narsa taxmin qilinmaydi."""
+    tokens = raw_name.split()
+    qty_text = _format_deficiency_qty(quantity)
+    if len(tokens) > 1 and re.match(rf"^{re.escape(qty_text)}[^\W\d_]+$", tokens[-1]):
+        tokens = tokens[:-1]
+    return deficiency_list_ai.normalize_name_words(" ".join(tokens))
+
+
+def _followup_items(raw_name: str, results: list[dict]) -> list[dict]:
+    """Miqdor so'ralgandan keyingi to'liq qator. Oldingi mahsulot bilan bir xil
+    (birinchi so'z teng) bo'lsa — tuzatilgan qator sifatida qabul qilinadi; boshqa
+    mahsulot bo'lsa — mavjud almashtirish taklifi (ha/yo'q), tasdiqsiz yozilmaydi."""
+    if len(results) != 1:
+        return results
+
+    old_name = deficiency_list_ai.normalize_name_words(raw_name)
+    new = results[0]["parsed"]
+    old_head = (old_name.split() or [""])[0].lower()
+    if not old_head or new["product_name"].split()[0].lower() == old_head:
+        return results
+
+    return [{
+        "raw_line": raw_name,
+        "parsed": None,
+        "partial": {
+            "product_name": old_name, "quantity": None, "unit": None,
+            "replace_proposal": {
+                "product_name": new["product_name"], "quantity": new["quantity"], "unit": new["unit"],
+            },
+        },
+    }]
+
+
 def _deficiency_need(item: dict) -> str:
     partial = item.get("partial") or {}
     quantity, unit = partial.get("quantity"), partial.get("unit")
@@ -1670,13 +1706,29 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(StateFilter(DeficiencyStates.item_amount))
     async def deficiency_item_amount(message: Message, state: FSMContext) -> None:
-        parsed = _parse_quantity_unit(message.text or "")
+        text = (message.text or "").strip()
+        data = await state.get_data()
+        raw_name = data.get("deficiency_item_name") or ""
+
+        parsed = _parse_quantity_unit(text)
         if parsed is None:
-            await message.answer("❌ Masalan: 10 kg / 5 dona / 2 litr / 3 quti — shu formatda kiriting:")
+            # Qisqa "20 blok" emas — to'liq tuzatilgan qator bo'lishi mumkin: mavjud
+            # parser, tushunmasa mavjud AI fallback (oldingi mahsulot qatori emas, yangi qator).
+            results = await deficiency_list_ai.parse_shopping_list(
+                openai_client if deficiency_list_ai.has_quantity_hint(text) else None, text
+            ) if text else []
+            if results and all(item["parsed"] is not None for item in results):
+                items = _followup_items(raw_name, results)
+                await state.update_data(deficiency_list_items=items)
+                await _advance_deficiency_list(message, state, data["shift_id"])
+                return
+            await message.answer(
+                "❌ Miqdor va birlik kerak — masalan: 20 blok / 10 kg, yoki to'liq tuzatilgan qator "
+                "(masalan: Kola 2 litr 20 blok):"
+            )
             return
 
         quantity, unit = parsed
-        data = await state.get_data()
         shift = cash_shift.get_shift(data.get("shift_id"))
         category = data.get("deficiency_category")
         if shift is None or category not in shift_deficiency.KNOWN_CATEGORIES:
@@ -1684,13 +1736,17 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await message.answer("❌ Bekor qilindi.")
             return
 
+        # Oldingi qatordagi xato yozilgan miqdor ("20blol") nomda qolmaydi.
+        name = _name_without_typo_quantity(raw_name, quantity)
         if category == shift_deficiency.CATEGORY_MARKET:
-            shift_deficiency.add_market_item(shift["id"], message.from_user.id, data["deficiency_item_name"], quantity, unit)
+            shift_deficiency.add_market_item(shift["id"], message.from_user.id, name, quantity, unit)
         else:
-            shift_deficiency.add_company_item(shift["id"], message.from_user.id, data["deficiency_item_name"], quantity, unit)
+            shift_deficiency.add_company_item(shift["id"], message.from_user.id, name, quantity, unit)
 
         await state.set_state(None)
-        sent = await message.answer("✅ Qo'shildi.", reply_markup=_deficiency_more_kb())
+        sent = await message.answer(
+            f"✅ Qo'shildi: {name} — {_format_deficiency_qty(quantity)} {unit}.", reply_markup=_deficiency_more_kb()
+        )
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
 
     @dp.callback_query(F.data == "csdef_add_more")

@@ -911,3 +911,86 @@ async def test_order_plain_quantity_answer_then_no_keeps_olma(bot_dp, monkeypatc
     sent = await send(main.dp, bot, 111, text="2. 3 dona")
     combined = _joined(sent)
     assert "Ro'yxat tayyor" in combined and "olma — 3 dona" in combined
+
+
+async def _typo_line_then_asked_for_amount(main, bot, monkeypatch, ai_payload=None, ai_error=True):
+    await _to_order_entry(main, bot, monkeypatch, ai_payload=ai_payload, ai_error=ai_error)
+    sent = await send(main.dp, bot, 111, text="Kola 2litr 20blol")
+    assert "Miqdorini kiriting" in _joined(sent)  # eski bosqichli oqimga tushdi
+
+
+def _market_products() -> dict:
+    return {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+
+
+async def test_item_amount_followup_short_answer_keeps_clean_product_name(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="20 blok")
+    assert "Kola 2 litr — 20 blok" in _joined(sent)  # hajm miqdorga aralashmadi, xato matn nomda qolmadi
+
+    products = _market_products()
+    assert list(products) == ["Kola 2 litr"]
+    assert products["Kola 2 litr"]["total_quantity"] == 20 and products["Kola 2 litr"]["unit"] == "blok"
+
+
+@pytest.mark.parametrize("corrected", ["Kola 2litr 20blok", "Kola 2lit 20 blok"])
+async def test_item_amount_followup_full_corrected_line_is_accepted(bot_dp, monkeypatch, corrected):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text=corrected)
+    combined = _joined(sent)
+    assert "1. Kola 2 litr — 20 blok" in combined and "blol" not in combined
+    assert _market_products() == {}  # tasdiqdan oldin DBga yozilmaydi
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    products = _market_products()
+    assert list(products) == ["Kola 2 litr"] and products["Kola 2 litr"]["total_quantity"] == 20
+
+
+async def test_item_amount_followup_uses_existing_ai_fallback_for_unclear_corrected_line(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    payload = [{"line": "Kola 2lit 20 blk", "product_name": "Kola 2 litr", "quantity": 20, "unit": "blok"}]
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch, ai_payload=payload, ai_error=False)
+
+    sent = await send(main.dp, bot, 111, text="Kola 2lit 20 blk")
+    assert "1. Kola 2 litr — 20 blok" in _joined(sent)
+
+
+async def test_item_amount_followup_ai_error_asks_only_what_is_missing_and_invents_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)  # AI timeout
+
+    sent = await send(main.dp, bot, 111, text="yigirma tayoq")
+    combined = _joined(sent)
+    assert "Miqdor va birlik kerak" in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}
+
+    sent = await send(main.dp, bot, 111, text="20 blok")  # aniq ma'lumot keyingi urinishda baribir ishlaydi
+    assert "Kola 2 litr — 20 blok" in _joined(sent)
+
+
+async def test_item_amount_followup_other_product_goes_through_replace_confirmation(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _typo_line_then_asked_for_amount(main, bot, monkeypatch)
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    combined = _joined(sent)
+    assert "almashtirasizmi?" in combined and "Ro'yxat tayyor" not in combined
+    assert _market_products() == {}  # tasdiqlanmaguncha hech narsa yozilmaydi
+
+    sent = await send(main.dp, bot, 111, text="1. ha")
+    assert "1. Karam — 2 dona" in _joined(sent)
+
+
+async def test_item_amount_plain_product_then_quantity_still_works_as_before(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor")
+    assert "Miqdorini kiriting" in _joined(sent)
+    sent = await send(main.dp, bot, 111, text="10 kg")
+    assert "Qo'shildi" in _joined(sent)
+    assert _market_products()["Pomidor"]["total_quantity"] == 10

@@ -100,7 +100,9 @@ def normalize_name_words(name: str) -> str:
         return fixed.capitalize() if word[0].isupper() else fixed
 
     pattern = "|".join(_QUALITY_FIXES)
-    return re.sub(r"\b(?:" + pattern + r")\b", _fix, name or "", flags=re.IGNORECASE)
+    fixed = re.sub(r"\b(?:" + pattern + r")\b", _fix, name or "", flags=re.IGNORECASE)
+    # Yopishgan/qisqartirilgan hajm ("2litr", "2lit") nomda "2 litr" bo'ladi; "2L" o'zgarmaydi.
+    return re.sub(r"(?<![\w])(\d+(?:[.,]\d+)?)\s*(?:litr|lit|litir)\b", r"\1 litr", fixed, flags=re.IGNORECASE)
 
 
 def has_quantity_hint(text: str) -> bool:

@@ -205,3 +205,18 @@ def test_other_product_answer_becomes_a_proposal_not_a_rename():
     assert apply_short_answer(item, "Karam 2 dona", other_product="Karam") is True
     assert resolve_unresolved_by_choice(item, "ha") is True
     assert item["parsed"] == {"product_name": "Karam", "quantity": 2.0, "unit": "dona"}
+
+
+def test_plain_quantity_unit_answer_does_not_clear_replace_proposal():
+    from services.deficiency_list_ai import apply_short_answer, parse_line_partial, resolve_unresolved_by_choice
+
+    item = {"raw_line": "olma", "parsed": None, "partial": parse_line_partial("olma")}
+    assert apply_short_answer(item, "Karam 2 dona", other_product="Karam") is True
+
+    assert apply_short_answer(item, "3 dona") is False  # oddiy javob taklifni o'chirmaydi
+    assert item["parsed"] is None
+    assert item["partial"]["product_name"] == "olma" and item["partial"]["quantity"] is None
+    assert item["partial"]["replace_proposal"] == {"product_name": "Karam", "quantity": 2.0, "unit": "dona"}
+
+    assert resolve_unresolved_by_choice(item, "ha") is True
+    assert item["parsed"] == {"product_name": "Karam", "quantity": 2.0, "unit": "dona"}

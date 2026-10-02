@@ -1436,6 +1436,9 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 if deficiency_list_ai.resolve_unresolved_by_choice(item, answer):
                     understood += 1
                     continue
+                if (item.get("partial") or {}).get("replace_proposal"):
+                    problems.append(f"{number}-qator: avval almashtirish savoliga «ha» yoki «yo'q» deb javob bering")
+                    continue
                 extra_quality = other_product = None
                 unknown = deficiency_list_ai.unknown_answer_words(answer)
                 if unknown:

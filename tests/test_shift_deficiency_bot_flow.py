@@ -868,3 +868,46 @@ async def test_order_ai_timeout_unclassified_word_explicit_replace_choice(bot_dp
     sent = await send(main.dp, bot, 111, text="2. almashtirish")
     combined = _joined(sent)
     assert "Karam — 2 dona" in combined and "olma" not in combined and "bodring — 10 kg" in combined
+
+
+async def test_order_plain_quantity_answer_keeps_replace_proposal_and_blocks_confirmation(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    async def _ai_product(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": None, "product": "Karam"}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _ai_product)
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    assert "Olmani karamga almashtirasizmi?" in _joined(sent)
+
+    sent = await send(main.dp, bot, 111, text="2. 3 dona")  # oddiy miqdor/birlik javobi
+    combined = _joined(sent)
+    assert "avval almashtirish savoliga" in combined
+    assert "Ro'yxat tayyor" not in combined
+
+    # Taklif saqlangan: keyingi aniq "ha" to'g'ri ishlaydi (Karam — 2 dona, 3 dona emas).
+    sent = await send(main.dp, bot, 111, text="2. ha")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined
+    assert "Karam — 2 dona" in combined and "olma" not in combined and "3 dona" not in combined
+
+
+async def test_order_plain_quantity_answer_then_no_keeps_olma(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    async def _ai_product(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": None, "product": "Karam"}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _ai_product)
+    await send(main.dp, bot, 111, text="Karam 2 dona")
+    await send(main.dp, bot, 111, text="2. 3 dona")
+
+    sent = await send(main.dp, bot, 111, text="2. yo'q")
+    assert "2. olma — miqdor va birlik kerak" in _joined(sent)  # taklif yopildi, olma qoldi, 3 dona saqlanmadi
+    sent = await send(main.dp, bot, 111, text="2. 3 dona")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and "olma — 3 dona" in combined

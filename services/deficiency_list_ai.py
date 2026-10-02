@@ -336,7 +336,7 @@ def apply_short_answer(
     - ``extra_quality`` (AI tasdiqlagan sifat) nomga qo'shiladi.
     - ``other_product`` (AI "boshqa mahsulot" degan): nom/miqdor/birlik
       O'ZGARMAYDI, almashtirish taklifi ``partial["replace_proposal"]`` da
-      kassir tasdiqlashini kutadi.
+      kassir tasdiqlashini kutadi. Taklif turganda boshqa javob rad etiladi.
     - Klassifikatsiya qilinmagan so'z ``partial["unresolved"]`` da yo'qolmay
       qoladi (nomga qo'shilmaydi) — kassir aniq tanlaydi.
     Faqat noaniq so'zdan iborat javob (AI tasdiqlamagan) rad etiladi
@@ -356,9 +356,12 @@ def apply_short_answer(
         item["partial"] = partial
         return True
 
+    if partial.get("replace_proposal"):
+        # Taklif faqat aniq ha/yo'q yoki aniq tahrir bilan hal bo'ladi — oddiy
+        # miqdor/birlik javobi uni o'chirmaydi va nomga/miqdorga tegmaydi.
+        return False
     if unknown and not extra_quality and not has_clear_part:
         return False
-    partial.pop("replace_proposal", None)
 
     if answer["quantity"] is not None:
         partial["quantity"] = answer["quantity"]

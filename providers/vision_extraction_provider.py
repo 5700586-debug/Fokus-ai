@@ -20,7 +20,7 @@ degan ma'noda, natijaning har bir maydoni bo'yicha EMAS).
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from openai import AsyncOpenAI
@@ -32,6 +32,13 @@ import config
 class ExtractionResult:
     confident: bool
     values: dict[str, str]
+    # Kassa/xarajat daftaridan o'qilgan har bir xarajat qatori:
+    # {"raw_name", "normalized_name", "amount": int}. Hisob-kitobda faqat amount.
+    expense_items: list[dict] = field(default_factory=list)
+    written_expense_total: str | None = None
+    expense_total_mismatch: bool = False
+    # Qatorlar summasi (faqat amount); solishtirib bo'lmasa (yaroqsiz qator/yo'q) None.
+    expense_items_sum: int | None = None
 
 
 class VisionExtractionProvider(Protocol):
@@ -73,21 +80,23 @@ _SALES_REPORT_PROMPT = (
 
 _CASH_REPORT_PROMPT = (
     "Bu — kassir kunlik KASSA/XARAJAT daftari varag'ining fotosurati "
-    "(qo'lda yozilgan). Undan quyidagilarni o'qi: cash_sales (varaqda "
-    "\"savdo\" deb aniq yozilgan summa; bo'lmasa yoki naqd savdo ekani "
-    "noaniq bo'lsa \"unclear\"), actual_cash_balance "
-    "(kassadagi haqiqiy naqd pul qoldig'i), expense_lines (varaqdagi har "
-    "bir xarajat qatorining summasi, ro'yxat sifatida), written_total "
-    "(agar varaqda alohida yozilgan jami xarajat bo'lsa). Faqat quyidagi "
-    "JSON formatida javob ber, boshqa hech narsa yozma:\n"
+    "(qo'lda yozilgan). Varaqda \"SOTIB OLISH / XARAJATLAR\" bo'limi bor (25 tagacha qator): "
+    "har qatorda mahsulot/xarajat nomi va summa. Undan quyidagilarni o'qi: "
+    "cash_sales (varaqda \"savdo\" deb aniq yozilgan summa; bo'lmasa yoki naqd savdo ekani "
+    "noaniq bo'lsa \"unclear\"), actual_cash_balance (kassadagi haqiqiy naqd pul qoldig'i), "
+    "expense_items (har bir xarajat qatori: raw_name — kassir yozgan asl nom AYNAN qog'ozdagidek; "
+    "normalized_name — tushunganing standart nom (imlo xatosini to'g'rila, masalan \"abinon\" -> "
+    "\"Obinon\"), ishonchsiz bo'lsa null; amount — shu qatorning summasi), "
+    "written_expense_total (varaqda alohida yozilgan \"Jami xarajat\" bo'lsa, aks holda null). "
+    "Faqat quyidagi JSON formatida javob ber, boshqa hech narsa yozma:\n"
     '{"cash_sales": "<son yoki \\"unclear\\">", '
     '"actual_cash_balance": "<son yoki \\"unclear\\">", '
-    '"expense_lines": [<sonlar ro\'yxati>], '
-    '"written_total": "<son yoki null>"}\n'
+    '"expense_items": [{"raw_name": "<matn>", "normalized_name": "<matn yoki null>", "amount": "<son>"}], '
+    '"written_expense_total": "<son yoki null>"}\n'
     "Yozuv bo'sh, o'qilmaydigan, ikki xil o'qilishi mumkin yoki pul "
     "formati noto'g'ri bo'lsa — \"actual_cash_balance\" uchun aynan "
-    "\"unclear\" yoz. Hech qanday hisob-kitob qilma, faqat qog'ozda "
-    "yozilganini o'qi."
+    "\"unclear\" yoz. Nomni o'qiy olmasang ham qatorni tashlama: raw_name'ga ko'ringanini yoz. "
+    "Hech qanday hisob-kitob qilma va hech narsani o'zing to'qima, faqat qog'ozda yozilganini o'qi."
 )
 
 _PROMPTS = {
@@ -105,6 +114,46 @@ def _clean_amount(raw) -> str | None:
     if not _AMOUNT_RE.match(cleaned):
         return None
     return cleaned
+
+
+_MAX_EXPENSE_ITEMS = 50
+_MAX_NAME_LENGTH = 80
+
+
+def _clean_name(raw) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    cleaned = " ".join(raw.split())[:_MAX_NAME_LENGTH]
+    return cleaned or None
+
+
+def _parse_expense_items(raw_items) -> tuple[list[dict], bool]:
+    """``expense_items`` -> ([{raw_name, normalized_name, amount:int}], has_invalid).
+    Summasi yaroqsiz (musbat butun son emas) qatorlar saqlanmaydi va ``has_invalid``
+    belgilanadi (jami solishtirib bo'lmaydi). Nom noaniq bo'lsa ham qator tashlanmaydi:
+    ``raw_name`` bo'sh bo'lsa ``normalized_name``, u ham bo'lmasa "Noma'lum"."""
+    if not isinstance(raw_items, list):
+        return [], False
+
+    items: list[dict] = []
+    has_invalid = False
+    for entry in raw_items[:_MAX_EXPENSE_ITEMS]:
+        if not isinstance(entry, dict):
+            has_invalid = True
+            continue
+        amount_text = _clean_amount(str(entry.get("amount")) if entry.get("amount") is not None else None)
+        if amount_text is None or int(amount_text) <= 0:
+            has_invalid = True
+            continue
+        raw_name = _clean_name(entry.get("raw_name"))
+        normalized = _clean_name(entry.get("normalized_name"))
+        raw_name = raw_name or normalized or "Noma'lum"
+        items.append({
+            "raw_name": raw_name, "normalized_name": normalized or raw_name, "amount": int(amount_text),
+        })
+    if len(raw_items) > _MAX_EXPENSE_ITEMS:
+        has_invalid = True
+    return items, has_invalid
 
 
 class OpenAIVisionExtractionProvider:
@@ -150,27 +199,37 @@ class OpenAIVisionExtractionProvider:
                 if amount is not None:
                     values[field] = amount
         else:
-            expense_lines_raw = data.get("expense_lines")
-            written_total = _clean_amount(data.get("written_total"))
+            items, has_invalid = _parse_expense_items(data.get("expense_items"))
+            written_total = _clean_amount(data.get("written_expense_total"))
+            if written_total is None:
+                written_total = _clean_amount(data.get("written_total"))
+
             lines_sum = None
-            if isinstance(expense_lines_raw, list) and expense_lines_raw:
-                cleaned_lines = [_clean_amount(str(item)) for item in expense_lines_raw]
+            if items and not has_invalid:
+                lines_sum = sum(item["amount"] for item in items)
+            elif not items and isinstance(data.get("expense_lines"), list) and data["expense_lines"]:
+                # Eski format (faqat summalar): nomlarsiz, faqat jami tekshiruvi uchun.
+                cleaned_lines = [_clean_amount(str(item)) for item in data["expense_lines"]]
                 if all(item is not None for item in cleaned_lines):
                     lines_sum = sum(int(item) for item in cleaned_lines)
 
-            # Ichki mos kelish tekshiruvi — AI hisoblamaydi, bu shunchaki
-            # o'qilgan ikkita raqamni solishtirish (kamomad formulasi
-            # EMAS). Mos kelmasa, shu varaqdan o'qilgan qoldiq ham
-            # unclear hisoblanadi (PHASE2 #9).
-            sums_consistent = (
-                lines_sum is None or written_total is None or str(lines_sum) == written_total
-            )
+            # Ichki mos kelish tekshiruvi — AI hisoblamaydi, bu shunchaki o'qilgan
+            # qatorlar summasini (FAQAT amount) yozilgan jami bilan solishtirish
+            # (kamomad formulasi EMAS). Mos kelmasa, shu varaqdan o'qilgan qoldiq
+            # ham unclear hisoblanadi (PHASE2 #9) — nom xato o'qilsa ham jami buzilmaydi.
+            mismatch = lines_sum is not None and written_total is not None and str(lines_sum) != written_total
             cash_sales = _clean_amount(data.get("cash_sales"))
             if cash_sales is not None:
                 values["cash_sales"] = cash_sales
             balance = _clean_amount(data.get("actual_cash_balance"))
-            if balance is not None and sums_consistent:
+            if balance is not None and not mismatch:
                 values["actual_cash_balance"] = balance
+
+            return ExtractionResult(
+                confident=True, values=values, expense_items=items,
+                written_expense_total=written_total, expense_total_mismatch=mismatch,
+                expense_items_sum=lines_sum,
+            )
 
         return ExtractionResult(confident=True, values=values)
 

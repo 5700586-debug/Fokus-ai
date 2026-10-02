@@ -21,6 +21,8 @@ EXPECTED_TABLES = {
     "meal_plans",
     "cash_shifts",
     "cash_expenses",
+    "cash_ledger_expense_items",
+    "cash_ledger_expense_summary",
     "cash_difference_reviews",
     "cash_shift_approvals",
     "inventory_daily_snapshots",

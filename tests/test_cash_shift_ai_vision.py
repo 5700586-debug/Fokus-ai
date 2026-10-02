@@ -331,3 +331,370 @@ async def test_escalation_after_retry_limit_still_notifies_branch_supervisor_too
     assert "tekshiruvi kerak" in founder_messages[0].text.lower()
     assert len(branch_messages) == 1
     assert len(finance_messages) == 1
+
+
+def _ledger_provider(items, written_total="598000", balance="100000", mismatch=False, items_sum=None):
+    values = {"actual_cash_balance": balance} if balance is not None else {}
+    return _FakeVisionProvider({
+        CASH_SHIFT_SALES_REPORT: ExtractionResult(
+            confident=True, values={"cash_sales": "100000", "card_sales": "0", "other_payments": "0"}
+        ),
+        CASH_SHIFT_CASH_REPORT: ExtractionResult(
+            confident=True, values=values, expense_items=items,
+            written_expense_total=written_total, expense_total_mismatch=mismatch, expense_items_sum=items_sum,
+        ),
+    })
+
+
+_LEDGER_ITEMS_2 = [
+    {"raw_name": "abinon", "normalized_name": "Obinon", "amount": 198000},
+    {"raw_name": "Sadaf", "normalized_name": "Sadaf", "amount": 400000},
+]
+
+
+def _ledger_rows(shift_id: int):
+    from services import cash_expense
+
+    return [(r["line_no"], r["raw_name"], r["normalized_name"], r["amount"]) for r in cash_expense.get_ledger_items(shift_id)]
+
+
+async def test_ledger_items_not_written_when_ai_reads_only_after_confirm(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2))
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert any("AI o'qigan qiymatlar" in t for t in _texts(sent))
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert _ledger_rows(shift["id"]) == []  # AI o'qidi, lekin tasdiqlanmagan — DBda yo'q
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert _ledger_rows(shift["id"]) == [
+        (1, "abinon", "Obinon", 198000), (2, "Sadaf", "Sadaf", 400000),  # original line_no ketma-ketligi
+    ]
+
+
+async def test_ledger_items_not_written_when_cashier_presses_correct(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2))
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_retry", target_chat_id=111)
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert _ledger_rows(shift["id"]) == []  # "Tuzatish" — DBga yozilmaydi
+
+
+async def test_ledger_items_reconfirm_replaces_old_rows_without_duplicates(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    from services import cash_expense, cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    cash_expense.save_ledger_items(shift["id"], [{"raw_name": "eski", "normalized_name": "Eski", "amount": 1}])
+
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2))
+    await _start_closeshift_with_photos(main, bot, 111)
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert _ledger_rows(shift["id"]) == [(1, "abinon", "Obinon", 198000), (2, "Sadaf", "Sadaf", 400000)]
+
+    # Qayta tasdiq (masalan farq chiqqach) — dublikat bo'lmaydi.
+    ledger = cash_expense.get_ledger_items(shift["id"])
+    cash_expense.save_ledger_items(shift["id"], [{k: r[k] for k in ("raw_name", "normalized_name", "amount")} for r in ledger])
+    assert len(_ledger_rows(shift["id"])) == 2
+
+
+async def test_confirmed_empty_ledger_items_clear_old_rows(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    from services import cash_expense, cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    cash_expense.save_ledger_items(shift["id"], _LEDGER_ITEMS_2)
+
+    _enable_ai(monkeypatch, _ledger_provider([]))  # qayta rasm: expense_items bo'sh
+    await _start_closeshift_with_photos(main, bot, 111)
+    assert len(_ledger_rows(shift["id"])) == 2  # tasdiqdan oldin eski qatorlar tegilmagan
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert _ledger_rows(shift["id"]) == []  # tasdiqlangan bo'sh natija eskilarini tozaladi
+
+
+async def test_ledger_items_untouched_when_ai_fails_and_manual_flow_used(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    from services import cash_expense, cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    cash_expense.save_ledger_items(shift["id"], _LEDGER_ITEMS_2)
+
+    _enable_ai(monkeypatch, _FakeVisionProvider(error=RuntimeError("AI xatosi")))
+    await _start_closeshift_with_photos(main, bot, 111)
+    await send(main.dp, bot, 111, text="100000")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="0")
+    await _confirm_close_amount(main, bot, 111, "100000")
+
+    assert len(_ledger_rows(shift["id"])) == 2  # daftar o'qilmadi — mavjud qatorlar o'zgarmadi
+
+
+async def test_ledger_items_save_failure_does_not_break_close_flow(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider([{"raw_name": "x", "normalized_name": "x", "amount": 1}], written_total="1"))
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    from services import cash_expense
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("DB xatosi")
+
+    monkeypatch.setattr(cash_expense, "save_ledger_items", _boom)
+    sent = await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert any("KASSA — KUN YAKUNI" in t for t in _texts(sent))  # smena yopilishi to'xtamadi
+
+
+async def test_ledger_items_dropped_on_correct_then_manual_balance_confirm_writes_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2))
+    await _start_closeshift_with_photos(main, bot, 111)  # AI expense_items o'qidi (FSMda)
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_retry", target_chat_id=111)  # "Tuzatish"
+    await send(main.dp, bot, 111, text="100000")  # qoldiq qo'lda
+    sent = await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert any("KASSA — KUN YAKUNI" in t for t in _texts(sent))  # smena yopildi
+
+    from repositories import cash_shifts as repo
+    from services import cash_shift
+
+    shift = cash_shift.get_shift(repo.get_last_closed_shift("Filial-1")["id"])
+    assert repo.get_ledger_expense_items(shift["id"]) == []  # eski AI qatorlari yozilmadi
+
+
+async def test_ledger_items_correct_does_not_clear_existing_rows_either(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    from services import cash_expense, cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    cash_expense.save_ledger_items(shift["id"], _LEDGER_ITEMS_2)  # avval tasdiqlangan qatorlar
+    _enable_ai(monkeypatch, _ledger_provider([]))
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_retry", target_chat_id=111)
+    await send(main.dp, bot, 111, text="100000")
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    assert len(_ledger_rows(shift["id"])) == 2  # "Tuzatish" None -> mavjud qatorlarga tegilmaydi
+
+
+async def test_ledger_items_written_when_no_mismatch(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2, written_total="598000", mismatch=False))
+    await _start_closeshift_with_photos(main, bot, 111)
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    from repositories import cash_shifts as repo
+
+    closed = repo.get_last_closed_shift("Filial-1")
+    assert [(r["line_no"], r["raw_name"], r["amount"]) for r in repo.get_ledger_expense_items(closed["id"])] == [
+        (1, "abinon", 198000), (2, "Sadaf", 400000),
+    ]
+
+
+async def test_ledger_match_shows_no_warning_and_writes_items(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2, written_total="598000", mismatch=False, items_sum=598000))
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert not any("mos kelmadi" in t for t in _texts(sent))
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    from repositories import cash_shifts as repo
+
+    closed = repo.get_last_closed_shift("Filial-1")
+    assert len(repo.get_ledger_expense_items(closed["id"])) == 2
+
+
+
+
+def _mismatch_provider(balance=None):
+    return _ledger_provider(_LEDGER_ITEMS_2, written_total="900000", balance=balance, mismatch=True, items_sum=598000)
+
+
+def _ledger_summary(shift_id: int):
+    from repositories import cash_shifts as repo
+
+    return repo.get_ledger_expense_summary(shift_id)
+
+
+async def _close_shift_id(main, bot):
+    from repositories import cash_shifts as repo
+
+    return repo.get_last_closed_shift("Filial-1")["id"]
+
+
+async def test_ledger_match_writes_items_with_status_matched(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2, written_total="598000", items_sum=598000))
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert not any("mos kelmadi" in t for t in _texts(sent))
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    shift_id = await _close_shift_id(main, bot)
+    summary = _ledger_summary(shift_id)
+    assert summary["total_status"] == "matched" and summary["accepted_total"] == 598000
+    assert [(r["line_no"], r["raw_name"], r["normalized_name"], r["amount"]) for r in _ledger_rows_by_id(shift_id)] == [
+        (1, "abinon", "Obinon", 198000), (2, "Sadaf", "Sadaf", 400000),
+    ]
+
+
+def _ledger_rows_by_id(shift_id: int):
+    from repositories import cash_shifts as repo
+
+    return repo.get_ledger_expense_items(shift_id)
+
+
+async def test_ledger_mismatch_asks_cashier_with_three_buttons_and_waits(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider())
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    message = next(m for m in sent if getattr(m, "text", None) and "mos kelmadi" in m.text)
+    assert message.text == (
+        "⚠️ Xarajatlar jami mos kelmadi.\nMen qatorlarni sanasam: 598 000 so'm\n"
+        "Daftardagi ‘Jami xarajat’: 900 000 so'm\n\nQaysi biri to'g'ri?"
+    )
+    labels = [b.text for row in message.reply_markup.inline_keyboard for b in row]
+    assert labels == ["✅ 598 000 to'g'ri", "✏️ 900 000 to'g'ri", "🔁 Qayta rasm yuborish"]
+    assert not any("tushunmadim" in t for t in _texts(sent))  # kassir tanlamaguncha davom etilmaydi
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert _ledger_rows_by_id(shift["id"]) == []  # tanlovgacha DBga yozilmaydi
+
+
+async def test_ledger_mismatch_items_sum_accepted_writes_items_with_status(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider())
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    sent = await send_callback(main.dp, bot, 111, data="csui_ledger_items", target_chat_id=111)
+    assert any("tushunmadim" in t for t in _texts(sent))  # mavjud oqim: qoldiq so'raladi
+    await send(main.dp, bot, 111, text="100000")
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    shift_id = await _close_shift_id(main, bot)
+    summary = _ledger_summary(shift_id)
+    assert summary["total_status"] == "cashier_accepted_items_sum"
+    assert (summary["items_sum"], summary["written_total"], summary["accepted_total"]) == (598000, 900000, 598000)
+    assert [(r["line_no"], r["raw_name"], r["amount"]) for r in _ledger_rows_by_id(shift_id)] == [
+        (1, "abinon", 198000), (2, "Sadaf", 400000),  # nomlar mismatch sababli tashlanmadi, line_no saqlandi
+    ]
+
+
+async def test_ledger_mismatch_written_total_accepted_writes_items_with_status(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider())
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    await send_callback(main.dp, bot, 111, data="csui_ledger_written", target_chat_id=111)
+    await send(main.dp, bot, 111, text="100000")
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+
+    shift_id = await _close_shift_id(main, bot)
+    summary = _ledger_summary(shift_id)
+    assert summary["total_status"] == "cashier_accepted_written_total"
+    assert (summary["items_sum"], summary["written_total"], summary["accepted_total"]) == (598000, 900000, 900000)
+    assert len(_ledger_rows_by_id(shift_id)) == 2  # qatorlar baribir yozildi
+
+
+async def test_ledger_mismatch_resend_photo_clears_temp_results_and_writes_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider())
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    sent = await send_callback(main.dp, bot, 111, data="csui_ledger_resend", target_chat_id=111)
+    assert any("rasmini qayta yuboring" in t for t in _texts(sent))
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert _ledger_rows_by_id(shift["id"]) == [] and _ledger_summary(shift["id"]) is None
+    ctx = main.dp.fsm.get_context(bot=bot, chat_id=111, user_id=111)
+    data = await ctx.get_data()
+    assert data["ledger_expense_items"] is None and data["ledger_total_status"] is None
+    assert data["cash_sales"] is None and data["actual_cash_balance"] is None
+    assert await ctx.get_state() == "CloseShiftStates:cash_photo"
+
+    # Yangi rasm (endi jami mos) alohida bosqich sifatida qayta o'qiladi.
+    _enable_ai(monkeypatch, _ledger_provider(_LEDGER_ITEMS_2, written_total="598000", items_sum=598000))
+    sent = await send(main.dp, bot, 111, photo_file_id="cash_photo_2")
+    assert any("AI o'qigan qiymatlar" in t for t in _texts(sent))
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    assert _ledger_summary(await _close_shift_id(main, bot))["total_status"] == "matched"
+
+
+async def test_ledger_mismatch_buttons_not_accepted_after_choice_made(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider())
+    await _start_closeshift_with_photos(main, bot, 111)
+
+    await send_callback(main.dp, bot, 111, data="csui_ledger_items", target_chat_id=111)
+    sent = await send_callback(main.dp, bot, 111, data="csui_ledger_written", target_chat_id=111)  # eski tugma
+    assert not [m for m in sent if getattr(m, "text", None)]
+
+    ctx = main.dp.fsm.get_context(bot=bot, chat_id=111, user_id=111)
+    assert (await ctx.get_data())["ledger_total_status"] == "cashier_accepted_items_sum"
+
+
+async def test_correct_after_ledger_choice_clears_ai_ledger_data_and_writes_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, _mismatch_provider(balance="100000"))
+    await _start_closeshift_with_photos(main, bot, 111)
+    await send_callback(main.dp, bot, 111, data="csui_ledger_items", target_chat_id=111)
+
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_retry", target_chat_id=111)  # "Tuzatish"
+    ctx = main.dp.fsm.get_context(bot=bot, chat_id=111, user_id=111)
+    data = await ctx.get_data()
+    assert data["ledger_expense_items"] is None and data["ledger_total_status"] is None
+
+    await send(main.dp, bot, 111, text="100000")
+    await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    shift_id = await _close_shift_id(main, bot)
+    assert _ledger_rows_by_id(shift_id) == [] and _ledger_summary(shift_id) is None

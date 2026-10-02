@@ -23,7 +23,7 @@ KNOWN_CATEGORIES = (CATEGORY_MARKET, CATEGORY_COMPANY)
 STATUS_OPEN = "open"
 STATUS_ARRIVED = "arrived"
 
-KNOWN_UNITS = ("kg", "dona", "litr", "quti", "blok", "karobka")
+KNOWN_UNITS = ("kg", "dona", "litr", "quti", "blok", "karobka", "yashik")
 
 STEP_MARKET = "market"
 STEP_COMPANY = "company"

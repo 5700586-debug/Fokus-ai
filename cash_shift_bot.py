@@ -554,9 +554,9 @@ async def _advance_deficiency_list(reply_target: Message, state: FSMContext, shi
     aniq bo'lsa, yakuniy tasdiqlash xulosasini ko'rsatadi."""
     data = await state.get_data()
     items = data.get("deficiency_list_items") or []
-    index = next((i for i, item in enumerate(items) if item["parsed"] is None), None)
+    pending = [i for i, item in enumerate(items) if item["parsed"] is None]
 
-    if index is None:
+    if not pending:
         await state.set_state(None)
         lines = [
             f"{i + 1}. {item['parsed']['product_name']} — "
@@ -571,14 +571,81 @@ async def _advance_deficiency_list(reply_target: Message, state: FSMContext, shi
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
         return
 
-    await state.update_data(deficiency_list_unclear_index=index)
     await state.set_state(DeficiencyStates.list_clarify)
-    sent = await reply_target.answer(
-        f"❓ Bu qatorni tushunmadim: \"{items[index]['raw_line']}\"\n"
-        "Iltimos mahsulot, miqdor va birlikni shu formatda qayta yozing "
-        "(masalan: Pomidor 10 kg):"
-    )
+    sent = await reply_target.answer(_deficiency_clarify_text(items, pending))
     chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
+
+
+def _deficiency_need(item: dict) -> str:
+    partial = item.get("partial") or {}
+    quantity, unit = partial.get("quantity"), partial.get("unit")
+    if quantity is not None and unit is not None:
+        need = f"{_format_deficiency_qty(quantity)} {unit} qabul qilindi"
+    elif quantity is not None:
+        need = f"birlik kerak (miqdor: {_format_deficiency_qty(quantity)})"
+    elif unit is not None:
+        need = f"miqdor kerak (birlik: {unit})"
+    else:
+        need = "miqdor va birlik kerak"
+    unresolved = partial.get("unresolved")
+    if unresolved:
+        need += (
+            f"; “{' '.join(unresolved)}” — mahsulotni almashtirishmi yoki tavsif qo'shishmi? "
+            "(almashtirish / tavsif; yo'q — so'zni tashlab ketish)"
+        )
+    proposal = partial.get("replace_proposal")
+    if proposal:
+        given = " ".join(
+            part for part in (
+                _format_deficiency_qty(proposal["quantity"]) if proposal["quantity"] is not None else "",
+                proposal["unit"] or "",
+            ) if part
+        )
+        need = (
+            deficiency_list_ai.replace_question(partial.get("product_name") or "", proposal["product_name"])
+            + (f" ({proposal['product_name']} — {given})" if given else "")
+            + f" ha: almashtirish, yo'q: “{partial.get('product_name')}” qoladi"
+        )
+    return need
+
+
+def _deficiency_examples(items: list[dict], pending: list[int]) -> list[str]:
+    """Har bir qatorning yetishmagan ma'lumotiga mos misollar (miqdor
+    ma'lum bo'lsa qayta miqdor yozish ko'rsatilmaydi)."""
+    examples = []
+    for index in pending:
+        partial = items[index].get("partial") or {}
+        number = index + 1
+        quantity, unit = partial.get("quantity"), partial.get("unit")
+        if quantity is None and unit is None:
+            examples.append(f"{number}. 2 kg")
+        elif quantity is None:
+            examples.append(f"{number}. 2")
+        elif unit is None:
+            examples.append(f"{number}. kg")
+        if partial.get("replace_proposal"):
+            examples = [e for e in examples if not e.startswith(f"{number}. ")]
+            examples.append(f"{number}. ha / {number}. yo'q")
+        elif partial.get("unresolved"):
+            examples.append(f"{number}. almashtirish / {number}. tavsif")
+    return examples
+
+
+def _deficiency_clarify_text(items: list[dict], pending: list[int]) -> str:
+    # Savol raqami DOIMIY — ro'yxatdagi o'rni (index + 1); qisman javobdan
+    # keyin ham o'zgarmaydi, eski xabardagi raqam aynan o'sha mahsulotga tegishli.
+    lines = []
+    for index in pending:
+        item = items[index]
+        name = (item.get("partial") or {}).get("product_name") or item["raw_line"]
+        lines.append(f"{index + 1}. {name} — {_deficiency_need(item)}")
+
+    return (
+        "❓ Bu qatorlarni to'liq tushunmadim:\n\n" + "\n".join(lines) +
+        "\n\nHar biriga o'z raqami bilan javob yozing (ro'yxatni qayta yozish shart emas), masalan:\n"
+        + "\n".join(_deficiency_examples(items, pending)) +
+        f"\n\nMahsulotni almashtirish kerak bo'lsa: {pending[0] + 1}. yangi: Karam 2 dona"
+    )
 
 
 async def _process_deficiency_list(
@@ -1310,7 +1377,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         # o'tadi (deterministik, tushunmasa mavjud AI fallback). Raqamsiz
         # oddiy nom AI'ga yuborilmaydi. Aniqlanmasa — eski bosqichli oqim.
         results = await deficiency_list_ai.parse_shopping_list(
-            openai_client if re.search(r"\d", name) else None, name
+            openai_client if deficiency_list_ai.has_quantity_hint(name) else None, name
         )
         if results and results[0]["parsed"] is not None:
             data = await state.get_data()
@@ -1328,19 +1395,77 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def deficiency_list_clarify(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         items = data.get("deficiency_list_items") or []
-        index = data.get("deficiency_list_unclear_index")
-        if index is None or index >= len(items):
+        pending = [i for i, item in enumerate(items) if item["parsed"] is None]
+        if not pending:
             await state.clear()
             await message.answer("❌ Bekor qilindi.")
             return
 
-        parsed = deficiency_list_ai.parse_line_deterministic(message.text or "")
-        if parsed is None:
-            await message.answer("❌ Masalan: Pomidor 10 kg — shu formatda qayta yozing:")
+        text = message.text or ""
+        numbered, stray = deficiency_list_ai.split_numbered_answers(text)
+        if not numbered:
+            # Raqamsiz javob faqat bitta noaniq qator bo'lganda va aniq
+            # bitta qatordan iborat bo'lsa ishonchli — aks holda taxmin qilinmaydi.
+            if len(pending) == 1 and len(stray) == 1:
+                numbered, stray = [(pending[0] + 1, stray[0])], []
+            else:
+                await message.answer(
+                    "❌ Qaysi mahsulotga tegishli ekani noaniq. Raqam bilan yozing, "
+                    f"masalan: {pending[0] + 1}. 2 blok"
+                )
+                return
+
+        understood = 0
+        seen: set[int] = set()
+        problems = [f"“{line}” — raqamsiz, qaysi mahsulotga tegishli ekani noaniq" for line in stray]
+        for number, answer in numbered:
+            if not 1 <= number <= len(items):
+                problems.append(f"{number}-raqamli qator yo'q")
+            elif number in seen:
+                problems.append(f"{number}-raqam takrorlandi — birinchi javob qabul qilingan")
+            elif items[number - 1]["parsed"] is not None:
+                problems.append(f"{number}-qator allaqachon yakunlangan — o'zgartirilmadi")
+            else:
+                seen.add(number)
+                item = items[number - 1]
+                # Ixtiyoriy aniq tahrir ("yangi: ...") va kassirning aniq tanlovi.
+                if deficiency_list_ai.parse_explicit_edit(answer) is not None:
+                    deficiency_list_ai.apply_explicit_edit(item, answer)
+                    understood += 1
+                    continue
+                if deficiency_list_ai.resolve_unresolved_by_choice(item, answer):
+                    understood += 1
+                    continue
+                extra_quality = other_product = None
+                unknown = deficiency_list_ai.unknown_answer_words(answer)
+                if unknown:
+                    # Kod o'qiy olmagan so'zni mavjud AI savol kontekstida ajratadi: shu mahsulotning
+                    # sifati yoki BOSHQA mahsulot nomi. Xato/noaniq bo'lsa ikkalasi None — so'z nomga
+                    # qo'shilmaydi, kassir aniq tanlaydi (almashtirish / tavsif).
+                    verdict = await deficiency_list_ai.classify_answer_words(
+                        openai_client,
+                        (item.get("partial") or {}).get("product_name") or item["raw_line"],
+                        _deficiency_need(item),
+                        unknown,
+                    )
+                    extra_quality, other_product = verdict["quality"], verdict["product"]
+                if deficiency_list_ai.apply_short_answer(
+                    item, answer, extra_quality=extra_quality, other_product=other_product
+                ):
+                    understood += 1
+                else:
+                    problems.append(f"{number}. “{answer}” — javobni tushunmadim")
+
+        if understood == 0:
+            await message.answer(
+                f"❌ Javobni tushunmadim. Raqam bilan yozing, masalan: {pending[0] + 1}. 2 blok\n"
+                + "\n".join(problems)
+            )
             return
 
-        items[index]["parsed"] = parsed
         await state.update_data(deficiency_list_items=items)
+        if problems:
+            await message.answer("⚠️ Qabul qilinmadi:\n" + "\n".join(problems))
         await _advance_deficiency_list(message, state, data["shift_id"])
 
     @dp.callback_query(F.data == "csdef_list_confirm")
@@ -1454,7 +1579,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await callback.answer()
             return
 
-        await state.update_data(deficiency_list_items=None, deficiency_list_unclear_index=None)
+        await state.update_data(deficiency_list_items=None)
         await state.set_state(DeficiencyStates.item_name)
         await callback.message.edit_reply_markup(reply_markup=None)
         sent = await callback.message.answer("✏️ Ro'yxatni qaytadan yozing:")

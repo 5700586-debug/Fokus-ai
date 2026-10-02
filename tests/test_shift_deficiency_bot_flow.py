@@ -253,7 +253,7 @@ async def test_multiline_list_ai_uncertain_line_asks_manual_clarification(bot_dp
     assert "tushunmadim" in combined.lower()
     assert "nimadir tushunarsiz" in combined
 
-    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    sent = await send(main.dp, bot, 111, text="2. yangi: Karam 2 dona")
     combined = " ".join(t for t in texts(sent) if t)
     assert "Ro'yxat tayyor" in combined
     assert "Pomidor — 10 kg" in combined
@@ -276,7 +276,7 @@ async def test_multiline_list_ai_failure_preserves_list_and_requests_manual_clar
     assert "tushunmadim" in combined.lower()
     assert "noaniq qator" in combined
 
-    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    sent = await send(main.dp, bot, 111, text="2. yangi: Karam 2 dona")
     combined = " ".join(t for t in texts(sent) if t)
     assert "Pomidor — 10 kg" in combined
     assert "Karam — 2 dona" in combined
@@ -489,3 +489,382 @@ async def test_company_single_line_ai_unsure_falls_back_to_old_stepwise_flow(bot
     sent = await send(main.dp, bot, 111, text="10 blok")
     assert "Qo'shildi" in " ".join(t for t in texts(sent) if t)
     assert _company_items() == [("Cola 2L", 10.0, "blok")]
+
+
+_ORDER_MESSAGE = (
+    "pomidor 1 yashig\nbodring 10 kg\nkola 2 litr 5 blok\nzira\nolma qizil 1karopka\ntuz\nolma 3 kg"
+)
+
+
+async def _to_order_entry(main, bot, monkeypatch, ai_payload=None, ai_error=False):
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    async def _fake_create(**kwargs):
+        if ai_error:
+            raise TimeoutError("AI timeout")
+        return SimpleNamespace(output_text=json.dumps(ai_payload or []))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _fake_create)
+
+
+def _joined(sent) -> str:
+    return " ".join(t for t in texts(sent) if t)
+
+
+async def test_order_missing_info_asked_in_one_numbered_message_and_short_answers_merge(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text=_ORDER_MESSAGE)
+    questions = [t for t in texts(sent) if t and "tushunmadim" in t]
+    assert len(questions) == 1  # barcha savollar BITTA xabarda
+    assert "4. zira — miqdor va birlik kerak" in questions[0]  # raqam = ro'yxatdagi doimiy o'rni
+    assert "6. tuz — miqdor va birlik kerak" in questions[0]
+
+    sent = await send(main.dp, bot, 111, text="4. 2 blok\n6. 1 kg")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined
+    assert "pomidor — 1 yashik" in combined
+    assert "bodring — 10 kg" in combined
+    assert "kola 2 litr — 5 blok" in combined  # hajm miqdorga aralashmadi
+    assert "olma qizil — 1 karobka" in combined
+    assert "zira — 2 blok" in combined
+    assert "tuz — 1 kg" in combined
+    assert shift_deficiency.get_daily_market_shortage() == []  # tasdiqdan oldin DBga yozilmaydi
+
+
+async def test_order_partial_answer_keeps_accepted_and_numbers_stay_permanent(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nzira\ntuz\nolma")
+
+    sent = await send(main.dp, bot, 111, text="2. 2 blok\n4. kotta")
+    combined = _joined(sent)
+    assert "3. tuz — miqdor va birlik kerak" in combined  # qayta raqamlanmadi
+    assert "4. olma katta — miqdor va birlik kerak" in combined  # sifat saqlandi, taxmin qilinmadi
+    assert "zira" not in combined
+
+    sent = await send(main.dp, bot, 111, text="3. 1 kg\n4. 4 kg")
+    combined = _joined(sent)
+    assert "bodring — 10 kg" in combined and "zira — 2 blok" in combined
+    assert "tuz — 1 kg" in combined and "olma katta — 4 kg" in combined
+
+
+async def test_order_old_number_still_hits_same_product_after_first_is_resolved(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="zira\ntuz\nolma")
+
+    await send(main.dp, bot, 111, text="1. 2 blok")  # birinchisi yechildi
+    sent = await send(main.dp, bot, 111, text="3. kotta")  # eski 3-raqam aynan uchinchi (olma)
+    combined = _joined(sent)
+    assert "3. olma katta — miqdor va birlik kerak" in combined
+    assert "2. tuz — miqdor va birlik kerak" in combined
+
+    sent = await send(main.dp, bot, 111, text="1. 99 kg\n2. 1 kg\n2. 9 kg")
+    combined = _joined(sent)
+    assert "1-qator allaqachon yakunlangan" in combined
+    assert "2-raqam takrorlandi" in combined
+    assert "3. olma katta — miqdor va birlik kerak" in combined
+
+    sent = await send(main.dp, bot, 111, text="3. bilmayman")
+    assert "javobni tushunmadim" in _joined(sent).lower()
+    sent = await send(main.dp, bot, 111, text="3. 4 kg")
+    combined = _joined(sent)
+    assert "zira — 2 blok" in combined and "tuz — 1 kg" in combined
+    assert "olma katta — 4 kg" in combined and "bilmayman" not in combined
+
+
+async def test_order_ambiguous_unnumbered_answer_is_not_guessed(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="zira\ntuz")
+
+    sent = await send(main.dp, bot, 111, text="2 blok")
+    combined = _joined(sent)
+    assert "noaniq" in combined and "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="1. 2 blok\n7. 1 kg")
+    combined = _joined(sent)
+    assert "7-raqamli qator yo'q" in combined
+    assert "2. tuz — miqdor va birlik kerak" in combined
+
+
+async def test_order_ai_timeout_keeps_list_and_manual_entry_works(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text="Pomidor 10 kg\nQandaydir narsa")
+    combined = _joined(sent)
+    assert "tushunmadim" in combined and "Qandaydir narsa" in combined
+
+    sent = await send(main.dp, bot, 111, text="2. yangi: Karam 2 dona")  # ixtiyoriy aniq tahrir
+    combined = _joined(sent)
+    assert "Pomidor — 10 kg" in combined and "Karam — 2 dona" in combined
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    products = {p["product_name"]: p for p in shift_deficiency.get_daily_market_shortage()}
+    assert products["Karam"]["total_quantity"] == 2
+
+
+async def test_order_plain_bodring_and_tuzlangan_bodring_stay_separate_names(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text="bodring 10 kg\ntuzlangan bodring 3 kg")
+    combined = _joined(sent)
+    assert "bodring — 10 kg" in combined and "tuzlangan bodring — 3 kg" in combined
+    assert "salyon" not in combined.lower() and "svej" not in combined.lower()
+
+
+async def test_order_single_line_without_digit_can_use_existing_ai(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    payload = [{"line": "pomidor ikki yashiqda", "product_name": "pomidor", "quantity": 2, "unit": "yashik"}]
+    await _to_order_entry(main, bot, monkeypatch, ai_payload=payload)
+
+    sent = await send(main.dp, bot, 111, text="pomidor ikki yashiqda")  # raqamsiz, deterministik tushunmaydi
+    assert "pomidor — 2 yashik" in _joined(sent)
+
+
+async def test_order_free_quality_words_resolved_by_existing_ai_with_context(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+    inputs = []
+
+    async def _quality_ai(**kwargs):
+        inputs.append(kwargs["input"])
+        word = kwargs["input"].rsplit(": ", 1)[-1]
+        return SimpleNamespace(output_text=json.dumps({"quality": word, "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _quality_ai)
+
+    sent = await send(main.dp, bot, 111, text="1. pishgan\n2. yirikroq")
+    combined = _joined(sent)
+    assert "1. olma pishgan — miqdor va birlik kerak" in combined  # miqdor/birlik/brend to'qilmadi
+    assert "2. nok yirikroq — miqdor va birlik kerak" in combined
+    assert "Mahsulot: olma" in inputs[0] and "miqdor va birlik kerak" in inputs[0]
+
+    sent = await send(main.dp, bot, 111, text="1. 3 kg\n2. 2 kg")
+    combined = _joined(sent)
+    assert "olma pishgan — 3 kg" in combined and "nok yirikroq — 2 kg" in combined
+
+
+async def test_order_non_answer_skips_ai_and_changes_nothing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+    await send(main.dp, bot, 111, text="1. kotta")
+    calls = 0
+
+    async def _count(**kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(output_text=json.dumps({"quality": "bilmayman", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _count)
+
+    sent = await send(main.dp, bot, 111, text="1. bilmayman")
+    assert "javobni tushunmadim" in _joined(sent).lower() and calls == 0
+
+    sent = await send(main.dp, bot, 111, text="1. 2 kg\n2. 1 kg")
+    combined = _joined(sent)
+    assert "olma katta — 2 kg" in combined and "nok — 1 kg" in combined
+
+
+async def test_order_ai_error_or_invented_word_leaves_previous_info_unchanged(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+    await send(main.dp, bot, 111, text="1. kotta")
+
+    sent = await send(main.dp, bot, 111, text="1. pishgan")  # AI xatosi — rad etiladi
+    assert "javobni tushunmadim" in _joined(sent).lower()
+
+    async def _invented(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": "Saturn", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _invented)
+    sent = await send(main.dp, bot, 111, text="1. pishgan")
+    assert "javobni tushunmadim" in _joined(sent).lower()
+
+    sent = await send(main.dp, bot, 111, text="1. 2 kg\n2. 1 kg")
+    combined = _joined(sent)
+    assert "olma katta — 2 kg" in combined and "Saturn" not in combined and "pishgan" not in combined
+
+
+async def test_order_mixed_answer_ai_error_keeps_2kg_and_blocks_confirmation_until_resolved(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+
+    sent = await send(main.dp, bot, 111, text="1. 2 kg pishgan")
+    combined = _joined(sent)
+    assert "1. olma — 2 kg qabul qilindi; “pishgan” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?" in combined
+    assert "2. nok — miqdor va birlik kerak" in combined
+    assert "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="2. 1 kg")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" not in combined  # noaniqlik hal bo'lmaguncha tasdiq chiqmaydi
+    assert "1. olma — 2 kg qabul qilindi; “pishgan”" in combined
+
+    sent = await send(main.dp, bot, 111, text="1. nima")
+    assert "Ro'yxat tayyor" not in _joined(sent)
+
+    sent = await send(main.dp, bot, 111, text="1. tavsif")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and "olma pishgan — 2 kg" in combined and "nok — 1 kg" in combined
+    assert shift_deficiency.get_daily_market_shortage() == []
+
+
+async def test_order_mixed_answer_unclassified_word_can_be_dropped_or_resolved_by_ai_retry(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+    await send(main.dp, bot, 111, text="1. 2 kg pishgan\n2. 3 kg yirikroq")
+
+    sent = await send(main.dp, bot, 111, text="1. yo'q")  # "pishgan" tashlanadi
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" not in combined
+    assert "2. nok — 3 kg qabul qilindi; “yirikroq” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?" in combined
+
+    async def _ai_ok(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": "yirikroq", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _ai_ok)
+    sent = await send(main.dp, bot, 111, text="2. yirikroq")  # AI qayta urinish muvaffaqiyatli
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and "olma — 2 kg" in combined and "pishgan" not in combined
+    assert "nok yirikroq — 3 kg" in combined
+
+
+async def test_order_single_pending_short_answer_never_replaces_product_name(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    async def _ai_ok(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": "pishgan", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _ai_ok)
+    sent = await send(main.dp, bot, 111, text="pishgan 2 kg")
+    combined = _joined(sent)
+    assert "2. olma pishgan — 2 kg" in combined and "bodring — 10 kg" in combined
+
+
+async def test_order_single_pending_short_answer_with_ai_error_keeps_old_name_and_quantity(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    sent = await send(main.dp, bot, 111, text="pishgan 2 kg")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" not in combined
+    assert "2. olma — 2 kg qabul qilindi; “pishgan”" in combined
+
+
+async def test_order_examples_match_what_is_missing(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+
+    sent = await send(main.dp, bot, 111, text="tuz 5\nzira kg\nbodring\nolma")
+    text = [t for t in texts(sent) if t and "tushunmadim" in t][0]
+    assert "1. tuz — birlik kerak (miqdor: 5)" in text
+    assert "1. kg" in text and "1. 2 kg" not in text  # miqdor ma'lum — qayta miqdor ko'rsatilmaydi
+    assert "2. zira — miqdor kerak (birlik: kg)" in text
+    assert "\n2. 2\n" in text
+    assert "3. 2 kg" in text and "4. 2 kg" in text
+
+
+async def test_order_unclassified_word_example_shows_replace_or_describe_choice(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="olma\nnok")
+
+    sent = await send(main.dp, bot, 111, text="1. 2 kg pishgan")
+    text = _joined(sent)
+    assert "1. almashtirish / 1. tavsif" in text
+    assert "1. ha" not in text
+    assert "1. kg" not in text and "1. 2 kg" not in text  # miqdor va birlik ma'lum — qayta so'ralmaydi
+
+
+async def test_order_other_product_answer_asks_replace_confirmation_and_keeps_name_until_yes(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    async def _ai_product(**kwargs):
+        return SimpleNamespace(output_text=json.dumps({"quality": None, "product": "Karam"}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _ai_product)
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")  # "yangi:" yozish shart emas
+    combined = _joined(sent)
+    assert "Olmani karamga almashtirasizmi?" in combined
+    assert "2. olma —" in combined  # tasdiqlanmaguncha nom o'zgarmadi
+    assert "tavsif" not in combined and "2. ha / 2. yo'q" in combined
+    assert "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="2. yo'q")
+    assert "2. olma — miqdor va birlik kerak" in _joined(sent)
+
+    await send(main.dp, bot, 111, text="Karam 2 dona")
+    sent = await send(main.dp, bot, 111, text="2. ha")
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and "Karam — 2 dona" in combined and "olma" not in combined
+    assert "bodring — 10 kg" in combined
+
+
+async def test_order_quality_answer_still_extends_previous_name_without_ai(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+    calls = 0
+
+    async def _count(**kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(output_text=json.dumps({"quality": None, "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _count)
+
+    sent = await send(main.dp, bot, 111, text="katta 2 kg")  # aniq sifat: kod o'zi qo'shadi
+    combined = _joined(sent)
+    assert "olma katta — 2 kg" in combined and "Ro'yxat tayyor" in combined and calls == 0
+
+
+async def test_order_ai_timeout_unclassified_word_plain_ha_never_makes_olma_karam(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)  # AI timeout
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+
+    sent = await send(main.dp, bot, 111, text="Karam 2 dona")
+    combined = _joined(sent)
+    assert "2. olma — 2 dona qabul qilindi; “Karam” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?" in combined
+    assert "sifat" not in combined.split("masalan")[0]  # noma'lum so'z "sifat" deb atalmaydi
+    assert "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="2. ha")  # oddiy "ha" hal qilmaydi
+    combined = _joined(sent)
+    assert "olma Karam" not in combined and "Ro'yxat tayyor" not in combined
+    assert "javobni tushunmadim" in combined.lower()
+
+    sent = await send(main.dp, bot, 111, text="ha")  # raqamsiz yagona "ha" ham hal qilmaydi
+    assert "olma Karam" not in _joined(sent) and "Ro'yxat tayyor" not in _joined(sent)
+
+    sent = await send(main.dp, bot, 111, text="2. tavsif")  # faqat aniq tanlov
+    assert "olma Karam — 2 dona" in _joined(sent)
+
+
+async def test_order_ai_timeout_unclassified_word_explicit_replace_choice(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="bodring 10 kg\nolma")
+    await send(main.dp, bot, 111, text="Karam 2 dona")
+
+    sent = await send(main.dp, bot, 111, text="2. almashtirish")
+    combined = _joined(sent)
+    assert "Karam — 2 dona" in combined and "olma" not in combined and "bodring — 10 kg" in combined

@@ -233,7 +233,7 @@ async def test_multiline_list_unclear_lines_use_single_batched_ai_call(bot_dp, m
     assert "Ro'yxat tayyor" in combined
     assert "Pomidor — 10 kg" in combined
     assert "Sabzi — 3 kg" in combined
-    assert "Un — 1 quti" in combined  # karobka -> quti normalizatsiya
+    assert "Un — 1 karobka" in combined  # karobka alohida birlik (quti'ga o'girilmaydi)
 
 
 async def test_multiline_list_ai_uncertain_line_asks_manual_clarification(bot_dp, monkeypatch):
@@ -393,3 +393,99 @@ async def test_full_closeshift_still_succeeds_after_clearing_deficiency_gate(bot
 
     combined = " ".join(t for t in texts(sent) if t)
     assert "KASSA — KUN YAKUNI" in combined
+
+
+async def test_multiline_cola_blok_and_flesh_karobka_accepted_without_ai(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+
+    async def _no_ai(**kwargs):
+        raise AssertionError("AI chaqirilmasligi kerak — ikkala qator deterministik")
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _no_ai)
+
+    sent = await send(main.dp, bot, 111, text="Cola 2L 10 blok\nFlesh 1 karobka")
+    combined = " ".join(t for t in texts(sent) if t)
+
+    assert "Bu qatorni tushunmadim" not in combined
+    assert "1. Cola 2L — 10 blok" in combined
+    assert "2. Flesh — 1 karobka" in combined
+
+
+def _company_items() -> list[tuple]:
+    from db import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT product_name, quantity, unit FROM shift_deficiency_items WHERE category = 'company'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [(r["product_name"], r["quantity"], r["unit"]) for r in rows]
+
+
+async def _to_company_step(main, bot):
+    _make_kassir(111)
+    await _open_shift(main, bot, 111)
+    await send(main.dp, bot, 111, text="/closeshift")
+    await send_callback(main.dp, bot, 111, data="csdef_none", target_chat_id=111)  # bozor yo'q
+
+
+async def test_company_single_line_is_accepted_via_parse_shopping_list_without_ai(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_company_step(main, bot)
+
+    async def _no_ai(**kwargs):
+        raise AssertionError("AI chaqirilmasligi kerak — qator deterministik")
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _no_ai)
+
+    sent = await send(main.dp, bot, 111, text="Cola 2L 10 blok")
+    combined = " ".join(t for t in texts(sent) if t)
+    assert "Bu qatorni tushunmadim" not in combined
+    assert "1. Cola 2L — 10 blok" in combined
+
+    await send_callback(main.dp, bot, 111, data="csdef_list_confirm", target_chat_id=111)
+    assert _company_items() == [("Cola 2L", 10.0, "blok")]
+
+
+async def test_company_single_unclear_line_uses_existing_ai_fallback(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_company_step(main, bot)
+
+    call_count = 0
+
+    async def _fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        payload = [{"line": "Cola 2L 10 blokcha", "product_name": "Cola 2L", "quantity": 10, "unit": "blok"}]
+        return SimpleNamespace(output_text=json.dumps(payload, ensure_ascii=False))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _fake_create)
+
+    sent = await send(main.dp, bot, 111, text="Cola 2L 10 blokcha")
+    combined = " ".join(t for t in texts(sent) if t)
+
+    assert call_count == 1
+    assert "1. Cola 2L — 10 blok" in combined
+
+
+async def test_company_single_line_ai_unsure_falls_back_to_old_stepwise_flow(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_company_step(main, bot)
+
+    async def _unsure(**kwargs):
+        payload = [{"line": "Cola 2L", "product_name": None, "quantity": None, "unit": None}]
+        return SimpleNamespace(output_text=json.dumps(payload))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _unsure)
+
+    sent = await send(main.dp, bot, 111, text="Cola 2L")
+    assert "Miqdorini kiriting" in " ".join(t for t in texts(sent) if t)
+
+    sent = await send(main.dp, bot, 111, text="10 blok")
+    assert "Qo'shildi" in " ".join(t for t in texts(sent) if t)
+    assert _company_items() == [("Cola 2L", 10.0, "blok")]

@@ -1042,7 +1042,7 @@ async def test_followup_replacement_confirmed_with_ha_uses_new_full_line(bot_dp,
     assert "1. tuz Orzu — 2 blok" in _joined(sent)
 
 
-@pytest.mark.parametrize("answer", ["20 blk", "20"])
+@pytest.mark.parametrize("answer", ["20"])
 async def test_followup_partial_answer_with_ai_error_keeps_quantity_and_asks_only_unit(bot_dp, monkeypatch, answer):
     main, bot = bot_dp
     await _typo_line_then_asked_for_amount(main, bot, monkeypatch)  # AI timeout
@@ -1067,3 +1067,53 @@ async def test_followup_unit_only_answer_asks_only_quantity(bot_dp, monkeypatch)
     assert "1. Pomidor — miqdor kerak (birlik: kg)" in _joined(sent)
     sent = await send(main.dp, bot, 111, text="1. 10")
     assert "1. Pomidor — 10 kg" in _joined(sent)
+
+
+@pytest.mark.parametrize(
+    "answer, expected_need",
+    [
+        ("2 pishgan", "1. Pomidor — birlik kerak (miqdor: 2); “pishgan” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?"),
+        ("20 blk", "1. Pomidor — birlik kerak (miqdor: 20); “blk” — mahsulotni almashtirishmi yoki tavsif qo'shishmi?"),
+    ],
+)
+async def test_followup_partial_answer_unknown_word_is_kept_unresolved_with_ai_error(
+    bot_dp, monkeypatch, answer, expected_need
+):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)  # AI timeout
+    await send(main.dp, bot, 111, text="Pomidor")
+
+    sent = await send(main.dp, bot, 111, text=answer)
+    combined = _joined(sent)
+    assert expected_need in combined  # miqdor saqlandi, so'z yo'qolmadi, sifat deb qabul qilinmadi
+    assert "Ro'yxat tayyor" not in combined
+
+    sent = await send(main.dp, bot, 111, text="1. blok")  # birlik berildi, lekin so'z hali hal bo'lmagan
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" not in combined  # noma'lum so'z hal bo'lmaguncha tasdiq chiqmaydi
+    assert "mahsulotni almashtirishmi yoki tavsif qo'shishmi?" in combined
+
+    word = answer.split()[1]
+    sent = await send(main.dp, bot, 111, text="1. yo'q")  # kassirning aniq tanlovi: so'zni tashlash
+    combined = _joined(sent)
+    assert "Ro'yxat tayyor" in combined and word not in combined
+
+
+async def test_followup_partial_answer_unknown_word_sent_to_existing_ai_classifier(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _to_order_entry(main, bot, monkeypatch, ai_error=True)
+    await send(main.dp, bot, 111, text="Pomidor")
+    inputs = []
+
+    async def _quality_ai(**kwargs):
+        inputs.append(kwargs["input"])
+        return SimpleNamespace(output_text=json.dumps({"quality": "pishgan", "product": None}))
+
+    monkeypatch.setattr(main.openai_client.responses, "create", _quality_ai)
+    sent = await send(main.dp, bot, 111, text="2 pishgan")
+    combined = _joined(sent)
+    assert "1. Pomidor pishgan — birlik kerak (miqdor: 2)" in combined  # AI tasdiqladi: nomga qo'shildi
+    assert "Mahsulot: Pomidor" in inputs[-1] and "Javobdagi so'zlar: pishgan" in inputs[-1]
+
+    sent = await send(main.dp, bot, 111, text="1. kg")
+    assert "1. Pomidor pishgan — 2 kg" in _joined(sent)

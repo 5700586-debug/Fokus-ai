@@ -619,11 +619,12 @@ def _followup_items(raw_name: str, results: list[dict]) -> list[dict]:
     }]
 
 
-def _partial_followup_item(raw_name: str, text: str) -> dict | None:
-    """Javobda faqat qisman ma'lumot bor ("20", "blok", "20 blk"): aniq qism saqlanadi,
-    mavjud partial/clarify oqimi faqat yetishmaganini so'raydi. Miqdorning yonidagi
-    tushunilmagan so'z (birlik imlo xatosi bo'lishi mumkin) tavsif sifatida saqlanmaydi —
-    shunchaki birlik so'raladi; hech narsa to'qilmaydi."""
+async def _partial_followup_item(openai_client, raw_name: str, text: str) -> dict | None:
+    """Javobda faqat qisman ma'lumot bor ("20", "blok", "2 pishgan", "20 blk"): aniq
+    miqdor/birlik saqlanadi, mavjud partial/clarify oqimi faqat yetishmaganini so'raydi.
+    Tushunilmagan so'z TASHLANMAYDI: mavjud AI uni sifat yoki boshqa mahsulot deb ajratadi;
+    AI xato bersa/noaniq bo'lsa so'z ``unresolved`` da qoladi (sifat deb qabul qilinmaydi)
+    va kassir "almashtirish / tavsif / yo'q" deb aniq tanlaydi."""
     short = deficiency_list_ai.parse_short_answer(text)
     if short is None or (short["quantity"] is None and short["unit"] is None):
         return None
@@ -634,10 +635,15 @@ def _partial_followup_item(raw_name: str, text: str) -> dict | None:
         if quantity is not None else deficiency_list_ai.normalize_name_words(raw_name)
     )
     item = {"raw_line": raw_name, "parsed": None, "partial": {"product_name": name, "quantity": None, "unit": None}}
-    answer = text
-    if short["unit"] is None and short["unknown"] and not short["quality"]:
-        answer = _format_deficiency_qty(quantity)
-    return item if deficiency_list_ai.apply_short_answer(item, answer) else None
+
+    extra_quality = other_product = None
+    if short["unknown"]:
+        verdict = await deficiency_list_ai.classify_answer_words(
+            openai_client, name, _deficiency_need(item), short["unknown"]
+        )
+        extra_quality, other_product = verdict["quality"], verdict["product"]
+    ok = deficiency_list_ai.apply_short_answer(item, text, extra_quality=extra_quality, other_product=other_product)
+    return item if ok else None
 
 
 def _deficiency_need(item: dict) -> str:
@@ -1750,7 +1756,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 await state.update_data(deficiency_list_items=items)
                 await _advance_deficiency_list(message, state, data["shift_id"])
                 return
-            partial_item = _partial_followup_item(raw_name, text)
+            partial_item = await _partial_followup_item(openai_client, raw_name, text)
             if partial_item is not None:
                 await state.update_data(deficiency_list_items=[partial_item])
                 await _advance_deficiency_list(message, state, data["shift_id"])

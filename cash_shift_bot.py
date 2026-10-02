@@ -1306,6 +1306,18 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await message.answer("❌ Mahsulot nomini yozing.")
             return
 
+        # Bitta qator ham ko'p qatorli xabar kabi parse_shopping_list'dan
+        # o'tadi (deterministik, tushunmasa mavjud AI fallback). Raqamsiz
+        # oddiy nom AI'ga yuborilmaydi. Aniqlanmasa — eski bosqichli oqim.
+        results = await deficiency_list_ai.parse_shopping_list(
+            openai_client if re.search(r"\d", name) else None, name
+        )
+        if results and results[0]["parsed"] is not None:
+            data = await state.get_data()
+            await state.update_data(deficiency_list_items=results)
+            await _advance_deficiency_list(message, state, data["shift_id"])
+            return
+
         await state.update_data(deficiency_item_name=name)
         await state.set_state(DeficiencyStates.item_amount)
         data = await state.get_data()

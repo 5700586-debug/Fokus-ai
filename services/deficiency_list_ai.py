@@ -25,8 +25,7 @@ _AI_MODEL = "gpt-5-mini"
 # ro'yxatga KIRMAYDI — shuning uchun regex ularni miqdor deb
 # noto'g'ri o'qib qolmaydi, ular nom ichida saqlanib qoladi.
 _UNIT_ALIASES = {
-    "karobka": "quti",
-    "коробка": "quti",
+    "коробка": "karobka",
     "ta": "dona",
 }
 
@@ -79,7 +78,7 @@ _AI_INSTRUCTIONS = (
     "ba'zi qatorlarni oddiy qoidalar bilan aniqlab bo'lmadi — ular senga beriladi. "
     "Har bir qatorni {product_name, quantity, unit} ko'rinishiga o'gir. "
     "Ruxsat etilgan birliklar FAQAT: " + ", ".join(KNOWN_UNITS) + ". "
-    "'karobka' yoki 'коробка' uchrasa — 'quti' deb ol; 'ta' uchrasa — 'dona' deb ol. "
+    "'коробка' uchrasa — 'karobka' deb ol; 'ta' uchrasa — 'dona' deb ol. "
     "Mahsulot nomidagi o'lcham/hajmni (masalan '500 gr', '1.5 litrli idish') "
     "product_name ICHIDA SAQLA, uni quantity deb hisoblama. "
     "Hech qachon mahsulot nomi, miqdor yoki birlikni O'ZING TO'QIMA — qatordan "

@@ -154,11 +154,12 @@ def _price_choice_kb() -> InlineKeyboardMarkup:
 
 
 def _unit_choice_kb() -> InlineKeyboardMarkup:
+    units = list(shift_deficiency.KNOWN_UNITS)
     return InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(text=unit, callback_data=f"sup_new_unit:{unit}")
-            for unit in shift_deficiency.KNOWN_UNITS
-        ]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text=unit, callback_data=f"sup_new_unit:{unit}") for unit in units[index:index + 4]]
+            for index in range(0, len(units), 4)
+        ]
     )
 
 

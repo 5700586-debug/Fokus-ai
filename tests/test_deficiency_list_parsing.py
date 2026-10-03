@@ -42,6 +42,73 @@ def test_spelling_variants_and_word_numbers_are_understood(line, expected):
     assert parse_line_deterministic(line) == expected
 
 
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("tuz 3 karopka", {"product_name": "tuz", "quantity": 3.0, "unit": "karobka"}),
+        ("un 5 qop", {"product_name": "un", "quantity": 5.0, "unit": "qop"}),
+        ("ukrop 5vog'", {"product_name": "ukrop", "quantity": 5.0, "unit": "bog"}),
+        ("rayhon 5bog'", {"product_name": "rayhon", "quantity": 5.0, "unit": "bog"}),
+        ("olma 1karopka", {"product_name": "olma", "quantity": 1.0, "unit": "karobka"}),
+        ("pomidor 2 yashig", {"product_name": "pomidor", "quantity": 2.0, "unit": "yashik"}),
+    ],
+)
+def test_real_store_units_are_understood(line, expected):
+    assert parse_line_deterministic(line) == expected
+
+
+@pytest.mark.parametrize(
+    "written, normalized",
+    [
+        ("karopka", "karobka"),
+        ("karopqa", "karobka"),
+        ("korobka", "karobka"),
+        ("коробка", "karobka"),
+        ("yashig", "yashik"),
+        ("yashiq", "yashik"),
+        ("yashik", "yashik"),
+        ("ящик", "yashik"),
+        ("qop", "qop"),
+        ("pachka", "pachka"),
+        ("пачка", "pachka"),
+        ("upakovka", "upakovka"),
+        ("упаковка", "upakovka"),
+        ("bog", "bog"),
+        ("bog'", "bog"),
+        ("bog‘", "bog"),
+        ("bog’", "bog"),
+        ("vog", "bog"),
+        ("vog'", "bog"),
+        ("vog‘", "bog"),
+        ("vog’", "bog"),
+        ("vogh", "bog"),
+    ],
+)
+def test_unit_spelling_variants_are_normalized(written, normalized):
+    assert parse_line_deterministic(f"rayhon 5 {written}") == {
+        "product_name": "rayhon",
+        "quantity": 5.0,
+        "unit": normalized,
+    }
+    assert parse_line_deterministic(f"rayhon 5{written}") == {
+        "product_name": "rayhon",
+        "quantity": 5.0,
+        "unit": normalized,
+    }
+
+
+def test_short_answer_understands_glued_store_units():
+    from services.deficiency_list_ai import apply_short_answer, parse_line_partial
+
+    item = {"raw_line": "olma", "parsed": None, "partial": parse_line_partial("olma")}
+    assert apply_short_answer(item, "1karopka") is True
+    assert item["parsed"] == {"product_name": "olma", "quantity": 1.0, "unit": "karobka"}
+
+    item = {"raw_line": "ukrop", "parsed": None, "partial": parse_line_partial("ukrop")}
+    assert apply_short_answer(item, "5vog'") is True
+    assert item["parsed"] == {"product_name": "ukrop", "quantity": 5.0, "unit": "bog"}
+
+
 def test_partial_parse_never_invents_missing_quantity_or_unit():
     from services.deficiency_list_ai import parse_line_partial
 

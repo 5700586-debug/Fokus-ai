@@ -138,7 +138,7 @@ async def test_ai_asks_only_the_one_unclear_field(bot_dp, monkeypatch):
     _enable_ai(monkeypatch, provider)
 
     sent = await _start_closeshift_with_photos(main, bot, 111)
-    texts = _texts(sent)
+    texts = [t for t in _texts(sent) if t != _WAIT_TEXT]
     assert texts == ["⚠️ Boshqa to'lovlar summasini tushunmadim. Faqat shu summani yozing."]
 
     # Tushunilgan maydonlar qayta so'ralmaydi — faqat shu bitta qator.
@@ -170,7 +170,7 @@ async def test_ai_conflicting_cross_photo_value_becomes_unclear(bot_dp, monkeypa
     _enable_ai(monkeypatch, provider)
 
     sent = await _start_closeshift_with_photos(main, bot, 111)
-    texts = _texts(sent)
+    texts = [t for t in _texts(sent) if t != _WAIT_TEXT]
     assert texts == ["⚠️ Bugungi naqd savdo summasini tushunmadim. Faqat shu summani yozing."]
 
 
@@ -214,7 +214,7 @@ async def test_ai_total_failure_falls_back_to_original_manual_flow(bot_dp, monke
     _enable_ai(monkeypatch, provider)
 
     sent = await _start_closeshift_with_photos(main, bot, 111)
-    texts = _texts(sent)
+    texts = [t for t in _texts(sent) if t != _WAIT_TEXT]
     assert texts == ["Bugungi naqd savdo summasini kiriting:"]
 
     # Smena yopish to'xtab qolmaydi — mavjud qo'lda kiritish oqimi
@@ -698,3 +698,164 @@ async def test_correct_after_ledger_choice_clears_ai_ledger_data_and_writes_noth
     await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
     shift_id = await _close_shift_id(main, bot)
     assert _ledger_rows_by_id(shift_id) == [] and _ledger_summary(shift_id) is None
+
+
+_WAIT_TEXT = "⏳ Rasmlarni o'qiyapman, biroz kuting…"
+
+
+class _DelayedProvider(_FakeVisionProvider):
+    def __init__(self, results=None, delay: float = 0.0, enabled: bool = True):
+        super().__init__(results)
+        self._delay = delay
+        self._enabled = enabled
+
+    def is_enabled(self) -> bool:
+        return self._enabled
+
+    async def extract(self, file_id: str, document_type: str):
+        import asyncio
+
+        await asyncio.sleep(self._delay)
+        return await super().extract(file_id, document_type)
+
+
+def _clear_results():
+    return {
+        CASH_SHIFT_SALES_REPORT: ExtractionResult(
+            confident=True, values={"cash_sales": "100000", "card_sales": "0", "other_payments": "0"}
+        ),
+        CASH_SHIFT_CASH_REPORT: ExtractionResult(confident=True, values={"actual_cash_balance": "100000"}),
+    }
+
+
+def _unconfident_results():
+    return {
+        CASH_SHIFT_SALES_REPORT: ExtractionResult(confident=False, values={}),
+        CASH_SHIFT_CASH_REPORT: ExtractionResult(confident=False, values={}),
+    }
+
+
+def _wait_message_cleaned_up(sent) -> bool:
+    """Kutish xabari yuborilgan va aynan shu xabar keyin o'chirilgan."""
+    for index, method in enumerate(sent):
+        if getattr(method, "text", None) == _WAIT_TEXT:
+            message_id = index + 1
+            return any(
+                type(later).__name__ == "DeleteMessage" and later.message_id == message_id
+                for later in sent[index + 1:]
+            )
+    return False
+
+
+async def _open_and_enable(main, bot, monkeypatch, provider):
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+    _enable_ai(monkeypatch, provider)
+
+
+async def test_vision_timeout_is_60_seconds_and_late_answer_is_accepted(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    import asyncio
+
+    import cash_shift_bot
+
+    assert cash_shift_bot._VISION_EXTRACTION_TIMEOUT_SECONDS == 60
+    await _open_and_enable(main, bot, monkeypatch, _DelayedProvider(_clear_results(), delay=0.2))
+
+    limits = []
+    real_wait_for = asyncio.wait_for
+
+    async def _spy(awaitable, timeout=None):
+        limits.append(timeout)
+        return await real_wait_for(awaitable, timeout=None)  # haqiqiy 60 s kutilmaydi
+
+    monkeypatch.setattr(cash_shift_bot.asyncio, "wait_for", _spy)
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+
+    assert 60 in limits  # AI chaqiruvi 60 soniyalik cheklov bilan (oldin 20)
+    assert any("AI o'qigan qiymatlar" in t for t in _texts(sent))  # kech (lekin cheklovdan oldin) javob qabul qilindi
+    assert _wait_message_cleaned_up(sent)
+
+
+async def test_vision_timeout_falls_back_to_manual_flow_logs_reason_and_removes_wait_message(
+    bot_dp, monkeypatch, capsys
+):
+    main, bot = bot_dp
+    import cash_shift_bot
+
+    await _open_and_enable(main, bot, monkeypatch, _DelayedProvider(_clear_results(), delay=1.0))
+    monkeypatch.setattr(cash_shift_bot, "_VISION_EXTRACTION_TIMEOUT_SECONDS", 0.05)
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert any("Bugungi naqd savdo summasini kiriting" in t for t in _texts(sent))  # qo'lda oqim ishladi
+    assert _wait_message_cleaned_up(sent)  # timeoutda ham kutish xabari qolmadi
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    log = capsys.readouterr().out
+    assert f"cash_vision_fallback reason=timeout shift_id={shift['id']} elapsed=" in log
+    assert "data:image" not in log and "base64" not in log  # rasm/kalit/AI javobi logga yozilmaydi
+
+
+async def test_wait_message_is_sent_and_removed_when_analysis_succeeds(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    await _open_and_enable(main, bot, monkeypatch, _DelayedProvider(_clear_results()))
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert _WAIT_TEXT in _texts(sent) and _wait_message_cleaned_up(sent)
+    assert any("AI o'qigan qiymatlar" in t for t in _texts(sent))
+
+
+async def test_wait_message_not_sent_and_reason_logged_when_provider_disabled(bot_dp, monkeypatch, capsys):
+    main, bot = bot_dp
+    await _open_and_enable(main, bot, monkeypatch, _DelayedProvider(_clear_results(), enabled=False))
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert _WAIT_TEXT not in _texts(sent)  # tahlil bo'lmaydi — kutish xabari ham yo'q
+    assert any("Bugungi naqd savdo summasini kiriting" in t for t in _texts(sent))
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    assert f"cash_vision_fallback reason=disabled shift_id={shift['id']} elapsed=" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("reason", ["download", "both_unconfident", "exception", "no_sales_ref"])
+async def test_manual_fallback_reason_is_logged_and_wait_message_never_left_behind(
+    bot_dp, monkeypatch, capsys, reason
+):
+    main, bot = bot_dp
+    import cash_shift_bot
+
+    if reason == "exception":
+        provider = _FakeVisionProvider(error=RuntimeError("AI xatosi"))
+    elif reason == "both_unconfident":
+        provider = _DelayedProvider(_unconfident_results())
+    else:
+        provider = _DelayedProvider(_clear_results())
+    await _open_and_enable(main, bot, monkeypatch, provider)
+
+    if reason == "download":
+        async def _no_download(bot_, file_id):
+            return None
+
+        monkeypatch.setattr(cash_shift_bot, "_download_photo_data_uri", _no_download)
+    if reason == "no_sales_ref":
+        from repositories import cash_shifts as repo
+
+        monkeypatch.setattr(repo, "set_sales_report_photo", lambda shift_id, file_id: None)
+
+    sent = await _start_closeshift_with_photos(main, bot, 111)
+    assert any("Bugungi naqd savdo summasini kiriting" in t for t in _texts(sent))  # qo'lda oqim ishladi
+    if reason == "no_sales_ref":
+        assert _WAIT_TEXT not in _texts(sent)  # tahlil boshlanmadi
+    else:
+        assert _wait_message_cleaned_up(sent)
+
+    from services import cash_shift
+
+    shift = cash_shift.get_open_shift(111, company_time.today().isoformat())
+    log = capsys.readouterr().out
+    assert f"cash_vision_fallback reason={reason} shift_id={shift['id']} elapsed=" in log
+    assert "data:image" not in log

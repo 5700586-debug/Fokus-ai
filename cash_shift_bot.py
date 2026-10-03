@@ -289,7 +289,7 @@ def _ai_summary_confirm_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="csui_close_amount_ok"),
             InlineKeyboardButton(text="✏️ Tuzatish", callback_data="csui_close_amount_retry"),
         ],
-        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+        [InlineKeyboardButton(text="📸 Rasmlarni qayta yuborish", callback_data="csui_close_restart")],
     ])
 
 
@@ -460,13 +460,13 @@ def _confirm_handover_start_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ Ha, topshiraman", callback_data="csui_close_start_yes"),
             InlineKeyboardButton(text="❌ Orqaga", callback_data="csui_close_start_back"),
         ],
-        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+        [InlineKeyboardButton(text="📸 Rasmlarni qayta yuborish", callback_data="csui_close_restart")],
     ])
 
 
 def _close_restart_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart"),
+        InlineKeyboardButton(text="📸 Rasmlarni qayta yuborish", callback_data="csui_close_restart"),
     ]])
 
 
@@ -476,7 +476,7 @@ def _confirm_close_amount_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_close_amount_ok"),
             InlineKeyboardButton(text="🔄 Qayta yozaman", callback_data="csui_close_amount_retry"),
         ],
-        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+        [InlineKeyboardButton(text="📸 Rasmlarni qayta yuborish", callback_data="csui_close_restart")],
     ])
 
 
@@ -2349,11 +2349,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             cash_sales=None, card_sales=None, other_payments=None, actual_cash_balance=None,
             _ai_unclear_queue=[], **_LEDGER_CLEARED,
         )
-        await state.set_state(CloseShiftStates.cash_sales)
+        await state.set_state(CloseShiftStates.sales_photo)
         await callback.message.edit_reply_markup(reply_markup=None)
         sent = await callback.message.answer(
-            "🔄 Boshidan boshladik. Bugungi naqd savdo summasini kiriting:",
-            reply_markup=_close_restart_kb(),
+            "📸 Boshidan boshlaymiz. Kompyuterdagi kunlik savdo hisobotining rasmini qayta yuboring:"
         )
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
         await callback.answer()

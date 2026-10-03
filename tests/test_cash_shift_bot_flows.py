@@ -142,7 +142,7 @@ async def test_close_shift_restart_starts_manual_amounts_from_cash_sales(bot_dp,
     await send(main.dp, bot, 111, text="500")   # xato karta savdo
 
     sent = await send_callback(main.dp, bot, 111, data="csui_close_restart", target_chat_id=111)
-    assert any("Boshidan boshladik" in t for t in texts(sent) if t)
+    assert any("Boshidan boshladik" in m.text for m in sent if getattr(m, "text", None))
 
     await send(main.dp, bot, 111, text="2000")
     await send(main.dp, bot, 111, text="0")
@@ -150,7 +150,7 @@ async def test_close_shift_restart_starts_manual_amounts_from_cash_sales(bot_dp,
     await send_callback(main.dp, bot, 111, data="csui_close_start_yes", target_chat_id=111)
     await send(main.dp, bot, 111, text="2000")
     sent = await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
-    combined = "\n".join(t for t in texts(sent) if t)
+    combined = "\n".join(m.text for m in sent if getattr(m, "text", None))
 
     assert "Naqd: 2000" in combined
     assert "Karta: 0" in combined

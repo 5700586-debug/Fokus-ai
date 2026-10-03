@@ -126,6 +126,38 @@ async def _clear_daily_report_gate(main, bot, user_id: int) -> None:
     await send_callback(main.dp, bot, user_id, data="csdr_staff_no", target_chat_id=user_id)
 
 
+
+async def test_close_shift_restart_starts_manual_amounts_from_cash_sales(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await _open_shift(main, bot, 111, "0")
+
+    await send(main.dp, bot, 111, text="/closeshift")
+    await _clear_deficiency_gate(main, bot, 111)
+    await _clear_daily_report_gate(main, bot, 111)
+    await send(main.dp, bot, 111, photo_file_id="sales_photo")
+    await send(main.dp, bot, 111, photo_file_id="cash_photo")
+
+    await send(main.dp, bot, 111, text="1000")  # xato naqd savdo
+    await send(main.dp, bot, 111, text="500")   # xato karta savdo
+
+    sent = await send_callback(main.dp, bot, 111, data="csui_close_restart", target_chat_id=111)
+    assert any("Boshidan boshladik" in t for t in texts(sent) if t)
+
+    await send(main.dp, bot, 111, text="2000")
+    await send(main.dp, bot, 111, text="0")
+    await send(main.dp, bot, 111, text="0")
+    await send_callback(main.dp, bot, 111, data="csui_close_start_yes", target_chat_id=111)
+    await send(main.dp, bot, 111, text="2000")
+    sent = await send_callback(main.dp, bot, 111, data="csui_close_amount_ok", target_chat_id=111)
+    combined = "\n".join(t for t in texts(sent) if t)
+
+    assert "Naqd: 2000" in combined
+    assert "Karta: 0" in combined
+    assert "Farq: 0" in combined
+    assert "Naqd: 1000" not in combined and "Karta: 500" not in combined
+
+
 async def _close_shift_happy_path(
     main, bot, user_id: int, cash_sales="100000", card_sales="0", other="0", actual="100000"
 ):

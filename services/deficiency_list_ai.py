@@ -28,10 +28,17 @@ _AI_MODEL = "gpt-5-mini"
 _UNIT_ALIASES = {
     "коробка": "karobka",
     "karopka": "karobka",
+    "karopqa": "karobka",
     "korobka": "karobka",
     "yashig": "yashik",
     "yashiq": "yashik",
     "ящик": "yashik",
+    "пачка": "pachka",
+    "упаковка": "upakovka",
+    "vog": "bog",
+    "vog'": "bog",
+    "vogh": "bog",
+    "bog'": "bog",
     "ta": "dona",
 }
 
@@ -77,7 +84,7 @@ _HINT_TOKENS = set(KNOWN_UNITS) | set(_UNIT_ALIASES) | set(_NUMBER_WORDS)
 
 
 def _clean_apostrophes(text: str) -> str:
-    return (text or "").replace("’", "'").replace("ʻ", "'").replace("`", "'")
+    return (text or "").replace("’", "'").replace("‘", "'").replace("ʻ", "'").replace("`", "'")
 
 
 def _to_quantity(raw: str) -> float | None:

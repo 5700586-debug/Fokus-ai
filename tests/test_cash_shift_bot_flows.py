@@ -25,6 +25,28 @@ def anyio_backend():
     return "asyncio"
 
 
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("50000", 50000),
+        ("50 000", 50000),
+        ("50.000", 50000),
+        ("50,000", 50000),
+        ("2 067 000", 2067000),
+        ("2067000 naqd pul", 2067000),
+        ("2067000 naqt pul", 2067000),
+        ("50.00", None),
+        ("1.5", None),
+        ("naqd 50000", None),
+    ],
+)
+def test_parse_amount_accepts_cashier_human_formats(text, expected):
+    import cash_shift_bot
+
+    assert cash_shift_bot._parse_amount(text) == expected
+
 def _make_kassir(user_id: int, branch: str = "Filial-1") -> None:
     from roles import set_role
     import employees

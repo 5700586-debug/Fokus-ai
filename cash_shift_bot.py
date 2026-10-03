@@ -232,7 +232,24 @@ class DailyReportStates(StatesGroup):
 
 
 def _parse_amount(text: str) -> int | None:
-    cleaned = text.strip().replace(" ", "").replace("'", "").replace(",", "")
+    # Kassirlar pulni ko'pincha "50.000", "50 000", "50,000" yoki
+    # "2067000 naqd pul" deb yozadi. So'mda kasr kerak emas, shuning uchun
+    # nuqta/vergul faqat minglik ajratgich sifatida qabul qilinadi.
+    text = text.strip().lower()
+    if not text:
+        return None
+
+    match = re.match(r"^-?[\d\s.,']+", text)
+    if match is None:
+        return None
+
+    raw_number = match.group(0).strip()
+    compact = raw_number.replace(" ", "").replace("'", "")
+    if "." in compact or "," in compact:
+        if not re.fullmatch(r"-?\d{1,3}([.,]\d{3})+", compact):
+            return None
+
+    cleaned = compact.replace(",", "").replace(".", "")
     if not cleaned.lstrip("-").isdigit():
         return None
     return int(cleaned)

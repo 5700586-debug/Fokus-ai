@@ -284,10 +284,13 @@ def _ai_summary_confirm_kb() -> InlineKeyboardMarkup:
     # ``closeshift_amount_confirmed``/``closeshift_amount_retry``
     # handlerlarini o'zgarishsiz qayta ishlatish uchun, faqat tugma matni
     # AI-xulosa ekraniga mos ("Tasdiqlash"/"Tuzatish").
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="csui_close_amount_ok"),
-        InlineKeyboardButton(text="✏️ Tuzatish", callback_data="csui_close_amount_retry"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="csui_close_amount_ok"),
+            InlineKeyboardButton(text="✏️ Tuzatish", callback_data="csui_close_amount_retry"),
+        ],
+        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+    ])
 
 
 async def _download_photo_data_uri(bot, file_id: str) -> str | None:
@@ -452,10 +455,13 @@ async def _ask_next_ai_field_or_summary(message: Message, state: FSMContext) -> 
 
 
 def _confirm_handover_start_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Ha, topshiraman", callback_data="csui_close_start_yes"),
-        InlineKeyboardButton(text="❌ Orqaga", callback_data="csui_close_start_back"),
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ha, topshiraman", callback_data="csui_close_start_yes"),
+            InlineKeyboardButton(text="❌ Orqaga", callback_data="csui_close_start_back"),
+        ],
+        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+    ])
 
 
 def _close_restart_kb() -> InlineKeyboardMarkup:
@@ -2293,7 +2299,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def closeshift_cash_sales(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         await state.update_data(cash_sales=amount)
@@ -2306,7 +2312,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def closeshift_card_sales(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         await state.update_data(card_sales=amount)
@@ -2372,7 +2378,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def closeshift_actual_cash_balance(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         await state.update_data(actual_cash_balance=amount)

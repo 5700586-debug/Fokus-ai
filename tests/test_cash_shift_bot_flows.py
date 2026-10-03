@@ -127,7 +127,7 @@ async def _clear_daily_report_gate(main, bot, user_id: int) -> None:
 
 
 
-async def test_close_shift_restart_starts_manual_amounts_from_cash_sales(bot_dp, monkeypatch):
+async def test_close_shift_restart_starts_again_from_photos(bot_dp, monkeypatch):
     main, bot = bot_dp
     _make_kassir(111)
     await _open_shift(main, bot, 111, "0")
@@ -142,8 +142,10 @@ async def test_close_shift_restart_starts_manual_amounts_from_cash_sales(bot_dp,
     await send(main.dp, bot, 111, text="500")   # xato karta savdo
 
     sent = await send_callback(main.dp, bot, 111, data="csui_close_restart", target_chat_id=111)
-    assert any("Boshidan boshladik" in m.text for m in sent if getattr(m, "text", None))
+    assert any("Kompyuterdagi kunlik savdo hisobotining rasmini qayta yuboring" in m.text for m in sent if getattr(m, "text", None))
 
+    await send(main.dp, bot, 111, photo_file_id="sales_photo_retry")
+    await send(main.dp, bot, 111, photo_file_id="cash_photo_retry")
     await send(main.dp, bot, 111, text="2000")
     await send(main.dp, bot, 111, text="0")
     await send(main.dp, bot, 111, text="0")

@@ -12,6 +12,7 @@ qo'lda kiritish oqimi o'zgarishsiz ishlayveradi.
 import asyncio
 import base64
 import re
+import time
 import uuid
 
 import company_time
@@ -258,7 +259,7 @@ _AI_FIELD_LABELS = {
     "other_payments": "Boshqa to'lovlar",
     "actual_cash_balance": "Kassadagi haqiqiy naqd qoldiq",
 }
-_VISION_EXTRACTION_TIMEOUT_SECONDS = 20
+_VISION_EXTRACTION_TIMEOUT_SECONDS = 60
 
 
 def _ai_summary_confirm_kb() -> InlineKeyboardMarkup:
@@ -286,22 +287,32 @@ async def _download_photo_data_uri(bot, file_id: str) -> str | None:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def _log_vision_fallback(reason: str, shift_id: int | None, started: float) -> None:
+    """Qo'lda kiritishga o'tish sababini logga yozadi: sabab kodi (timeout, download, disabled,
+    no_sales_ref, both_unconfident, exception), smena ID va sarflangan vaqt. Kalit, rasm yoki
+    AI javobi YOZILMAYDI."""
+    print(f"cash_vision_fallback reason={reason} shift_id={shift_id} elapsed={time.monotonic() - started:.1f}s")
+
+
 async def _extract_cash_shift_fields(
-    bot, openai_client: AsyncOpenAI, sales_file_id: str, cash_file_id: str
+    bot, openai_client: AsyncOpenAI, sales_file_id: str, cash_file_id: str, shift_id: int | None = None
 ) -> dict | None:
     """AI o'qishga urinadi. ``None`` — AI butunlay ishlamadi/o'chirilgan
     (chaqiruvchi mavjud qo'lda kiritish oqimidan foydalanishi kerak,
-    PHASE2 #11). Bo'sh yoki to'liq bo'lmagan dict — AI ishladi, lekin
-    ba'zi/barcha maydonlarni "unclear" deb hisoblади (chaqiruvchi faqat
+    PHASE2 #11; sabab ``cash_vision_fallback`` logida). Bo'sh yoki to'liq bo'lmagan dict — AI
+    ishladi, lekin ba'zi/barcha maydonlarni "unclear" deb hisoblади (chaqiruvchi faqat
     o'sha maydonlarni so'raydi, PHASE2 #9/#10)."""
+    started = time.monotonic()
     provider = get_vision_extraction_provider(openai_client)
     if not provider.is_enabled():
+        _log_vision_fallback("disabled", shift_id, started)
         return None
 
     try:
         sales_uri = await _download_photo_data_uri(bot, sales_file_id)
         cash_uri = await _download_photo_data_uri(bot, cash_file_id)
         if sales_uri is None or cash_uri is None:
+            _log_vision_fallback("download", shift_id, started)
             return None
 
         sales_result, cash_result = await asyncio.wait_for(
@@ -311,11 +322,16 @@ async def _extract_cash_shift_fields(
             ),
             timeout=_VISION_EXTRACTION_TIMEOUT_SECONDS,
         )
+    except asyncio.TimeoutError:
+        _log_vision_fallback("timeout", shift_id, started)
+        return None
     except Exception as error:  # noqa: BLE001
         print(f"Vision extraction xatosi (cash_shift): {error!r}")
+        _log_vision_fallback("exception", shift_id, started)
         return None
 
     if not sales_result.confident and not cash_result.confident:
+        _log_vision_fallback("both_unconfident", shift_id, started)
         return None
 
     # Ikki rasm orasida bog'liq qiymat ziddiyati (PHASE2 #9, oxirgi
@@ -2154,10 +2170,27 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         sales_file_id = shift.get("sales_report_photo_ref") if shift else None
 
         extracted = None
-        if sales_file_id:
-            extracted = await _extract_cash_shift_fields(
-                message.bot, openai_client, sales_file_id, file_id
-            )
+        if not sales_file_id:
+            _log_vision_fallback("no_sales_ref", data["shift_id"], time.monotonic())
+        else:
+            # Tahlil biroz davom etadi — kassir kutayotganini bilsin. Xabar tahlil tugagach
+            # (muvaffaqiyat, timeout yoki xato) har holda o'chiriladi.
+            wait_message = None
+            if get_vision_extraction_provider(openai_client).is_enabled():
+                try:
+                    wait_message = await message.answer("⏳ Rasmlarni o'qiyapman, biroz kuting…")
+                except Exception as error:  # noqa: BLE001
+                    print(f"Kutish xabarini yuborishda xato: {error!r}")
+            try:
+                extracted = await _extract_cash_shift_fields(
+                    message.bot, openai_client, sales_file_id, file_id, shift_id=data["shift_id"]
+                )
+            finally:
+                if wait_message is not None:
+                    try:
+                        await wait_message.delete()
+                    except Exception as error:  # noqa: BLE001
+                        print(f"Kutish xabarini o'chirishda xato: {error!r}")
 
         if extracted is None:
             # AI o'chirilgan/butunlay ishlamadi — mavjud qo'lda kiritish

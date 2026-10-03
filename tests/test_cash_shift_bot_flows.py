@@ -1044,8 +1044,12 @@ async def test_kassir_choice_buttons_are_two_per_row(bot_dp):
     sent = await send(main.dp, bot, 111, text="0")  # "Smenani topshirasizmi?" darvozasi
 
     rows = sent[0].reply_markup.inline_keyboard
-    assert len(rows) == 1
+    # Tanlov tugmalari (Ha/Orqaga) bitta qatorda ikkitadan; uzun "Rasmlarni qayta yuborish" tugmasi
+    # telefonda sig'ishi uchun alohida to'liq qatorda (oxirgi qator).
+    assert len(rows) == 2
     assert [b.text for b in rows[0]] == ["✅ Ha, topshiraman", "❌ Orqaga"]
+    assert [b.text for b in rows[1]] == ["📸 Rasmlarni qayta yuborish"]
+    assert [b.callback_data for b in rows[1]] == ["csui_close_restart"]
 
 
 def _seed_closed_shift(branch: str, actual_cash_balance: int, shift_date: str, employee_id: int = 900) -> None:

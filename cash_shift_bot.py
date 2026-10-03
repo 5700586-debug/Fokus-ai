@@ -458,11 +458,20 @@ def _confirm_handover_start_kb() -> InlineKeyboardMarkup:
     ]])
 
 
-def _confirm_close_amount_kb() -> InlineKeyboardMarkup:
+def _close_restart_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_close_amount_ok"),
-        InlineKeyboardButton(text="🔄 Qayta yozaman", callback_data="csui_close_amount_retry"),
+        InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart"),
     ]])
+
+
+def _confirm_close_amount_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ To'g'ri", callback_data="csui_close_amount_ok"),
+            InlineKeyboardButton(text="🔄 Qayta yozaman", callback_data="csui_close_amount_retry"),
+        ],
+        [InlineKeyboardButton(text="🔄 Boshidan boshlash", callback_data="csui_close_restart")],
+    ])
 
 
 def _confirm_previous_balance_kb(token: str) -> InlineKeyboardMarkup:
@@ -1193,7 +1202,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def openshift_manual_balance(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         await state.clear()
@@ -1210,7 +1219,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def openshift_counted_balance(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         await state.update_data(counted_amount=amount)
@@ -2215,7 +2224,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             # qolgan vaqtinchalik daftar qatorlari tozalanadi (DBga tegilmaydi).
             await state.update_data(**_LEDGER_CLEARED)
             await state.set_state(CloseShiftStates.cash_sales)
-            sent = await message.answer("Bugungi naqd savdo summasini kiriting:")
+            sent = await message.answer("Bugungi naqd savdo summasini kiriting:", reply_markup=_close_restart_kb())
             chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
             return
 
@@ -2268,7 +2277,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
     async def closeshift_ai_unclear_field(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.")
+            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
         data = await state.get_data()
@@ -2290,7 +2299,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         await state.update_data(cash_sales=amount)
         await state.set_state(CloseShiftStates.card_sales)
         data = await state.get_data()
-        sent = await message.answer("Bugungi karta savdo summasini kiriting:")
+        sent = await message.answer("Bugungi karta savdo summasini kiriting:", reply_markup=_close_restart_kb())
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.card_sales))
@@ -2303,14 +2312,14 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         await state.update_data(card_sales=amount)
         await state.set_state(CloseShiftStates.other_payments)
         data = await state.get_data()
-        sent = await message.answer("Boshqa to'lovlar summasini kiriting (bo'lmasa 0 yozing):")
+        sent = await message.answer("Boshqa to'lovlar summasini kiriting (bo'lmasa 0 yozing):", reply_markup=_close_restart_kb())
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseShiftStates.other_payments))
     async def closeshift_other_payments(message: Message, state: FSMContext) -> None:
         amount = _parse_amount(message.text or "")
         if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting (bo'lmasa 0).")
+            await message.answer("❌ Faqat musbat raqam kiriting (bo'lmasa 0).", reply_markup=_close_restart_kb())
             return
 
         await state.update_data(other_payments=amount)
@@ -2319,12 +2328,36 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         sent = await message.answer("Smenani topshirasizmi?", reply_markup=_confirm_handover_start_kb())
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
+    @dp.callback_query(F.data == "csui_close_restart")
+    async def closeshift_restart(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        shift_id = data.get("shift_id")
+        if not shift_id:
+            await state.clear()
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer("❌ Bekor qilindi. /closeshift ni qayta bosing.")
+            await callback.answer()
+            return
+
+        await state.update_data(
+            cash_sales=None, card_sales=None, other_payments=None, actual_cash_balance=None,
+            _ai_unclear_queue=[], **_LEDGER_CLEARED,
+        )
+        await state.set_state(CloseShiftStates.cash_sales)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        sent = await callback.message.answer(
+            "🔄 Boshidan boshladik. Bugungi naqd savdo summasini kiriting:",
+            reply_markup=_close_restart_kb(),
+        )
+        chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift_id), sent)
+        await callback.answer()
+
     @dp.callback_query(F.data == "csui_close_start_yes", StateFilter(CloseShiftStates.confirm_handover_start))
     async def closeshift_start_yes(callback: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CloseShiftStates.actual_cash_balance)
         await callback.message.edit_reply_markup(reply_markup=None)
         data = await state.get_data()
-        sent = await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        sent = await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.", reply_markup=_close_restart_kb())
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
         await callback.answer()
 
@@ -2357,7 +2390,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         await state.update_data(**_LEDGER_CLEARED)
         await state.set_state(CloseShiftStates.actual_cash_balance)
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.")
+        await callback.message.answer("💵 Kassadagi pulni sanab, summani yozing.", reply_markup=_close_restart_kb())
         await callback.answer()
 
     @dp.callback_query(F.data == "csui_close_amount_ok", StateFilter(CloseShiftStates.confirm_actual_balance))

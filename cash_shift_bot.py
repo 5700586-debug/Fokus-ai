@@ -243,7 +243,13 @@ def _parse_amount(text: str) -> int | None:
     if match is None:
         return None
 
-    cleaned = match.group(0).replace(" ", "").replace("'", "").replace(",", "").replace(".", "")
+    raw_number = match.group(0).strip()
+    compact = raw_number.replace(" ", "").replace("'", "")
+    if "." in compact or "," in compact:
+        if not re.fullmatch(r"-?\d{1,3}([.,]\d{3})+", compact):
+            return None
+
+    cleaned = compact.replace(",", "").replace(".", "")
     if not cleaned.lstrip("-").isdigit():
         return None
     return int(cleaned)

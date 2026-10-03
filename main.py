@@ -1408,7 +1408,7 @@ class _HasViewingBranch(Filter):
 
 @dp.message(F.text == "👥 Xodimlar", _HasViewingBranch())
 async def founder_branch_employees_handler(message: Message, viewing_branch: str) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_STORE_CARDS):
         return
 
     await message.answer(
@@ -1642,7 +1642,7 @@ def _store_branch_shifts_text(branch: str) -> str:
 
 @dp.message(F.text.in_(_BRANCH_BUTTON_TEXT_TO_NAME))
 async def founder_branch_card_handler(message: Message, state: FSMContext) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_STORE_CARDS):
         return
 
     branch = _BRANCH_BUTTON_TEXT_TO_NAME[message.text]
@@ -1652,7 +1652,7 @@ async def founder_branch_card_handler(message: Message, state: FSMContext) -> No
 
 @dp.message(F.text == _STORE_CARD_BACK_TEXT)
 async def founder_store_card_back_handler(message: Message, state: FSMContext) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_STORE_CARDS):
         return
 
     await state.update_data(viewing_branch=None)
@@ -1661,7 +1661,7 @@ async def founder_store_card_back_handler(message: Message, state: FSMContext) -
 
 @dp.message(F.text == _STORE_SUBVIEW_BACK_TEXT, _HasViewingBranch())
 async def founder_store_subview_back_handler(message: Message, viewing_branch: str) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_STORE_CARDS):
         return
 
     await message.answer(_store_card_text(viewing_branch), reply_markup=_store_card_keyboard())
@@ -1669,7 +1669,7 @@ async def founder_store_subview_back_handler(message: Message, viewing_branch: s
 
 @dp.message(F.text == _STORE_CARD_SHIFTS_TEXT, _HasViewingBranch())
 async def founder_branch_shifts_handler(message: Message, viewing_branch: str) -> None:
-    if not await ensure_authorized(message):
+    if not await permissions.ensure_permission(message, permissions.ACTION_VIEW_STORE_CARDS):
         return
 
     await message.answer(

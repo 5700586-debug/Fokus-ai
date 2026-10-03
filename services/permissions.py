@@ -135,6 +135,11 @@ ACTION_E2E_VIEW_TEST_RUN = "e2e_view_test_run"
 
 _E2E_TESTER_ONLY_ACTIONS = frozenset({ACTION_E2E_TEST_CASH_SHIFT, ACTION_E2E_VIEW_TEST_RUN})
 
+# main.py — "🏬 Do'konlar" filial kartalari va bugungi smenalar tafsiloti (to'liq pul
+# summalari bilan). Founder-only: ``ROLE_PERMISSIONS``da hech qaysi rolga biriktirilmagan,
+# shuning uchun Founder bypass'idan tashqari hech kim (tugma matnini qo'lda yuborganda ham) ocholmaydi.
+ACTION_VIEW_STORE_CARDS = "view_store_cards"
+
 # Founder-only amallar (masalan /setrule, /processmonth, /invite) shu
 # ro'yxatga kiritilmaydi — ularga faqat Founder ruxsatli (pastdagi
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol

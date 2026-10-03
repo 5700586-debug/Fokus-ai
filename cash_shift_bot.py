@@ -134,7 +134,10 @@ def _employee_name(user_id: int) -> str:
     return full_name or str(user_id)
 
 
-def _format_shift_summary(shift: dict) -> str:
+def _format_shift_summary(shift: dict, include_money: bool = True) -> str:
+    if not include_money:
+        return _format_shift_summary_no_money(shift)
+
     lines = [
         "💰 KASSA — KUN YAKUNI",
         "",
@@ -157,6 +160,32 @@ def _format_shift_summary(shift: dict) -> str:
         f"Status: {_STATUS_LABELS.get(shift['status'], shift['status'])}",
     ]
     return "\n".join(lines)
+
+
+def _format_shift_summary_no_money(shift: dict) -> str:
+    """Pulsiz variant (nazoratchi uchun): kassir, filial, sana, status va "tafovut bor"
+    belgisi — savdo, qoldiq, xarajat va farq SUMMALARI yo'q."""
+    needs_review = shift.get("status") == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL
+    has_difference = bool(shift.get("difference"))
+    lines = [
+        "💰 KASSA — TEKSHIRUV",
+        "",
+        f"Kassir: {_employee_name(shift['employee_id'])}",
+        f"Filial: {shift.get('branch') or '-'}",
+        f"Sana: {shift['shift_date']}",
+        f"Status: {_STATUS_LABELS.get(shift['status'], shift['status'])}",
+    ]
+    if has_difference:
+        lines.append("⚠️ Tafovut bor")
+    if needs_review:
+        lines.append("🔎 Tekshiruv kerak")
+    return "\n".join(lines)
+
+
+def _can_see_cash_money(user_id: int) -> bool:
+    """Pul summalarini to'liq ko'rish: Founder (bypass) va ``ACTION_VIEW_CASH_SUMMARY``
+    (moliyachi). Nazoratchi pul tafsilotini ko'rmaydi."""
+    return permissions.has_permission(user_id, permissions.ACTION_VIEW_CASH_SUMMARY)
 
 
 class OpenShiftStates(StatesGroup):
@@ -453,11 +482,9 @@ def _discrepancy_supervisor_kb(shift_id: int) -> InlineKeyboardMarkup:
 
 
 async def _send_shift_for_review(message: Message, shift: dict) -> None:
-    card = _format_shift_summary(shift)
-    text = (
-        "🔴 Smena farqi tolerance/retry chegarasidan oshdi — Nazoratchi/Founder "
-        "tekshiruvi kerak.\n\n" + card
-    )
+    header = "🔴 Smena farqi tolerance/retry chegarasidan oshdi — Nazoratchi/Founder tekshiruvi kerak.\n\n"
+    full_text = header + _format_shift_summary(shift)
+    masked_text = header + _format_shift_summary(shift, include_money=False)
 
     recipients = {FOUNDER_ID}
     profile = get_profile(shift["employee_id"])
@@ -470,6 +497,7 @@ async def _send_shift_for_review(message: Message, shift: dict) -> None:
         recipients.add(nazoratchi_id)
 
     for recipient_id in recipients:
+        text = full_text if _can_see_cash_money(recipient_id) else masked_text
         await message.bot.send_message(recipient_id, text, reply_markup=_review_keyboard(shift["id"]))
 
 
@@ -508,16 +536,24 @@ async def _send_discrepancy_alert(
     """
     difference = shift["received_cash_balance"] - shift["opening_balance"]
     topshiruvchi = _employee_name(handed_over_employee_id) if handed_over_employee_id is not None else "-"
-    text = (
-        "⚠️ KASSA TAFOVUTI\n\n"
-        f"Filial: {shift.get('branch') or '-'}\n"
-        f"Topshiruvchi kassir: {topshiruvchi}\n"
-        f"Qabul qiluvchi kassir: {_employee_name(shift['employee_id'])}\n"
-        f"Topshirilgan summa: {shift['opening_balance']} so'm\n"
-        f"Qabul qilingan summa: {shift['received_cash_balance']} so'm\n"
-        f"Tafovut: {_format_signed_amount(difference)} so'm\n"
-        f"Sabab: {reason}"
-    )
+    base_lines = [
+        "⚠️ KASSA TAFOVUTI",
+        "",
+        f"Filial: {shift.get('branch') or '-'}",
+        f"Topshiruvchi kassir: {topshiruvchi}",
+        f"Qabul qiluvchi kassir: {_employee_name(shift['employee_id'])}",
+    ]
+    full_text = "\n".join(base_lines + [
+        f"Topshirilgan summa: {shift['opening_balance']} so'm",
+        f"Qabul qilingan summa: {shift['received_cash_balance']} so'm",
+        f"Tafovut: {_format_signed_amount(difference)} so'm",
+        f"Sabab: {reason}",
+    ])
+    # Nazoratchi pulsiz variantni oladi: tafovut BORligi aytiladi, summalar yo'q. Kassir yozgan
+    # sabab matni ham ko'rsatilmaydi (ichida pul summasi bo'lishi mumkin) — faqat umumiy eslatma.
+    masked_text = "\n".join(base_lines + [
+        "⚠️ Tafovut bor", "Sabab kiritilgan. Tafsilot Founder/Moliyachi uchun.",
+    ])
 
     recipients = {FOUNDER_ID}
     # Nazoratchi bitta va filialga bog'lanmagan (single-slot rol) —
@@ -529,6 +565,7 @@ async def _send_discrepancy_alert(
         recipients.add(nazoratchi_id)
 
     for recipient_id in recipients:
+        text = full_text if _can_see_cash_money(recipient_id) else masked_text
         await message.bot.send_message(recipient_id, text, reply_markup=_discrepancy_supervisor_kb(shift["id"]))
 
 
@@ -2449,4 +2486,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await message.answer("ℹ️ Bugun uchun smena topilmadi.")
             return
 
-        await message.answer(_format_shift_summary(shift))
+        # O'z smenasi — to'liq; boshqa xodim smenasi — faqat Founder/Moliyachi to'liq,
+        # nazoratchi (va boshqalar) pulsiz variant.
+        include_money = target_id == message.from_user.id or _can_see_cash_money(message.from_user.id)
+        await message.answer(_format_shift_summary(shift, include_money=include_money))

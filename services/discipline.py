@@ -173,6 +173,8 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
     grade_points = grade_points_map[grade_key]
     previous = discipline_repo.get_daily_evaluation(employee_id, eval_date)
     discipline_repo.upsert_daily_evaluation(employee_id, supervisor_id, eval_date, grade_key, grade_points)
+    # Qayta baholashda eski baho yo'qolmaydi: har baho alohida tarix qatori.
+    discipline_repo.add_evaluation_history(employee_id, supervisor_id, eval_date, grade_key, grade_points)
 
     delta = grade_points - (previous["grade_points"] if previous else 0)
     if delta:
@@ -183,6 +185,27 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
         balance = get_salary(employee_id)["bonus_bank"]
 
     return EvaluationResult(grade_key=grade_key, grade_points=grade_points, bonus_bank_balance=balance)
+
+
+def get_grade_history(employee_id: int, eval_date: str) -> list[dict]:
+    return discipline_repo.get_evaluation_history(employee_id, eval_date)
+
+
+def format_daily_star_message(
+    name: str, grade_points: int, reason: str, totals: dict, day_label: str = "kecha"
+) -> str:
+    """Xodim uchun yulduzli kunlik xabar matni. Ichki hisob — ball, xodimga ⭐ ko'rinishida;
+    Bonus (plus) va Minus ALOHIDA yig'iladi, Hisob = Bonus - Minus ("+3 va -12 = -9" deb
+    qo'shilmaydi). Eski xabarni o'chirib yangisini yuborish (live yuborish) alohida TODO —
+    bu yerda faqat matn/hisob poydevori. ``totals`` — ``get_period_point_totals`` natijasi."""
+    sign = "+" if grade_points >= 0 else ""
+    return (
+        f"{name}, {day_label} siz {sign}{grade_points} ⭐ oldingiz.\n"
+        f"Sabab: {reason}.\n"
+        f"Shu oy jami: {totals['bonus']} ⭐\n"
+        f"Minus: {totals['minus']} ⭐ kamaygan\n"
+        f"Hisob: {totals['net']} ⭐"
+    )
 
 
 def get_daily_grade(employee_id: int, eval_date: str) -> dict | None:

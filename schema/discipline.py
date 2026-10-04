@@ -68,6 +68,33 @@ CREATE TABLE IF NOT EXISTS bonus_bank_ledger (
     created_at TEXT NOT NULL
 );
 
+-- Har bir kunlik baho BERISH alohida qator sifatida saqlanadi (``daily_evaluations`` joriy
+-- bahoni ushlaydi va qayta baholashda ustiga yoziladi — eski baho tarixi shu yerda qoladi).
+CREATE TABLE IF NOT EXISTS daily_evaluation_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    supervisor_id INTEGER NOT NULL,
+    eval_date TEXT NOT NULL,
+    grade_key TEXT NOT NULL,
+    grade_points INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- Nazoratchi tekshiruv sessiyasi = sana + filial + nazoratchi. Yopilmagan (``open``) sessiya
+-- keyingi kunga ham saqlanadi — yo'qolmaydi va majburan yopilmaydi.
+CREATE TABLE IF NOT EXISTS nazoratchi_branch_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supervisor_id INTEGER NOT NULL,
+    branch TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    evaluated_count INTEGER,
+    total_count INTEGER,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    UNIQUE(supervisor_id, branch, session_date)
+);
+
 CREATE TABLE IF NOT EXISTS daily_closures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supervisor_id INTEGER NOT NULL,

@@ -251,6 +251,35 @@ def upsert_daily_evaluation(
         conn.close()
 
 
+def add_evaluation_history(
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int
+) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO daily_evaluation_history "
+            "(employee_id, supervisor_id, eval_date, grade_key, grade_points, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (employee_id, supervisor_id, eval_date, grade_key, grade_points, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_evaluation_history(employee_id: int, eval_date: str) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM daily_evaluation_history WHERE employee_id = ? AND eval_date = ? ORDER BY id",
+            (employee_id, eval_date),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def get_evaluations_for_date(eval_date: str) -> list[dict]:
     conn = get_connection()
     try:
@@ -433,3 +462,76 @@ def try_record_supervisor_audit(
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+# ---------------------------------------------------- branch review sessions --
+
+
+def open_branch_session(supervisor_id: int, branch: str, session_date: str) -> dict:
+    """Sessiya (nazoratchi + filial + sana) mavjud bo'lmasa ochadi; mavjudini qaytaradi."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO nazoratchi_branch_sessions "
+            "(supervisor_id, branch, session_date, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
+            (supervisor_id, branch, session_date, _now()),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND branch = ? AND session_date = ?",
+            (supervisor_id, branch, session_date),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row)
+
+
+def get_branch_session(supervisor_id: int, branch: str, session_date: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND branch = ? AND session_date = ?",
+            (supervisor_id, branch, session_date),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
+def close_branch_session(session_id: int, evaluated_count: int, total_count: int) -> bool:
+    """Atomik ``open -> closed``: takroriy/parallel yopish ``False`` qaytaradi."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE nazoratchi_branch_sessions SET status = 'closed', evaluated_count = ?, total_count = ?, "
+            "closed_at = ? WHERE id = ? AND status = 'open'",
+            (evaluated_count, total_count, _now(), session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None, on_date: str | None = None) -> list[dict]:
+    clauses = ["supervisor_id = ?", "status = 'open'"]
+    params: list = [supervisor_id]
+    if before_date is not None:
+        clauses.append("session_date < ?")
+        params.append(before_date)
+    if on_date is not None:
+        clauses.append("session_date = ?")
+        params.append(on_date)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM nazoratchi_branch_sessions WHERE " + " AND ".join(clauses) +
+            " ORDER BY session_date, branch",
+            tuple(params),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]

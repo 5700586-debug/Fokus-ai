@@ -24,9 +24,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import employees
-from config import COMPANY_TIMEZONE, FOUNDER_ID
+from config import COMPANY_TIMEZONE, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import is_authorized, list_users
-from services import chat_cleanup, discipline, discipline_ai, permissions, rule_learning
+from services import chat_cleanup, discipline, discipline_ai, nazoratchi_day, permissions, rule_learning
 from services import rules as rules_service
 
 logger = logging.getLogger(__name__)
@@ -119,44 +119,117 @@ def _format_board(title: str, board: list[dict], score_key: str) -> str:
     return "\n".join(lines)
 
 
-def _employee_list_keyboard(page: int) -> InlineKeyboardMarkup:
-    targets = _target_employees()
-    start = page * _PAGE_SIZE
-    page_items = targets[start : start + _PAGE_SIZE]
-
-    rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"bos:emp:{user_id}:{page}")]
-        for user_id, name in page_items
-    ]
-
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"bos:page:{page - 1}"))
-    if start + _PAGE_SIZE < len(targets):
-        nav_row.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"bos:page:{page + 1}"))
-    if nav_row:
-        rows.append(nav_row)
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+# ----------------------------------------- filial -> xodimlar -> baholash (UI) --
+# Sessiya = sana + filial + nazoratchi. Callback'lar sanani ``YYYYMMDD`` ko'rinishida olib yuradi
+# (har filial/sana alohida, eski yopilmagan sessiya ham shu orqali ochiladi).
 
 
-def _employee_action_keyboard(employee_id: int) -> InlineKeyboardMarkup:
+def _ymd(iso_date: str) -> str:
+    return iso_date.replace("-", "")
+
+
+def _iso_from_ymd(text: str) -> str | None:
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return None
+
+
+def _branch_short(branch: str) -> str:
+    return branch.removeprefix("SATURN ").strip() or branch
+
+
+def _branch_index(branch: str) -> int | None:
+    try:
+        return RECRUITING_BRANCH_NAMES.index(branch)
+    except ValueError:
+        return None
+
+
+def _branch_picker_keyboard(prefix: str, review_date: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Chala - 1", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_CHALA}"
-                ),
-                InlineKeyboardButton(
-                    text="Norma - 2", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_NORMA}"
-                ),
-                InlineKeyboardButton(
-                    text="A'lo - 3", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_ALO}"
-                ),
-            ],
-            [InlineKeyboardButton(text="🚫 Ball ayirish (-10/-20/-30)", callback_data=f"bos:penalty_menu:{employee_id}")],
+            [InlineKeyboardButton(text=f"📍 {name}", callback_data=f"{prefix}:{index}:{_ymd(review_date)}")]
+            for index, name in enumerate(RECRUITING_BRANCH_NAMES)
         ]
     )
+
+
+def _day_phrase(session_date: str) -> str:
+    from datetime import timedelta
+
+    if session_date == (_today() - timedelta(days=1)).isoformat():
+        return "Kecha"
+    year, month, day = session_date.split("-")
+    return f"{day}.{month}.{year} sanadagi"
+
+
+def _stale_offer(supervisor_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
+    """Oldingi kunlardan yopilmay qolgan filial sessiyalari bo'lsa taklif: avval shuni yopish yoki
+    bugungi nazoratga o'tish. Hech narsa majburlanmaydi, sessiya yo'qolmaydi."""
+    sessions = nazoratchi_day.stale_open_sessions(supervisor_id, _today().isoformat())
+    sessions = [item for item in sessions if _branch_index(item["branch"]) is not None]
+    if not sessions:
+        return None
+
+    lines = [f"{_day_phrase(item['session_date'])} {_branch_short(item['branch'])} nazorati tugallanmagan." for item in sessions[:3]]
+    if len(sessions) > 3:
+        lines.append(f"…va yana {len(sessions) - 3} ta.")
+    question = "Avval shuni yopamizmi yoki bugungi nazoratga o'tasizmi?"
+    if len(lines) == 1:
+        lines = [f"{lines[0]} {question}"]
+    else:
+        lines.append(question)
+
+    rows = [
+        [InlineKeyboardButton(
+            text=f"🔁 {_branch_short(item['branch'])} {item['session_date'][8:]}.{item['session_date'][5:7]} — avval shuni yopamiz",
+            callback_data=f"bos:br:{_branch_index(item['branch'])}:{_ymd(item['session_date'])}",
+        )]
+        for item in sessions[:3]
+    ]
+    rows.append([InlineKeyboardButton(text="➡️ Bugungi nazoratga o'tish", callback_data="bos:today")])
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _branch_screen(branch: str, review_date: str, supervisor_id: int, prefix: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=supervisor_id)
+    ymd = _ymd(review_date)
+    index = _branch_index(branch)
+    if not statuses:
+        text = f"{prefix}🏬 {branch} — {review_date}\n\nHozircha bu filialda aktiv xodim mavjud emas."
+    else:
+        text = f"{prefix}🏬 {branch} — {review_date}\n\n" + "\n".join(item.line() for item in statuses)
+
+    buttons = [
+        InlineKeyboardButton(text=f"{item.emoji} {item.name}", callback_data=f"bos:emp:{item.profile['user_id']}:{ymd}")
+        for item in statuses
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="✅ Filialni yopish", callback_data=f"bos:close:{index}:{ymd}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Filiallar", callback_data="bos:today")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _employee_action_keyboard(employee_id: int, review_date: str, branch: str | None) -> InlineKeyboardMarkup:
+    ymd = _ymd(review_date)
+    index = _branch_index(branch) if branch else None
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="Chala - 1", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_CHALA}:{ymd}"
+            ),
+            InlineKeyboardButton(
+                text="Norma - 2", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_NORMA}:{ymd}"
+            ),
+            InlineKeyboardButton(
+                text="A'lo - 3", callback_data=f"bos:grade:{employee_id}:{discipline.GRADE_ALO}:{ymd}"
+            ),
+        ],
+        [InlineKeyboardButton(text="🚫 Ball ayirish (-10/-20/-30)", callback_data=f"bos:penalty_menu:{employee_id}")],
+    ]
+    if index is not None:
+        rows.append([InlineKeyboardButton(text="⬅️ Filial", callback_data=f"bos:br:{index}:{ymd}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _penalty_amount_keyboard(employee_id: int) -> InlineKeyboardMarkup:
@@ -316,15 +389,41 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        await message.answer("👥 Xodimni tanlang:", reply_markup=_employee_list_keyboard(0))
+        offer = _stale_offer(message.from_user.id)
+        if offer is not None:
+            await message.answer(offer[0], reply_markup=offer[1])
+            return
 
-    @dp.callback_query(F.data.startswith("bos:page:"))
-    async def baholash_page(callback: CallbackQuery) -> None:
+        await message.answer(
+            "🏬 Avval filialni tanlang:", reply_markup=_branch_picker_keyboard("bos:br", _today().isoformat())
+        )
+
+    @dp.callback_query(F.data == "bos:today")
+    async def baholash_today(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        page = int(callback.data.split(":")[2])
-        await callback.message.edit_text("👥 Xodimni tanlang:", reply_markup=_employee_list_keyboard(page))
+        await callback.message.edit_text(
+            "🏬 Avval filialni tanlang:", reply_markup=_branch_picker_keyboard("bos:br", _today().isoformat())
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("bos:br:"))
+    async def baholash_pick_branch(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
+            return
+
+        _, _, index_str, ymd = callback.data.split(":")
+        review_date = _iso_from_ymd(ymd)
+        index = int(index_str)
+        if review_date is None or not 0 <= index < len(RECRUITING_BRANCH_NAMES):
+            await callback.answer("Filial topilmadi.", show_alert=True)
+            return
+
+        branch = RECRUITING_BRANCH_NAMES[index]
+        nazoratchi_day.open_session(callback.from_user.id, branch, review_date)
+        text, keyboard = _branch_screen(branch, review_date, callback.from_user.id)
+        await callback.message.edit_text(text, reply_markup=keyboard)
         await callback.answer()
 
     @dp.callback_query(F.data.startswith("bos:emp:"))
@@ -332,11 +431,27 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        employee_id = int(callback.data.split(":")[2])
+        parts = callback.data.split(":")
+        employee_id = int(parts[2])
+        review_date = (_iso_from_ymd(parts[3]) if len(parts) > 3 else None) or _today().isoformat()
+        profile = employees.get_profile(employee_id)
         name = _employee_name(employee_id)
+        branch = profile.get("branch") if profile else None
+
+        lines = [f"👤 {name}"]
+        if profile is not None:
+            lines.append(nazoratchi_day.employee_status(profile, review_date).line())
+        history = discipline.get_grade_history(employee_id, review_date)
+        if history:
+            lines.append("")
+            lines.append("📜 Bugungi baholar:")
+            lines += [
+                f"• {discipline.GRADE_LABELS.get(row['grade_key'], row['grade_key'])} ({row['grade_points']} ball)"
+                for row in history
+            ]
+        lines += ["", "Baho tanlang yoki ball ayirish kiriting:"]
         await callback.message.edit_text(
-            f"👤 {name}\nBaho tanlang yoki ball ayirish kiriting:",
-            reply_markup=_employee_action_keyboard(employee_id),
+            "\n".join(lines), reply_markup=_employee_action_keyboard(employee_id, review_date, branch)
         )
         await callback.answer()
 
@@ -345,18 +460,26 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        _, _, employee_id_str, grade_key = callback.data.split(":")
-        employee_id = int(employee_id_str)
-        eval_date = _today().isoformat()
+        parts = callback.data.split(":")
+        employee_id = int(parts[2])
+        grade_key = parts[3]
+        review_date = (_iso_from_ymd(parts[4]) if len(parts) > 4 else None) or _today().isoformat()
 
-        result = discipline.record_daily_grade(employee_id, callback.from_user.id, eval_date, grade_key)
+        result = discipline.record_daily_grade(employee_id, callback.from_user.id, review_date, grade_key)
 
         name = _employee_name(employee_id)
         label = discipline.GRADE_LABELS[grade_key]
-        await callback.message.edit_text(
+        confirmation = (
             f"✅ {name} — {label} ({result.grade_points} ball) qayd etildi.\n"
             f"💰 Bonus banki: {result.bonus_bank_balance} ball"
         )
+        profile = employees.get_profile(employee_id)
+        branch = profile.get("branch") if profile else None
+        if branch and _branch_index(branch) is not None:
+            text, keyboard = _branch_screen(branch, review_date, callback.from_user.id, prefix=confirmation + "\n\n")
+            await callback.message.edit_text(text, reply_markup=keyboard)
+        else:
+            await callback.message.edit_text(confirmation)
         await callback.answer("Saqlandi")
 
     @dp.callback_query(F.data.startswith("bos:penalty_menu:"))
@@ -480,15 +603,46 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_CLOSE_DAY):
             return
 
-        today = _today().isoformat()
-        total = len(_target_employees())
-
-        if not discipline.close_day(message.from_user.id, today, total):
-            await message.answer(f"ℹ️ {today} allaqachon yopilgan.")
+        offer = _stale_offer(message.from_user.id)
+        if offer is not None:
+            await message.answer(offer[0], reply_markup=offer[1])
             return
 
-        evaluated = len(discipline.get_daily_leaderboard(today))
-        await message.answer(f"✅ {today} kuni yopildi. Baholangan: {evaluated}/{total}")
+        await message.answer(
+            "✅ Qaysi filial nazoratini yopamiz?",
+            reply_markup=_branch_picker_keyboard("bos:close", _today().isoformat()),
+        )
+
+    @dp.callback_query(F.data.startswith("bos:close:"))
+    async def close_branch_handler(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_CLOSE_DAY):
+            return
+
+        _, _, index_str, ymd = callback.data.split(":")
+        review_date = _iso_from_ymd(ymd)
+        index = int(index_str) if index_str.isdigit() else -1
+        if review_date is None or not 0 <= index < len(RECRUITING_BRANCH_NAMES):
+            await callback.answer("Filial topilmadi.", show_alert=True)
+            return
+
+        branch = RECRUITING_BRANCH_NAMES[index]
+        result = nazoratchi_day.close_session(callback.from_user.id, branch, review_date)
+
+        if result.already_closed:
+            await callback.message.edit_text(f"ℹ️ {branch} — {review_date} nazorati allaqachon yopilgan.")
+        elif result.blockers:
+            await callback.message.edit_text(
+                nazoratchi_day.blockers_text(result.blockers),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="📋 Filialga qaytish", callback_data=f"bos:br:{index}:{ymd}"),
+                ]]),
+            )
+        else:
+            damda = f"\n🔴 Damda: {result.off_count}" if result.off_count else ""
+            await callback.message.edit_text(
+                f"✅ {branch} — {review_date} nazorati yopildi. Baholangan: {result.evaluated}/{result.total}{damda}"
+            )
+        await callback.answer()
 
     # ------------------------------------------------------- dashboardlar --
 

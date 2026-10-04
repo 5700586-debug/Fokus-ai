@@ -477,7 +477,6 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("nazoratchi", "/filiallar — Filial bo'yicha xodimlarni ko'rish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/baholash — Xodimni kunlik baholash/ball ayirish", permissions.ACTION_EVALUATE_EMPLOYEE),
     ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),
-    ("nazoratchi", "/score — Xodimga oylik ball qo'yish", permissions.ACTION_SCORE_EMPLOYEE),
     (
         "nazoratchi",
         "/grafiksorov — Grafik o'zgartirish so'rovlari",
@@ -674,7 +673,6 @@ _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
     "/filiallar": "🏬 Filiallar",
     "/baholash": "📋 Xodimni baholash",
     "/kunniyop": "✅ Kunni yopish",
-    "/score": "⭐ Oylik ball qo'yish",
     "/grafiksorov": "📅 Grafik so'rovlari",
     "/natijam": "🏆 Bugungi natija",
 }

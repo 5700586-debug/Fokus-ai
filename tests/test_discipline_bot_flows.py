@@ -54,7 +54,7 @@ async def test_baholash_allowed_for_nazoratchi(bot_dp):
     _set_role(111, "kassir")
 
     sent = await send(main.dp, bot, 1, text="/baholash")
-    assert "Xodimni tanlang" in sent[0].text
+    assert "Avval filialni tanlang" in sent[0].text  # hamma xodim emas — avval filial
 
 
 async def test_grading_flow_updates_bonus_bank(bot_dp, monkeypatch):
@@ -452,15 +452,19 @@ async def test_founder_alert_send_error_does_not_break_penalty_flow(bot_dp, monk
     assert founder_texts == []
 
 
-async def test_kunniyop_close_day_then_reports_already_closed(bot_dp):
+async def test_kunniyop_asks_branch_then_closes_branch_session_then_reports_already_closed(bot_dp):
     main, bot = bot_dp
     _set_role(1, "nazoratchi")
-    _set_role(111, "kassir")
+    from config import RECRUITING_BRANCH_NAMES
 
     sent = await send(main.dp, bot, 1, text="/kunniyop")
-    assert "yopildi" in sent[0].text
+    assert "Qaysi filial nazoratini yopamiz" in sent[0].text
+    ymd = discipline_bot._ymd(discipline_bot._today().isoformat())
 
-    sent = await send(main.dp, bot, 1, text="/kunniyop")
+    sent = await send_callback(main.dp, bot, 1, data=f"bos:close:0:{ymd}", target_chat_id=1)
+    assert "yopildi" in sent[0].text and RECRUITING_BRANCH_NAMES[0] in sent[0].text
+
+    sent = await send_callback(main.dp, bot, 1, data=f"bos:close:0:{ymd}", target_chat_id=1)
     assert "allaqachon yopilgan" in sent[0].text
 
 

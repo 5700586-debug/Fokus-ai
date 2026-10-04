@@ -446,8 +446,12 @@ async def test_score_requires_nazoratchi_role(bot_dp):
     sent = await send(main.dp, bot, 888, text="/score 1 90")
     _assert_denied(sent)
 
+    # Nazoratchiga /score ishlamaydi (u faqat kunlik baho beradi); Founder uchun qoladi.
     set_role(999, "nazoratchi", set_by=FOUNDER_ID)
     sent = await send(main.dp, bot, 999, text="/score 1 90")
+    _assert_denied(sent)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/score 1 90")
     assert len(sent) == 1
     assert "qayd etildi" in sent[0].text
 

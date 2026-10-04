@@ -23,6 +23,8 @@ EXPECTED_TABLES = {
     "cash_expenses",
     "cash_ledger_expense_items",
     "cash_ledger_expense_summary",
+    "daily_evaluation_history",
+    "nazoratchi_branch_sessions",
     "cash_difference_reviews",
     "cash_shift_approvals",
     "inventory_daily_snapshots",

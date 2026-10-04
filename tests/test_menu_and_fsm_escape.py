@@ -33,7 +33,7 @@ async def test_stale_penalty_state_does_not_swallow_a_different_command(bot_dp):
     await send_callback(main.dp, bot, 1, data="bos:pen:111:10", target_chat_id=1)
 
     sent = await send(main.dp, bot, 1, text="/kunniyop")
-    assert any("yopildi" in (m.text or "") for m in sent), [m.text for m in sent]
+    assert any("Qaysi filial nazoratini yopamiz" in (m.text or "") for m in sent), [m.text for m in sent]
 
     from services import discipline
 
@@ -136,9 +136,10 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
     rows = sent[0].reply_markup.keyboard
 
     assert [btn.text for btn in rows[0]] == ["🏬 Filiallar", "📋 Xodimni baholash"]
-    assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "⭐ Oylik ball qo'yish"]
-    assert [btn.text for btn in rows[2]] == ["📅 Grafik so'rovlari", "🏆 Bugungi natija"]
+    assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "📅 Grafik so'rovlari"]
+    assert [btn.text for btn in rows[2]] == ["🏆 Bugungi natija"]
     assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
+    assert "⭐ Oylik ball qo'yish" not in [btn.text for row in rows for btn in row]  # nazoratchida oylik ball yo'q
 
 
 async def test_nazoratchi_friendly_button_still_triggers_real_command(bot_dp):

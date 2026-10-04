@@ -145,8 +145,9 @@ ACTION_VIEW_STORE_CARDS = "view_store_cards"
 # ``has_permission()``dagi bypass orqali), boshqa hech qanday rol
 # qo'shilmaydi.
 ROLE_PERMISSIONS: dict[str, set[str]] = {
+    # Nazoratchi faqat KUNLIK baho beradi; oylik ball (/score, ACTION_SCORE_EMPLOYEE) endi
+    # unga berilmaydi — u Founder-only (Founder bypass orqali).
     "nazoratchi": {
-        ACTION_SCORE_EMPLOYEE,
         ACTION_REVIEW_CASH_SHIFT,
         ACTION_REVIEW_INVENTORY_VARIANCE,
         ACTION_EVALUATE_EMPLOYEE,

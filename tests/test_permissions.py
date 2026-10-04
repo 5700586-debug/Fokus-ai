@@ -11,7 +11,10 @@ def test_founder_has_all_permissions(monkeypatch):
 def test_role_only_has_its_own_action(monkeypatch):
     monkeypatch.setattr(permissions, "get_role", lambda user_id: "nazoratchi")
 
-    assert permissions.has_permission(1, permissions.ACTION_SCORE_EMPLOYEE) is True
+    # Nazoratchi faqat kunlik baho beradi: oylik ball (/score) unga berilmaydi, kunlik baho — beriladi.
+    assert permissions.has_permission(1, permissions.ACTION_SCORE_EMPLOYEE) is False
+    assert permissions.has_permission(1, permissions.ACTION_EVALUATE_EMPLOYEE) is True
+    assert permissions.has_permission(1, permissions.ACTION_CLOSE_DAY) is True
     assert permissions.has_permission(1, permissions.ACTION_LOG_MARKET_OBSERVATION) is False
 
 

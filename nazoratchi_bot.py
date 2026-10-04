@@ -256,7 +256,7 @@ def _employees_keyboard(branch: str, *, exclude_user_id: int | None = None) -> I
         for profile in active_employees
     ]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text="⬅️ Filiallar", callback_data=_CB_BRANCHES)])
+    rows.append([InlineKeyboardButton(text="⬅️ Filialni tanlash", callback_data=_CB_BRANCHES)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -780,7 +780,7 @@ def _match_confirm_keyboard(user_id: int, rule_number: int) -> InlineKeyboardMar
                 InlineKeyboardButton(
                     text="✅ Ha, qo'llash", callback_data=f"{_CB_MATCH_CONFIRM_PREFIX}{user_id}:{rule_number}"
                 ),
-                InlineKeyboardButton(text="❌ Yo'q, Founderga yubor", callback_data=f"{_CB_MATCH_REJECT_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="❌ Yo'q, Asoschiga yubor", callback_data=f"{_CB_MATCH_REJECT_PREFIX}{user_id}"),
             ]
         ]
     )
@@ -864,7 +864,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                 await callback.message.edit_text(
                     f"🏬 {branch}\n\nHozircha bu filialda aktiv xodim mavjud emas.",
                     reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filiallar", callback_data=_CB_BRANCHES)]]
+                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filialni tanlash", callback_data=_CB_BRANCHES)]]
                     ),
                 )
             return
@@ -963,7 +963,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         keyboard = _penalty_rule_keyboard(user_id)
         text = f"👤 {full_name}\n\n➖ Qaysi nizom bandi bo'yicha ball ayiriladi?"
         if len(keyboard.inline_keyboard) <= 2:
-            text += "\n\nℹ️ Hozircha tasdiqlangan ball miqdori bilan nizom bandi yo'q — Founder /setnizombahosi orqali belgilashi kerak."
+            text += "\n\nℹ️ Hozircha tasdiqlangan ball miqdori bilan nizom bandi yo'q — Asoschi /setnizombahosi orqali belgilashi kerak."
 
         if callback.message:
             await callback.message.edit_text(text, reply_markup=keyboard)
@@ -1080,7 +1080,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await _notify_founder_unmatched(message.bot, user_id, message.from_user.id, text)
         await message.answer(
             "✅ Qabul qilindi — bu holat tasdiqlangan nizom bandiga mos kelmagani uchun "
-            "ball ayirilmadi, Founder ko'rib chiqishi uchun yuborildi."
+            "ball ayirilmadi, Asoschi ko'rib chiqishi uchun yuborildi."
         )
 
     @dp.callback_query(F.data.startswith(_CB_MATCH_CONFIRM_PREFIX))
@@ -1154,10 +1154,10 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         await _notify_founder_unmatched(callback.bot, user_id, callback.from_user.id, text)
-        await callback.answer("✅ Founderga yuborildi.")
+        await callback.answer("✅ Asoschiga yuborildi.")
         if callback.message:
             await callback.message.edit_text(
-                "✅ Qabul qilindi — ball ayirilmadi, Founder ko'rib chiqishi uchun yuborildi.",
+                "✅ Qabul qilindi — ball ayirilmadi, Asoschi ko'rib chiqishi uchun yuborildi.",
                 reply_markup=None,
             )
 
@@ -2385,7 +2385,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(
                 _offboard_result_text(offboarded),
                 reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filiallar", callback_data=_CB_BRANCHES)]]
+                    inline_keyboard=[[InlineKeyboardButton(text="⬅️ Filialni tanlash", callback_data=_CB_BRANCHES)]]
                 ),
             )
 

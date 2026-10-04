@@ -135,8 +135,8 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
     sent = await send(main.dp, bot, 111, text="🧑‍💼 Nazoratchi")
     rows = sent[0].reply_markup.keyboard
 
-    assert [btn.text for btn in rows[0]] == ["🏬 Filiallar", "📋 Xodimni baholash"]
-    assert [btn.text for btn in rows[1]] == ["✅ Kunni yopish", "📅 Grafik so'rovlari"]
+    assert [btn.text for btn in rows[0]] == ["🏬 Filialni tanlash", "📋 Baholash"]
+    assert [btn.text for btn in rows[1]] == ["✅ Filialni yopish", "📅 Grafik so'rovlari"]
     assert [btn.text for btn in rows[2]] == ["🏆 Bugungi natija"]
     assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
     assert "⭐ Oylik ball qo'yish" not in [btn.text for row in rows for btn in row]  # nazoratchida oylik ball yo'q
@@ -146,10 +146,28 @@ async def test_nazoratchi_friendly_button_still_triggers_real_command(bot_dp):
     main, bot = bot_dp
     _set_role(111, "nazoratchi")
 
-    sent = await send(main.dp, bot, 111, text="📋 Xodimni baholash")
+    sent = await send(main.dp, bot, 111, text="📋 Baholash")
 
     assert sent != []
     assert "tugmalardan birini tanlang" not in sent[0].text
+    assert "Avval filialni tanlang" in sent[0].text
+
+
+@pytest.mark.parametrize(
+    "old_label, expected_text",
+    [
+        ("📋 Xodimni baholash", "Avval filialni tanlang"),  # eski keshlangan tugma ham ishlaydi
+        ("🏬 Filiallar", "Filiallar"),
+        ("✅ Kunni yopish", "Qaysi filial nazoratini yopamiz"),
+    ],
+)
+async def test_nazoratchi_old_cached_button_labels_still_route_to_real_commands(bot_dp, old_label, expected_text):
+    main, bot = bot_dp
+    _set_role(111, "nazoratchi")
+
+    sent = await send(main.dp, bot, 111, text=old_label)
+
+    assert sent != [] and expected_text in sent[0].text
 
 
 async def test_kassir_friendly_button_still_triggers_real_command(bot_dp):

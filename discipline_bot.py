@@ -206,7 +206,7 @@ def _branch_screen(branch: str, review_date: str, supervisor_id: int, prefix: st
     ]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton(text="✅ Filialni yopish", callback_data=f"bos:close:{index}:{ymd}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Filiallar", callback_data="bos:today")])
+    rows.append([InlineKeyboardButton(text="⬅️ Filialni tanlash", callback_data="bos:today")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -228,7 +228,7 @@ def _employee_action_keyboard(employee_id: int, review_date: str, branch: str | 
         [InlineKeyboardButton(text="🚫 Ball ayirish (-10/-20/-30)", callback_data=f"bos:penalty_menu:{employee_id}")],
     ]
     if index is not None:
-        rows.append([InlineKeyboardButton(text="⬅️ Filial", callback_data=f"bos:br:{index}:{ymd}")])
+        rows.append([InlineKeyboardButton(text="⬅️ Filialga qaytish", callback_data=f"bos:br:{index}:{ymd}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -534,7 +534,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             if rule is None:
                 await message.answer(
                     f"❌ {rule_number}-nizom bazada topilmadi. Boshqa raqam kiriting yoki "
-                    "Founder'dan /addnizom orqali qo'shishini so'rang."
+                    "Asoschidan /addnizom orqali qo'shishini so'rang."
                 )
                 return
 

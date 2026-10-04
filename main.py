@@ -474,9 +474,9 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("founder", "/addvehicle — Yangi mashina qo'shish", permissions.ACTION_MANAGE_VEHICLES),
     ("founder", "/vazifabiriktir — Xodimga doimiy vazifa biriktirish", permissions.ACTION_MANAGE_TASK_ASSIGNMENTS),
     ("founder", "/vazifabekor — Xodimdan doimiy vazifani olib tashlash", permissions.ACTION_MANAGE_TASK_ASSIGNMENTS),
-    ("nazoratchi", "/filiallar — Filial bo'yicha xodimlarni ko'rish", permissions.ACTION_EVALUATE_EMPLOYEE),
-    ("nazoratchi", "/baholash — Xodimni kunlik baholash/ball ayirish", permissions.ACTION_EVALUATE_EMPLOYEE),
-    ("nazoratchi", "/kunniyop — Bugungi kunni yopish", permissions.ACTION_CLOSE_DAY),
+    ("nazoratchi", "/filiallar — Filialni tanlash va xodimlarni ko'rish", permissions.ACTION_EVALUATE_EMPLOYEE),
+    ("nazoratchi", "/baholash — Filialni tanlab, xodimlarni baholash", permissions.ACTION_EVALUATE_EMPLOYEE),
+    ("nazoratchi", "/kunniyop — Filial nazoratini yopish", permissions.ACTION_CLOSE_DAY),
     (
         "nazoratchi",
         "/grafiksorov — Grafik o'zgartirish so'rovlari",
@@ -670,9 +670,9 @@ _KASSIR_BUTTON_LABELS: dict[str, str] = {
 # patterniga o'xshash: haqiqiy buyruq o'zgarmaydi, faqat tugmada
 # ko'rinadigan matn almashadi.
 _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
-    "/filiallar": "🏬 Filiallar",
-    "/baholash": "📋 Xodimni baholash",
-    "/kunniyop": "✅ Kunni yopish",
+    "/filiallar": "🏬 Filialni tanlash",
+    "/baholash": "📋 Baholash",
+    "/kunniyop": "✅ Filialni yopish",
     "/grafiksorov": "📅 Grafik so'rovlari",
     "/natijam": "🏆 Bugungi natija",
 }
@@ -730,6 +730,15 @@ _SHARED_BUTTON_LABELS: dict[str, str] = {
 # bosilsa hamon o'z buyrug'iga olib borsin.
 _LEGACY_BUTTON_LABELS: dict[str, str] = {
     "⚠️ E'tiroz bildirish": "/apellyatsiya",
+    # Nazoratchi tugmalari soddalashtirilishidan oldingi yorliqlar (keshlangan klaviatura uchun).
+    "🏬 Filiallar": "/filiallar",
+    "📋 Xodimni baholash": "/baholash",
+    "✅ Kunni yopish": "/kunniyop",
+    "⭐ Oylik ball qo'yish": "/score",
+    "/filiallar — Filial bo'yicha xodimlarni ko'rish": "/filiallar",
+    "/baholash — Xodimni kunlik baholash/ball ayirish": "/baholash",
+    "/kunniyop — Bugungi kunni yopish": "/kunniyop",
+    "/score — Xodimga oylik ball qo'yish": "/score",
 }
 
 

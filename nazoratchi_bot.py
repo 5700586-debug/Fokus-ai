@@ -52,6 +52,7 @@ from roles import get_role, role_name
 from services import attendance as attendance_service
 from services import audit
 from services import one_on_one as one_on_one_service
+from services import schedule_range
 from services import discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
@@ -70,6 +71,8 @@ class ScheduleStates(StatesGroup):
     waiting_flexible_start = State()
     waiting_flexible_end = State()
     waiting_custom_date = State()
+    waiting_range_flex_start = State()
+    waiting_range_flex_end = State()
 
 
 class MobilityStates(StatesGroup):
@@ -103,6 +106,10 @@ _CB_SCHEDULE_OFF_PREFIX = "nzr_sched_off:"
 _CB_SCHEDULE_DATE_PREFIX = "nzr_sched_date:"
 _CB_SCHEDULE_CONFIRM_PREFIX = "nzr_sched_confirm:"
 _CB_SCHEDULE_CANCEL_PREFIX = "nzr_sched_cancel:"
+_CB_RANGE_PREFIX = "nzr_srange:"
+_CB_RANGE_SHIFT_PREFIX = "nzr_srs:"
+_CB_RANGE_OFF_PREFIX = "nzr_srd:"
+_CB_RANGE_OK_PREFIX = "nzr_srok:"
 
 # Grafik o'zgartirish so'rovlari (xodimning `/grafik` oqimi yaratadi).
 # Prefikslar ATAYLAB ":" bilan tugaydi -- shu sababli "nzr_schedreq:5"
@@ -405,6 +412,7 @@ def _schedule_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🕐 Erkin vaqt", callback_data=f"{_CB_SCHEDULE_FLEX_PREFIX}{user_id}")],
             [InlineKeyboardButton(text="🛌 Dam olish", callback_data=f"{_CB_SCHEDULE_OFF_PREFIX}{user_id}")],
             [InlineKeyboardButton(text="📅 Boshqa sana", callback_data=f"{_CB_SCHEDULE_DATE_PREFIX}{user_id}")],
+            [InlineKeyboardButton(text="📆 Oy oxirigacha grafik", callback_data=f"{_CB_RANGE_PREFIX}{user_id}")],
             [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_EMPLOYEE_PREFIX}{user_id}")],
         ]
     )
@@ -431,6 +439,56 @@ def _schedule_screen_text(profile: dict, schedule_date: str) -> str:
         f"📌 Grafik turi: {mode_label}\n"
         f"🕒 Reja: {plan_line}"
     )
+
+
+def _range_shift_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    labels = []
+    for mode in (attendance_service.SCHEDULE_MODE_FIXED_1, attendance_service.SCHEDULE_MODE_FIXED_2):
+        start_text, end_text = rules_service.get_fixed_shift_template(mode)
+        labels.append((f"{start_text}–{end_text}", mode))
+    rows = [[InlineKeyboardButton(text=text, callback_data=f"{_CB_RANGE_SHIFT_PREFIX}{user_id}:{mode}")] for text, mode in labels]
+    rows.append([InlineKeyboardButton(text="🕐 Erkin vaqt", callback_data=f"{_CB_RANGE_SHIFT_PREFIX}{user_id}:flex")])
+    rows.append([InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _range_off_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    def button(text: str, value: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(text=text, callback_data=f"{_CB_RANGE_OFF_PREFIX}{user_id}:{value}")
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [button("Yakshanba", "6"), button("Shanba", "5")],
+            [button("Boshqa kun", "other"), button("Dam kuni yo'q", "none")],
+            [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")],
+        ]
+    )
+
+
+def _range_weekday_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(text=name, callback_data=f"{_CB_RANGE_OFF_PREFIX}{user_id}:{index}")
+        for index, name in enumerate(schedule_range.WEEKDAY_NAMES)
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _range_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"{_CB_RANGE_OK_PREFIX}{user_id}"),
+                InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_SCHEDULE_PREFIX}{user_id}"),
+            ]
+        ]
+    )
+
+
+def _range_period_text() -> str:
+    start, end = schedule_range.month_range(company_time.today())
+    return f"{start.strftime('%d.%m.%Y')} dan {end.strftime('%d.%m.%Y')} gacha"
 
 
 def _schedule_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -1599,6 +1657,174 @@ def register(dp: Dispatcher, openai_client) -> None:
                 await callback.bot.send_message(
                     user_id,
                     f"🗓 Ish grafigingiz belgilandi/o'zgartirildi\n\n📅 Sana: {schedule_date}\n🕒 Vaqt: {notice_plan}",
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Xodimga grafik xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+        finally:
+            discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(actor_id)
+
+    # ------------------------------------- bugundan oy oxirigacha grafik --
+
+    @dp.callback_query(F.data.startswith(_CB_RANGE_PREFIX))
+    async def range_start(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        await state.update_data(schedule_range=None)
+        await callback.answer()
+        if callback.message:
+            await callback.message.edit_text(
+                f"📆 {_range_period_text()}\n\nSmenani tanlang:", reply_markup=_range_shift_keyboard(user_id)
+            )
+
+    async def _ask_range_off_day(target: Message, user_id: int, *, edit: bool) -> None:
+        text = "Haftalik dam kunini tanlang:"
+        if edit:
+            await target.edit_text(text, reply_markup=_range_off_keyboard(user_id))
+        else:
+            await target.answer(text, reply_markup=_range_off_keyboard(user_id))
+
+    @dp.callback_query(F.data.startswith(_CB_RANGE_SHIFT_PREFIX))
+    async def range_pick_shift(callback: CallbackQuery, state: FSMContext) -> None:
+        _, user_id_text, choice = callback.data.split(":", 2)
+        user_id = int(user_id_text)
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        if choice == "flex":
+            await callback.answer()
+            await state.update_data(schedule_employee_id=user_id)
+            await state.set_state(ScheduleStates.waiting_range_flex_start)
+            if callback.message:
+                await callback.message.edit_text("🕐 Boshlanish vaqtini kiriting (HH:MM):", reply_markup=None)
+            return
+
+        template = rules_service.get_fixed_shift_template(choice)
+        if template is None:
+            await callback.answer("Shablon topilmadi.", show_alert=True)
+            return
+
+        await callback.answer()
+        await state.update_data(schedule_range={"start": template[0], "end": template[1], "mode": choice})
+        if callback.message:
+            await _ask_range_off_day(callback.message, user_id, edit=True)
+
+    @dp.message(StateFilter(ScheduleStates.waiting_range_flex_start))
+    async def range_flex_start_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not attendance_service.is_valid_hhmm(text):
+            await message.answer("❌ Noto'g'ri format. Vaqtni HH:MM ko'rinishida kiriting (masalan 10:00):")
+            return
+
+        await state.update_data(schedule_range_flex_start=text)
+        await state.set_state(ScheduleStates.waiting_range_flex_end)
+        await message.answer("🕐 Tugash vaqtini kiriting (HH:MM):")
+
+    @dp.message(StateFilter(ScheduleStates.waiting_range_flex_end))
+    async def range_flex_end_input(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not attendance_service.is_valid_hhmm(text):
+            await message.answer("❌ Noto'g'ri format. Vaqtni HH:MM ko'rinishida kiriting (masalan 20:00):")
+            return
+
+        data = await state.get_data()
+        start_text = data.get("schedule_range_flex_start")
+        user_id = data.get("schedule_employee_id")
+        if start_text == text:
+            await message.answer("❌ Boshlanish va tugash vaqti bir xil bo'lishi mumkin emas. Tugash vaqtini qayta kiriting:")
+            return
+        if user_id is None or employees.get_profile(user_id) is None:
+            await state.clear()
+            await message.answer("❌ Bekor qilindi.")
+            return
+
+        await state.set_state(None)
+        await state.update_data(
+            schedule_range={"start": start_text, "end": text, "mode": attendance_service.SCHEDULE_MODE_FLEXIBLE}
+        )
+        await _ask_range_off_day(message, user_id, edit=False)
+
+    @dp.callback_query(F.data.startswith(_CB_RANGE_OFF_PREFIX))
+    async def range_pick_off_day(callback: CallbackQuery, state: FSMContext) -> None:
+        _, user_id_text, choice = callback.data.split(":", 2)
+        user_id = int(user_id_text)
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        data = await state.get_data()
+        shift = data.get("schedule_range")
+        if not shift:
+            await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+            return
+
+        await callback.answer()
+        if choice == "other":
+            if callback.message:
+                await callback.message.edit_text("Dam kunini tanlang:", reply_markup=_range_weekday_keyboard(user_id))
+            return
+
+        off_weekday = None if choice == "none" else int(choice)
+        if off_weekday is not None and not 0 <= off_weekday <= 6:
+            return
+
+        await state.update_data(schedule_range={**shift, "off_weekday": off_weekday})
+        start, end = schedule_range.month_range(company_time.today())
+        full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+        if callback.message:
+            await callback.message.edit_text(
+                schedule_range.confirm_text(full_name, start, end, shift, off_weekday),
+                reply_markup=_range_confirm_keyboard(user_id),
+            )
+
+    @dp.callback_query(F.data.startswith(_CB_RANGE_OK_PREFIX))
+    async def range_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+        user_id = int(callback.data.split(":", 1)[1])
+        profile = await _ensure_schedule_access(callback, user_id)
+        if profile is None:
+            return
+
+        actor_id = callback.from_user.id
+        if actor_id in discipline_bot._PENDING_PENALTY_APPLICATIONS:
+            await callback.answer()
+            return
+        discipline_bot._PENDING_PENALTY_APPLICATIONS.add(actor_id)
+
+        try:
+            data = await state.get_data()
+            shift = data.get("schedule_range")
+            if not shift or "off_weekday" not in shift:
+                await callback.answer("Ma'lumot topilmadi (eskirgan holat).", show_alert=True)
+                return
+
+            start, end = schedule_range.month_range(company_time.today())
+            try:
+                work_days, off_days, kept_days = schedule_range.apply_range(
+                    user_id, start, end, shift, shift["off_weekday"], actor_id
+                )
+            except ValueError:
+                await state.update_data(schedule_range=None)
+                await callback.answer("❌ Smena vaqti noto'g'ri. Qaytadan urinib ko'ring.", show_alert=True)
+                return
+
+            await state.update_data(schedule_range=None)
+            full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
+            await callback.answer("✅ Saqlandi.")
+            result = (
+                f"✅ Grafik saqlandi\n👤 {full_name}\n{_range_period_text()}\n"
+                f"{shift['start']}–{shift['end']}\nIsh kunlari: {work_days}, dam kunlari: {off_days}"
+                f"\nQo'lda o'zgartirilgani saqlandi: {kept_days} kun"
+            )
+            if callback.message:
+                await callback.message.edit_text(result, reply_markup=None)
+
+            try:
+                await callback.bot.send_message(
+                    user_id,
+                    f"🗓 Ish grafigingiz belgilandi\n\n{_range_period_text()}\n🕒 {shift['start']}–{shift['end']}",
                 )
             except Exception as error:  # noqa: BLE001
                 print(f"Xodimga grafik xabarini yuborib bo'lmadi ({user_id}): {error!r}")

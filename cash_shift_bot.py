@@ -40,7 +40,7 @@ from providers.vision_extraction_provider import (
     CASH_SHIFT_SALES_REPORT,
     get_vision_extraction_provider,
 )
-from roles import is_e2e_tester
+from roles import get_role, is_e2e_tester
 from services import (
     cash_expense,
     cash_shift,
@@ -1054,6 +1054,7 @@ async def _enter_daily_report_step(reply_target: Message, state: FSMContext, shi
     await _enter_close_shift_photo_flow(reply_target, state, shift)
 
 
+_EXPENSE_NOT_FOR_KASSIR = "Xarajat kiritish sizga ochilmagan. Xarajatni rahbar yoki moliyachi kiritadi."
 _EXPENSE_SHIFT_INVALID = "⚠️ Ochiq smena topilmadi. Avval 🟢 Smenani boshlash tugmasini bosing."
 
 
@@ -1427,6 +1428,15 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
     @dp.message(Command("expense"))
     async def expense_start(message: Message, state: FSMContext) -> None:
+        user_id = message.from_user.id
+        if get_role(user_id) == "kassir" and not permissions.has_permission(
+            user_id, permissions.ACTION_LOG_CASH_EXPENSE
+        ):
+            # Eski klaviaturadagi "Xarajat kiritish" tugmasi: kategoriya chiqmaydi.
+            await state.clear()
+            await message.answer(_EXPENSE_NOT_FOR_KASSIR)
+            return
+
         if not await permissions.ensure_permission(message, permissions.ACTION_LOG_CASH_EXPENSE):
             return
 

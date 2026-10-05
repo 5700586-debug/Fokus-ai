@@ -485,7 +485,6 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ("nazoratchi", "/natijam — Ta'minotchi bugungi natijasi", permissions.ACTION_VIEW_SUPPLIER_RESULTS),
     ("kassir", "/openshift — Kassa smenasini ochish", permissions.ACTION_OPEN_CASH_SHIFT),
     ("kassir", "/closeshift — Kassa smenasini yopish", permissions.ACTION_CLOSE_CASH_SHIFT),
-    ("kassir", "/expense — Kassa xarajatini kiritish", permissions.ACTION_LOG_CASH_EXPENSE),
     (
         "savdo_boshligi",
         "/invsnapshot — Kunlik ombor hisobotini yuborish",

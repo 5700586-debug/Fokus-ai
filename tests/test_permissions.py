@@ -29,7 +29,7 @@ def test_kassir_can_manage_own_shift_but_not_review_it(monkeypatch):
 
     assert permissions.has_permission(1, permissions.ACTION_OPEN_CASH_SHIFT) is True
     assert permissions.has_permission(1, permissions.ACTION_CLOSE_CASH_SHIFT) is True
-    assert permissions.has_permission(1, permissions.ACTION_LOG_CASH_EXPENSE) is True
+    assert permissions.has_permission(1, permissions.ACTION_LOG_CASH_EXPENSE) is False  # xarajatni rahbar/moliyachi kiritadi
     assert permissions.has_permission(1, permissions.ACTION_REVIEW_CASH_SHIFT) is False
 
 

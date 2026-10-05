@@ -13,6 +13,7 @@ from services import discipline, nazoratchi_day
 
 MAX_MESSAGE_CHARS = 3800
 _MAX_REASON_CHARS = 120
+_MAX_LINE_CHARS = 300
 
 
 def _signed_stars(points: int) -> str:
@@ -29,7 +30,20 @@ def _penalty_reason(penalty: dict) -> str:
     return reason[:_MAX_REASON_CHARS]
 
 
-def _employee_block(item: nazoratchi_day.EmployeeStatus, review_date: str) -> str:
+def _wrap_items(prefix: str, indent: str, items: list[str], separator: str) -> list[str]:
+    """Elementlarni (sabab/ism) ``_MAX_LINE_CHARS`` dan oshmaydigan qatorlarga joylaydi."""
+    lines, current, count = [], prefix, 0
+    for item in items:
+        if count and len(current) + len(separator) + len(item) > _MAX_LINE_CHARS:
+            lines.append(current)
+            current, count = indent, 0
+        current += (separator if count else "") + item
+        count += 1
+    lines.append(current)
+    return lines
+
+
+def _employee_lines(item: nazoratchi_day.EmployeeStatus, review_date: str) -> list[str]:
     user_id = item.profile["user_id"]
 
     grade = discipline.get_daily_grade(user_id, review_date)
@@ -43,33 +57,66 @@ def _employee_block(item: nazoratchi_day.EmployeeStatus, review_date: str) -> st
 
     lines = [f"• {item.name} — vaqt: {time_text}, ish: {work}, minus: {minus}"]
     if penalties:
-        reasons = "; ".join(dict.fromkeys(_penalty_reason(p) for p in penalties))
-        lines.append(f"  Sabab: {reasons}")
-    return "\n".join(lines)
+        reasons = list(dict.fromkeys(_penalty_reason(p) for p in penalties))
+        lines += _wrap_items("  Sabab: ", "  ", reasons, "; ")
+    return lines
+
+
+class _Packer:
+    """Qatorlarni xabarlarga joylaydi: hech bir xabar ``limit`` dan oshmaydi, xodimning bosh qatori
+    (ism + vaqt + ish + minus) hech qachon sabablardan ajralmaydi."""
+
+    def __init__(self, header_lines: list[str], limit: int) -> None:
+        self.limit = limit
+        self.chunks: list[str] = []
+        self.lines = list(header_lines)
+        self.has_units = False
+
+    def _fits(self, extra: list[str]) -> bool:
+        return len("\n".join(self.lines + extra)) <= self.limit
+
+    def _flush(self) -> None:
+        self.chunks.append("\n".join(self.lines).rstrip())
+        self.lines, self.has_units = [], False
+
+    def add(self, lines: list[str], keep: int, continuation: str) -> None:
+        if self._fits(lines):
+            self.lines += lines
+        elif self.has_units and len("\n".join(lines)) <= self.limit:
+            self._flush()
+            self.lines = list(lines)
+        else:
+            head, rest = lines[:keep], lines[keep:]
+            if self.has_units and not self._fits(head):
+                self._flush()
+            self.lines += head
+            for line in rest:
+                if not self._fits([line]):
+                    self._flush()
+                    self.lines = [continuation]
+                self.lines.append(line)
+        self.has_units = True
+
+    def finish(self) -> list[str]:
+        self._flush()
+        return self.chunks
 
 
 def build_close_report(
     branch: str, review_date: str, statuses: list[nazoratchi_day.EmployeeStatus], evaluated: int, total: int
 ) -> list[str]:
-    """Yopilgan filial uchun xabar(lar): xodim qatori hech qachon ikkiga bo'linmaydi."""
+    """Yopilgan filial uchun xabar(lar). Xodim qatori bo'linmaydi; juda ko'p sabab keyingi xabarda
+    "<ism> — sabablar davomi" bilan davom etadi."""
     label = date.fromisoformat(review_date).strftime("%d.%m.%Y")
     header = f"✅ {branch} nazorati yopildi\n📅 {label} — baholangan: {evaluated}/{total}"
+    packer = _Packer([header, ""], MAX_MESSAGE_CHARS)
 
-    units = [
-        _employee_block(item, review_date) for item in statuses if item.status != nazoratchi_day.STATUS_OFF
-    ]
+    for item in statuses:
+        if item.status != nazoratchi_day.STATUS_OFF:
+            packer.add(_employee_lines(item, review_date), 1, f"{item.name} — sabablar davomi")
+
     off_names = [item.name for item in statuses if item.status == nazoratchi_day.STATUS_OFF]
     if off_names:
-        units.append(f"\nDamda: {', '.join(off_names)}")
+        packer.add(["", *_wrap_items("Damda: ", "  ", off_names, ", ")], 2, "Damda — davomi:")
 
-    chunks: list[str] = []
-    current = header + "\n\n"
-    has_units = False
-    for unit in units:
-        if has_units and len(current) + len(unit) + 1 > MAX_MESSAGE_CHARS:
-            chunks.append(current.rstrip("\n"))
-            current, has_units = "", False
-        current += unit + "\n"
-        has_units = True
-    chunks.append(current.rstrip("\n"))
-    return chunks
+    return packer.finish()

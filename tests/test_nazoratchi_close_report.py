@@ -90,8 +90,8 @@ def test_missing_grade_is_not_turned_into_zero(rule):
     _employee(111, BRANCH_A, "Eshmat")
     _grade(111, discipline.GRADE_NORMA, date="2000-01-01")  # boshqa sana — bugun bahosi yo'q
 
-    block = report._employee_block(
-        nazoratchi_day.employee_status(employees.get_profile(111), _today()), _today()
+    block = "\n".join(
+        report._employee_lines(nazoratchi_day.employee_status(employees.get_profile(111), _today()), _today())
     )
     assert "ish: qo'yilmagan" in block and "ish: 0" not in block
 
@@ -163,6 +163,41 @@ def test_long_report_is_split_without_breaking_employee_rows(rule, monkeypatch):
         name = f"Xodim{index:02d} T"
         home = [c for c in chunks if f"• {name} —" in c]
         assert len(home) == 1 and f"Sabab{index:02d}" in home[0]  # qator va sababi birga
+
+
+def test_one_employee_with_very_many_reasons_never_exceeds_limit(rule, monkeypatch):
+    _employee(111, BRANCH_A, "Surayyo")
+    _employee(112, BRANCH_A, "Eshmat")
+    _grade(111, discipline.GRADE_NORMA)
+    _grade(112, discipline.GRADE_ALO)
+    for index in range(60):
+        _penalty(111, 1, f"Sabab raqam {index:02d} " + "x" * 80)
+    monkeypatch.setattr(report, "MAX_MESSAGE_CHARS", 700)
+
+    chunks = _build()
+    assert len(chunks) > 2
+    assert all(len(chunk) <= 700 for chunk in chunks)
+
+    head = "• Surayyo T — vaqt: tasdiqlanmagan, ish: +2 ⭐, minus: −60 ❌"
+    first = next(c for c in chunks if head in c)
+    assert "Sabab: Sabab raqam 00" in first  # ism+vaqt+ish+minus qatori sabab bilan birga
+    continuations = [c for c in chunks if c.startswith("Surayyo T — sabablar davomi")]
+    assert continuations and all(head not in c for c in continuations)
+    joined = "\n".join(chunks)
+    assert all(f"Sabab raqam {i:02d}" in joined for i in range(60))  # hech bir sabab yo'qolmagan
+    assert "• Eshmat T — vaqt: tasdiqlanmagan, ish: +3 ⭐, minus: 0" in joined
+    assert joined.count("minus: −60 ❌") == 1
+
+
+def test_long_off_list_is_split_too(rule, monkeypatch):
+    for index in range(40):
+        _employee(2000 + index, BRANCH_A, f"Damchi{index:02d}")
+        attendance_service.set_scheduled_day_off(2000 + index, _today(), "test")
+    monkeypatch.setattr(report, "MAX_MESSAGE_CHARS", 400)
+
+    chunks = _build()
+    assert all(len(chunk) <= 400 for chunk in chunks)
+    assert all(f"Damchi{i:02d} T" in "\n".join(chunks) for i in range(40))
 
 
 async def test_bot_sends_report_only_after_successful_close(bot_dp, rule):

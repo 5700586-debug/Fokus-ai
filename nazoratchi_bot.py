@@ -1802,8 +1802,8 @@ def register(dp: Dispatcher, openai_client) -> None:
 
             start, end = schedule_range.month_range(company_time.today())
             try:
-                work_days, off_days = schedule_range.apply_range(
-                    user_id, start, end, shift, shift["off_weekday"], _SCHEDULE_SOURCE, actor_id
+                work_days, off_days, kept_days = schedule_range.apply_range(
+                    user_id, start, end, shift, shift["off_weekday"], actor_id
                 )
             except ValueError:
                 await state.update_data(schedule_range=None)
@@ -1816,6 +1816,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             result = (
                 f"✅ Grafik saqlandi\n👤 {full_name}\n{_range_period_text()}\n"
                 f"{shift['start']}–{shift['end']}\nIsh kunlari: {work_days}, dam kunlari: {off_days}"
+                f"\nQo'lda o'zgartirilgani saqlandi: {kept_days} kun"
             )
             if callback.message:
                 await callback.message.edit_text(result, reply_markup=None)

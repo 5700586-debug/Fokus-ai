@@ -75,7 +75,7 @@ def test_month_range_is_today_to_month_end():
 
 def test_confirm_text_matches_agreed_shape():
     text = schedule_range.confirm_text("Valiyev Ali", date(2026, 10, 6), date(2026, 10, 31), {"start": "08:00", "end": "18:00"}, 6)
-    assert "06.10.2026 dan 31.10.2026 gacha\n08:00–18:00\nDam kuni: Yakshanba\n\nTasdiqlaysizmi?" in text
+    assert "06.10.2026 dan 31.10.2026 gacha\n08:00–18:00\nDam kuni: Yakshanba\nQo'lda o'zgartirilgan kunlar saqlanadi.\n\nTasdiqlaysizmi?" in text
     none_text = schedule_range.confirm_text("A", date(2026, 10, 6), date(2026, 10, 31), {"start": "08:00", "end": "18:00"}, None)
     assert "Dam kuni: yo'q" in none_text
 
@@ -84,7 +84,7 @@ def test_apply_range_rejects_bad_times_without_writing(temp_db):
     _setup()
     with pytest.raises(ValueError):
         schedule_range.apply_range(
-            _EMPLOYEE, date(2026, 10, 6), date(2026, 10, 10), {"start": "09:00", "end": "09:00"}, None, "test", 1
+            _EMPLOYEE, date(2026, 10, 6), date(2026, 10, 10), {"start": "09:00", "end": "09:00"}, None, 1
         )
     assert attendance_repo.get_shift_for_date(_EMPLOYEE, "2026-10-06") is None
 
@@ -197,6 +197,39 @@ async def test_single_day_manual_change_afterwards_does_not_break_the_rest(bot_d
     for day, row in before.items():
         if day != today:
             assert _shift(day)["status"] == row["status"] and _shift(day)["planned_start"] == row["planned_start"]
+
+
+async def test_manually_changed_days_survive_range_but_missing_and_range_days_update(bot_dp):
+    from services import attendance as attendance_service
+
+    main, bot = bot_dp
+    _setup()
+    days = _expected_days()
+    if len(days) < 4:
+        pytest.skip("oy oxiriga juda yaqin: kamida 4 kun kerak")
+    manual_work, manual_off, request_day = days[1], days[2], days[3]
+    attendance_service.set_scheduled_work_shift(_EMPLOYEE, manual_work.isoformat(), "11:00", "21:00", "nazoratchi_ui", created_by=1)
+    attendance_service.set_scheduled_day_off(_EMPLOYEE, manual_off.isoformat(), "nazoratchi_ui", created_by=1)
+    attendance_service.set_scheduled_work_shift(_EMPLOYEE, request_day.isoformat(), "12:00", "22:00", "employee_schedule_request", created_by=1)
+
+    await _run_flow(main, bot, "fixed_1", "none")
+
+    kept = _shift(manual_work)
+    assert (kept["planned_start"], kept["planned_end"], kept["source"]) == ("11:00", "21:00", "nazoratchi_ui")
+    assert _shift(manual_off)["status"] == "off" and _shift(manual_off)["source"] == "nazoratchi_ui"
+    assert (_shift(request_day)["planned_start"], _shift(request_day)["source"]) == ("12:00", "employee_schedule_request")
+    protected = {manual_work, manual_off, request_day}
+    for day in days:
+        if day not in protected:
+            row = _shift(day)
+            assert (row["status"], row["planned_start"], row["source"]) == ("work", "08:00", "nazoratchi_range"), day
+
+    # Range'ni qayta qo'yish: range-auto kunlar yangilanadi, qo'lda o'zgartirilganlar baribir saqlanadi.
+    await _run_flow(main, bot, "fixed_2", "none")
+    assert _shift(manual_work)["planned_start"] == "11:00"
+    for day in days:
+        if day not in protected:
+            assert _shift(day)["planned_start"] == "14:00", day
 
 
 async def test_stale_confirm_and_unauthorised_actor_write_nothing(bot_dp):

@@ -349,6 +349,21 @@ def create_penalty(
         conn.close()
 
 
+def list_active_penalties_for_date(employee_id: int, penalty_date: str) -> list[dict]:
+    """Shu kundagi AMALDAGI minuslar: apellyatsiya qondirilgan (bekor qilingan) yozuv chiqarilgan."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM discipline_penalties WHERE employee_id = ? AND penalty_date = ? "
+            "AND (appeal_decision IS NULL OR appeal_decision != 'approved') ORDER BY id",
+            (employee_id, penalty_date),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def get_penalty(penalty_id: int) -> dict | None:
     conn = get_connection()
     try:

@@ -107,7 +107,7 @@ async def test_category_button_lists_commands_and_back(bot_dp):
 
     assert "🟢 Smenani boshlash" in buttons
     assert "🔴 Smenani topshirish" in buttons
-    assert "💸 Xarajat kiritish" in buttons
+    assert "💸 Xarajat kiritish" not in buttons
     assert "🔙 Orqaga" in buttons
 
 
@@ -119,8 +119,8 @@ async def test_kassir_menu_buttons_are_paired_two_per_row(bot_dp):
     rows = sent[0].reply_markup.keyboard
 
     assert [btn.text for btn in rows[0]] == ["🟢 Smenani boshlash", "🔴 Smenani topshirish"]
-    assert [btn.text for btn in rows[1]] == ["💸 Xarajat kiritish"]
-    assert [btn.text for btn in rows[2]] == ["🔙 Orqaga"]
+    assert [btn.text for btn in rows[1]] == ["🔙 Orqaga"]
+    assert len(rows) == 2
 
 
 async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_dp):
@@ -183,6 +183,7 @@ async def test_kassir_friendly_button_still_triggers_real_command(bot_dp):
     assert sent != []
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_kassir_friendly_button_escapes_stale_expense_state(bot_dp):
     """Regressiya: kassirning yangi sodda tugma matni ("/" bilan
     boshlanmaydi) ``_ClearStaleStateMiddleware`` tomonidan "qochish"
@@ -204,6 +205,7 @@ async def test_kassir_friendly_button_escapes_stale_expense_state(bot_dp):
     assert "allaqachon ochilgan" in sent[0].text
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_top_level_menu_button_escapes_stale_expense_state(bot_dp):
     """Regressiya: asosiy menyu/bo'lim tugmalari ("💰 Kassa" va h.k.) ham
     "/" bilan boshlanmaydi — kassir ``/expense`` kategoriya kutayotgan
@@ -261,7 +263,7 @@ async def test_category_menu_buttons_contain_no_description_text(bot_dp):
 
     assert "🟢 Smenani boshlash" in buttons
     assert "🔴 Smenani topshirish" in buttons
-    assert "💸 Xarajat kiritish" in buttons
+    assert "💸 Xarajat kiritish" not in buttons
     assert not any("—" in b for b in buttons)
 
 

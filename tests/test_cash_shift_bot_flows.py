@@ -3,6 +3,7 @@ import pytest
 import company_time
 from config import FOUNDER_ID
 from services import messages as messages_catalog
+from services import permissions
 from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
@@ -13,6 +14,8 @@ _DENIAL_TEXTS = {
     messages_catalog.MANAGEMENT_DENIAL,
     messages_catalog.REPEAT_OFFENDER_DENIAL,
 }
+
+
 
 
 def _assert_denied(sent) -> None:
@@ -181,6 +184,7 @@ async def test_openshift_requires_kassir_role(bot_dp):
     _assert_denied(sent)
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_before_shift_open_shows_friendly_message_not_command(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
@@ -243,6 +247,7 @@ async def test_openshift_twice_same_day_does_not_duplicate(bot_dp):
     assert "allaqachon ochilgan" in sent[0].text.lower()
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_requires_open_shift(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
@@ -251,6 +256,7 @@ async def test_expense_requires_open_shift(bot_dp):
     assert "🟢 Smenani boshlash" in sent[0].text
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_full_flow_no_anomaly(bot_dp):
     main, bot = bot_dp
     _make_kassir(111)
@@ -306,6 +312,7 @@ async def test_expense_finish_skipped_when_already_pending_for_same_kassir(bot_d
     assert expenses_after == expenses_before
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_anomaly_requires_reason(bot_dp):
     main, bot = bot_dp
     from repositories import cash_shifts as repo
@@ -1249,6 +1256,7 @@ async def test_closeshift_after_midnight_closes_yesterdays_open_shift_keeping_id
     assert cash_shift.get_open_shift(111, company_time.today().isoformat()) is None
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_after_midnight_is_logged_on_yesterdays_open_shift(bot_dp, monkeypatch):
     main, bot = bot_dp
     from services import cash_expense
@@ -1335,6 +1343,7 @@ def _expense_count() -> int:
         conn.close()
 
 
+@pytest.mark.usefixtures("expense_enabled")
 @pytest.mark.parametrize("kind", ["other_employee", "other_branch", "test", "closed"])
 async def test_expense_with_invalid_fsm_shift_id_writes_nothing(bot_dp, kind):
     main, bot = bot_dp
@@ -1364,6 +1373,7 @@ async def test_expense_with_invalid_fsm_shift_id_writes_nothing(bot_dp, kind):
     assert _expense_count() == 0
 
 
+@pytest.mark.usefixtures("expense_enabled")
 async def test_expense_with_own_open_shift_id_still_writes(bot_dp):
     main, bot = bot_dp
     from services import cash_expense
@@ -1407,3 +1417,50 @@ async def test_find_working_shift_prefers_yesterdays_open_over_todays_closed_row
         conn.close()
 
     assert cash_shift_bot._find_working_shift(111)["id"] == yesterday_open["id"]
+
+
+# ------------------------------------------- kassirdan "Xarajat kiritish" yashirilgan --
+
+_EXPENSE_CLOSED_TEXT = "Xarajat kiritish sizga ochilmagan. Xarajatni rahbar yoki moliyachi kiritadi."
+
+
+async def test_kassir_does_not_see_expense_button_in_kassa_section(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+
+    sent = await send(main.dp, bot, 111, text="💰 Kassa")
+    buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
+
+    assert buttons == ["🟢 Smenani boshlash", "🔴 Smenani topshirish", "🔙 Orqaga"]
+    assert "Xarajat" not in sent[0].text
+
+
+async def test_kassir_pressing_old_expense_button_gets_short_reply_without_categories(bot_dp):
+    main, bot = bot_dp
+    _make_kassir(111)
+    await send(main.dp, bot, 111, text="/openshift")  # ochiq smena bo'lsa ham kategoriya chiqmaydi
+
+    for text in ("💸 Xarajat kiritish", "/expense"):
+        sent = await send(main.dp, bot, 111, text=text)
+        assert [m.text for m in sent if getattr(m, "text", None)] == [_EXPENSE_CLOSED_TEXT]
+        assert not any(getattr(m, "reply_markup", None) for m in sent)  # kategoriya klaviaturasi yo'q
+
+    # Keyingi matn kategoriya sifatida yutilmaydi (FSM holati ochilmagan).
+    sent = await send(main.dp, bot, 111, text="Taxi")
+    assert not any("Summasini kiriting" in (getattr(m, "text", "") or "") for m in sent)
+
+
+def test_expense_permission_stays_with_founder_not_kassir(temp_db):
+    from roles import set_role
+
+    set_role(111, "kassir", set_by=FOUNDER_ID)
+    set_role(222, "moliyachi", set_by=FOUNDER_ID)
+    set_role(333, "savdo_boshligi", set_by=FOUNDER_ID)
+
+    assert permissions.has_permission(FOUNDER_ID, permissions.ACTION_LOG_CASH_EXPENSE) is True
+    assert permissions.has_permission(111, permissions.ACTION_LOG_CASH_EXPENSE) is False
+    # Moliyachi/savdo boshlig'iga bu ruxsat HOZIR ham berilmagan (yangi huquq qo'shilmadi).
+    assert permissions.has_permission(222, permissions.ACTION_LOG_CASH_EXPENSE) is False
+    assert permissions.has_permission(333, permissions.ACTION_LOG_CASH_EXPENSE) is False
+    assert permissions.has_permission(111, permissions.ACTION_OPEN_CASH_SHIFT) is True
+    assert permissions.has_permission(111, permissions.ACTION_CLOSE_CASH_SHIFT) is True

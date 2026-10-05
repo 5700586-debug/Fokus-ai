@@ -82,3 +82,15 @@ def bot_dp(temp_db):
 
     bot = RecordingBot(token=os.environ["BOT_TOKEN"])
     return main, bot
+
+
+@pytest.fixture
+def expense_enabled(monkeypatch):
+    """Kassirda xarajat ruxsati ATAYLAB yo'q; bu fixture faqat xarajat OQIMINING o'zini (ruxsat berilsa) sinaydi."""
+    from services import permissions as _permissions
+
+    monkeypatch.setitem(
+        _permissions.ROLE_PERMISSIONS,
+        "kassir",
+        _permissions.ROLE_PERMISSIONS["kassir"] | {_permissions.ACTION_LOG_CASH_EXPENSE},
+    )

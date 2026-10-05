@@ -26,7 +26,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import employees
 from config import COMPANY_TIMEZONE, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import is_authorized, list_users
-from services import chat_cleanup, discipline, discipline_ai, nazoratchi_day, permissions, rule_learning
+from services import chat_cleanup, discipline, discipline_ai, nazoratchi_close_report as close_report, nazoratchi_day, permissions, rule_learning
 from services import rules as rules_service
 
 logger = logging.getLogger(__name__)
@@ -638,10 +638,11 @@ def register(dp: Dispatcher, openai_client) -> None:
                 ]]),
             )
         else:
-            damda = f"\n🔴 Damda: {result.off_count}" if result.off_count else ""
-            await callback.message.edit_text(
-                f"✅ {branch} — {review_date} nazorati yopildi. Baholangan: {result.evaluated}/{result.total}{damda}"
-            )
+            statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=callback.from_user.id)
+            chunks = close_report.build_close_report(branch, review_date, statuses, result.evaluated, result.total)
+            await callback.message.edit_text(chunks[0])
+            for chunk in chunks[1:]:
+                await callback.message.answer(chunk)
         await callback.answer()
 
     # ------------------------------------------------------- dashboardlar --

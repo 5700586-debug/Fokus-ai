@@ -151,7 +151,8 @@ async def test_close_succeeds_after_all_required_graded_and_session_closed(bot_d
     assert "3 ball" in sent[0].text and "✅ Pending T — baholandi" in sent[0].text  # ro'yxatda ✅
 
     sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
-    assert f"{BRANCH_A} — {today} nazorati yopildi. Baholangan: 1/2" in sent[0].text and "Damda: 1" in sent[0].text
+    assert f"{BRANCH_A} nazorati yopildi" in sent[0].text and "baholangan: 1/2" in sent[0].text
+    assert "Damda: Dam T" in sent[0].text
 
     from repositories import discipline as discipline_repo
 

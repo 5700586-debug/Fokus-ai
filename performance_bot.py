@@ -28,6 +28,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
+from cash_shift_bot import HOME_TEXT, home_keyboard
 from config import RECRUITING_BRANCH_NAMES
 from db import IntegrityError
 from repositories import supplier_purchases as supplier_purchases_repo
@@ -53,7 +54,8 @@ _SKIP_KB = _kb([_SKIP_TEXT])
 
 _SCHEDULE_OFF_TEXT = "🛌 Dam olish"
 _SCHEDULE_WORK_TEXT = "🕒 Ish vaqti"
-_SCHEDULE_TYPE_KB = _kb([_SCHEDULE_OFF_TEXT, _SCHEDULE_WORK_TEXT])
+_SCHEDULE_TYPE_KB = _kb([_SCHEDULE_OFF_TEXT, _SCHEDULE_WORK_TEXT], [HOME_TEXT])
+_SCHEDULE_SKIP_KB = _kb([_SKIP_TEXT], [HOME_TEXT])
 _SCHEDULE_NOT_EMPLOYEE_TEXT = (
     "❌ Siz tasdiqlangan xodim emassiz — grafik o'zgartirish so'rovini yubora olmaysiz."
 )
@@ -327,20 +329,22 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.clear()
 
         if _approved_employee_id(message.from_user.id) is None:
-            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=ReplyKeyboardRemove())
+            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=home_keyboard())
             return
 
         await state.set_state(ScheduleChangeStates.shift_date)
         await message.answer(
             "📅 Grafikni o'zgartirish.\nQaysi sana uchun? (masalan 01.09.2026)",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=home_keyboard(),
         )
 
     @dp.message(StateFilter(ScheduleChangeStates.shift_date))
     async def schedule_change_date(message: Message, state: FSMContext) -> None:
         shift_date = _parse_date_ddmmyyyy(message.text or "")
         if shift_date is None:
-            await message.answer("❌ Sanani KK.OO.YYYY ko'rinishida kiriting (masalan 01.09.2026).")
+            await message.answer(
+                "❌ Sanani KK.OO.YYYY ko'rinishida kiriting (masalan 01.09.2026).", reply_markup=home_keyboard()
+            )
             return
 
         await state.update_data(shift_date=shift_date.isoformat())
@@ -354,7 +358,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if text == _SCHEDULE_OFF_TEXT:
             await state.update_data(requested_status=attendance_service.SHIFT_STATUS_OFF)
             await state.set_state(ScheduleChangeStates.reason)
-            await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SKIP_KB)
+            await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SCHEDULE_SKIP_KB)
             return
 
         if text != _SCHEDULE_WORK_TEXT:
@@ -363,34 +367,34 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         await state.update_data(requested_status=attendance_service.SHIFT_STATUS_WORK)
         await state.set_state(ScheduleChangeStates.start_time)
-        await message.answer("Ish boshlanish vaqti (masalan 09:00):", reply_markup=ReplyKeyboardRemove())
+        await message.answer("Ish boshlanish vaqti (masalan 09:00):", reply_markup=home_keyboard())
 
     @dp.message(StateFilter(ScheduleChangeStates.start_time))
     async def schedule_change_start_time(message: Message, state: FSMContext) -> None:
         start_text = _parse_time_hhmm(message.text or "")
         if start_text is None:
-            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 09:00).")
+            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 09:00).", reply_markup=home_keyboard())
             return
 
         await state.update_data(start_text=start_text)
         await state.set_state(ScheduleChangeStates.end_time)
-        await message.answer("Ish tugash vaqti (masalan 18:00):")
+        await message.answer("Ish tugash vaqti (masalan 18:00):", reply_markup=home_keyboard())
 
     @dp.message(StateFilter(ScheduleChangeStates.end_time))
     async def schedule_change_end_time(message: Message, state: FSMContext) -> None:
         end_text = _parse_time_hhmm(message.text or "")
         if end_text is None:
-            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 18:00).")
+            await message.answer("❌ Vaqtni SS:DD ko'rinishida kiriting (masalan 18:00).", reply_markup=home_keyboard())
             return
 
         data = await state.get_data()
         if end_text == data.get("start_text"):
-            await message.answer("❌ Tugash vaqti boshlanish vaqti bilan bir xil bo'lmasin.")
+            await message.answer("❌ Tugash vaqti boshlanish vaqti bilan bir xil bo'lmasin.", reply_markup=home_keyboard())
             return
 
         await state.update_data(end_text=end_text)
         await state.set_state(ScheduleChangeStates.reason)
-        await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SKIP_KB)
+        await message.answer("Sabab (bo'lmasa o'tkazib yuboring):", reply_markup=_SCHEDULE_SKIP_KB)
 
     @dp.message(StateFilter(ScheduleChangeStates.reason))
     async def schedule_change_reason(message: Message, state: FSMContext) -> None:
@@ -406,7 +410,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         requested_status = data.get("requested_status")
 
         if employee_id is None:
-            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=ReplyKeyboardRemove())
+            await message.answer(_SCHEDULE_NOT_EMPLOYEE_TEXT, reply_markup=home_keyboard())
             return
 
         request_id = None
@@ -423,7 +427,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if request_id is None:
             await message.answer(
                 "❌ So'rov saqlanmadi. Sana va vaqtni tekshirib, /grafik orqali qaytadan urinib ko'ring.",
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=home_keyboard(),
             )
             return
 

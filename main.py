@@ -44,6 +44,7 @@ except Exception:
 import approval  # noqa: E402
 import calibration_bot  # noqa: E402
 import cash_shift_bot  # noqa: E402
+import cash_chat_cleanup  # noqa: E402
 import cash_close_review  # noqa: E402
 import discipline_bot  # noqa: E402
 import employees  # noqa: E402
@@ -1962,6 +1963,13 @@ async def profile_handler(message: Message) -> None:
     await message.answer(card)
 
 
+# Eng oxirgi callback handler: holatsiz (eskirgan) kassa tugmalari "aylanib" qolmasin. Aniq handlerlari
+# bor tugmalar (masalan csui_rev_resubmit, csui_disc_approve) bundan oldin ro'yxatdan o'tgan.
+@dp.callback_query(F.data.startswith("csui_"))
+async def stale_cash_button_handler(callback: CallbackQuery) -> None:
+    await callback.answer("Bu tugma eskirgan. Jarayonni qaytadan boshlang.", show_alert=True)
+
+
 @dp.errors()
 async def error_handler(event: ErrorEvent, bot: Bot) -> None:
     print(f"Bot xatosi: {event.exception!r}")
@@ -1993,6 +2001,7 @@ async def main() -> None:
     discipline_scheduler = discipline_bot.start_scheduler(bot)
     saturn_group_scheduler = saturn_group_bot.start_scheduler(bot, openai_client)
     recruiting_retention_scheduler = recruiting_bot.start_scheduler(bot)
+    cash_chat_scheduler = cash_chat_cleanup.start_scheduler(bot)
     # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
@@ -2007,6 +2016,7 @@ async def main() -> None:
         discipline_scheduler.shutdown(wait=False)
         saturn_group_scheduler.shutdown(wait=False)
         recruiting_retention_scheduler.shutdown(wait=False)
+        cash_chat_scheduler.shutdown(wait=False)
         close_all_pools()
         await bot.session.close()
 

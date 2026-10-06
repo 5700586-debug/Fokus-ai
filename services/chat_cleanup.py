@@ -12,6 +12,7 @@ emas).
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -58,3 +59,30 @@ async def cleanup(bot: Bot, workflow: str, workflow_key: str) -> None:
                 "Eski bot xabarini o'chirib bo'lmadi (chat_id=%s, message_id=%s): %r",
                 row["chat_id"], row["message_id"], error,
             )
+
+
+async def sweep_stale(bot: Bot, workflows: tuple[str, ...], older_than_hours: float, keep=None) -> int:
+    """``older_than_hours``dan eski kuzatilgan xabarlarni (faqat ``workflows``) o'chiradi; ``keep(row)``
+    ``True`` qaytargan qatorga tegilmaydi. Faqat chat xabarlari va ``bot_workflow_messages`` qatorlari —
+    biznes ma'lumotga tegmaydi. O'chirib bo'lmagan xabar (48 soat cheklovi, xato) jim o'tkaziladi va
+    qatori baribir olib tashlanadi. Qaytadi: qayta ishlangan qatorlar soni."""
+    before = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+    rows = repo.list_older_than(workflows, before)
+
+    handled: list[int] = []
+    for row in rows:
+        if keep is not None and keep(row):
+            continue
+        try:
+            await bot.delete_message(row["chat_id"], row["message_id"])
+        except TelegramBadRequest:
+            pass
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "Eski xabarni o'chirib bo'lmadi (chat_id=%s, message_id=%s): %r",
+                row["chat_id"], row["message_id"], error,
+            )
+        handled.append(row["id"])
+
+    repo.delete_by_ids(handled)
+    return len(handled)

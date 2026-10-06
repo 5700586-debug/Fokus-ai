@@ -211,3 +211,112 @@ async def test_shared_menu_exposes_the_schedule_change_command(bot_dp):
 
     assert "/grafik" in buttons
     assert "Grafikni o'zgartirish" in (sent[0].text or "")
+
+
+# ------------------------------------------- "🏠 Asosiy menyu" grafik so'rovi bosqichlarida --
+
+HOME = "🏠 Asosiy menyu"
+
+
+def _keyboards(sent) -> list[list[str]]:
+    return [
+        [b.text for row in m.reply_markup.keyboard for b in row]
+        for m in sent
+        if getattr(m, "reply_markup", None) is not None and hasattr(m.reply_markup, "keyboard")
+    ]
+
+
+async def _fsm_state(main, bot, user_id: int):
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.base import StorageKey
+
+    context = FSMContext(storage=main.dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+    return await context.get_state()
+
+
+async def test_home_button_stays_on_every_schedule_request_step_and_error(bot_dp):
+    main, bot = bot_dp
+    _make_employee()
+    day = _tomorrow().strftime("%d.%m.%Y")
+
+    steps = [
+        await send(main.dp, bot, EMPLOYEE_ID, text="/grafik"),                   # sana so'rovi
+        await send(main.dp, bot, EMPLOYEE_ID, text="noto'g'ri sana"),            # sana xatosi
+        await send(main.dp, bot, EMPLOYEE_ID, text=day),                         # ish/dam tanlash
+        await send(main.dp, bot, EMPLOYEE_ID, text="nimadir"),                   # tanlash xatosi
+        await send(main.dp, bot, EMPLOYEE_ID, text="🕒 Ish vaqti"),               # boshlanish vaqti
+        await send(main.dp, bot, EMPLOYEE_ID, text="99:99"),                     # vaqt xatosi
+        await send(main.dp, bot, EMPLOYEE_ID, text="09:00"),                     # tugash vaqti
+        await send(main.dp, bot, EMPLOYEE_ID, text="09:00"),                     # tugash xatosi (bir xil)
+        await send(main.dp, bot, EMPLOYEE_ID, text="18:00"),                     # sabab
+    ]
+
+    for index, sent in enumerate(steps):
+        assert any(HOME in keyboard for keyboard in _keyboards(sent)), f"{index}-bosqichda Asosiy menyu tugmasi yo'q"
+    assert _requests() == []
+
+
+@pytest.mark.parametrize("stage", ["date", "type", "start", "end", "reason"])
+async def test_home_clears_schedule_request_without_sending_it(bot_dp, stage):
+    main, bot = bot_dp
+    _make_employee()
+    day = _tomorrow().strftime("%d.%m.%Y")
+
+    await send(main.dp, bot, EMPLOYEE_ID, text="/grafik")
+    if stage != "date":
+        await send(main.dp, bot, EMPLOYEE_ID, text=day)
+    if stage in ("start", "end", "reason"):
+        await send(main.dp, bot, EMPLOYEE_ID, text="🕒 Ish vaqti")
+    if stage in ("end", "reason"):
+        await send(main.dp, bot, EMPLOYEE_ID, text="09:00")
+    if stage == "reason":
+        await send(main.dp, bot, EMPLOYEE_ID, text="18:00")
+
+    sent = await send(main.dp, bot, EMPLOYEE_ID, text=HOME)
+
+    assert await _fsm_state(main, bot, EMPLOYEE_ID) is None
+    assert _requests() == []  # so'rov yuborilmagan
+    menus = _keyboards(sent)
+    assert any("💰 Kassa" in keyboard for keyboard in menus) and [HOME] not in menus  # asosiy menyu
+
+    # Keyingi matn eski bosqichning javobi sifatida yutilmaydi.
+    after = await send(main.dp, bot, EMPLOYEE_ID, text="Oilaviy ish bor")
+    assert _requests() == [] and "qabul qilindi" not in "".join(texts(after))
+
+
+async def test_off_request_flow_and_schedule_are_unchanged_with_home_keyboard(bot_dp):
+    main, bot = bot_dp
+    _make_employee()
+    day = _tomorrow()
+
+    await send(main.dp, bot, EMPLOYEE_ID, text="/grafik")
+    await send(main.dp, bot, EMPLOYEE_ID, text=day.strftime("%d.%m.%Y"))
+    type_step = await send(main.dp, bot, EMPLOYEE_ID, text="🛌 Dam olish")
+    assert any(HOME in keyboard for keyboard in _keyboards(type_step))  # sabab bosqichi
+    sent = await send(main.dp, bot, EMPLOYEE_ID, text="Oilaviy ish bor")
+
+    assert "qabul qilindi" in (sent[0].text or "")
+    assert len(_requests()) == 1
+    assert attendance_repo.get_shift_for_date(EMPLOYEE_ID, day.isoformat()) is None
+
+
+async def test_success_message_keeps_home_button_and_home_opens_menu(bot_dp):
+    main, bot = bot_dp
+    _make_employee()
+    day = _tomorrow()
+
+    await send(main.dp, bot, EMPLOYEE_ID, text="/grafik")
+    await send(main.dp, bot, EMPLOYEE_ID, text=day.strftime("%d.%m.%Y"))
+    await send(main.dp, bot, EMPLOYEE_ID, text="🛌 Dam olish")
+    sent = await send(main.dp, bot, EMPLOYEE_ID, text="Oilaviy ish bor")
+
+    assert "qabul qilindi" in (sent[0].text or "")
+    assert any(HOME in keyboard for keyboard in _keyboards(sent))  # ReplyKeyboardRemove emas
+    assert len(_requests()) == 1  # so'rov bir marta yaratilgan
+    assert await _fsm_state(main, bot, EMPLOYEE_ID) is None
+
+    menu = await send(main.dp, bot, EMPLOYEE_ID, text=HOME)
+
+    assert any("💰 Kassa" in keyboard for keyboard in _keyboards(menu))
+    assert len(_requests()) == 1  # Home yangi so'rov yaratmaydi
+    assert await _fsm_state(main, bot, EMPLOYEE_ID) is None

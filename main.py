@@ -872,6 +872,22 @@ class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
 
 dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
 
+HOME_TEXT = cash_shift_bot.HOME_TEXT
+
+
+# Eng birinchi ro'yxatdan o'tadi: har qanday kutish holatida (summa/rasm/sana) shu tugma matn sifatida
+# yutilib ketmaydi. Moliyachiga yuborilgan tekshiruv (DB holati) bekor bo'lmaydi — faqat FSM tozalanadi.
+@dp.message(F.text == HOME_TEXT)
+async def menu_home_handler(message: Message, state: FSMContext) -> None:
+    if not await ensure_authorized(message):
+        return
+
+    data = await state.get_data()
+    await state.clear()
+    await cash_shift_bot.discard_unfinished_close_messages(message.bot, data)
+    await message.answer("🏠 Asosiy menyu.", reply_markup=build_menu(message.from_user.id))
+
+
 onboarding.register(dp)
 approval.register(dp)
 performance_bot.register(dp, openai_client)

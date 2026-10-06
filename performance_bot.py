@@ -433,7 +433,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         await message.answer(
             "✅ So'rovingiz qabul qilindi. Rahbar tasdiqlagunicha grafik o'zgarmaydi.",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=home_keyboard(),
         )
 
     # ----------------------------------------------- /setrule, /listrules --

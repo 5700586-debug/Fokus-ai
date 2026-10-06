@@ -298,3 +298,25 @@ async def test_off_request_flow_and_schedule_are_unchanged_with_home_keyboard(bo
     assert "qabul qilindi" in (sent[0].text or "")
     assert len(_requests()) == 1
     assert attendance_repo.get_shift_for_date(EMPLOYEE_ID, day.isoformat()) is None
+
+
+async def test_success_message_keeps_home_button_and_home_opens_menu(bot_dp):
+    main, bot = bot_dp
+    _make_employee()
+    day = _tomorrow()
+
+    await send(main.dp, bot, EMPLOYEE_ID, text="/grafik")
+    await send(main.dp, bot, EMPLOYEE_ID, text=day.strftime("%d.%m.%Y"))
+    await send(main.dp, bot, EMPLOYEE_ID, text="🛌 Dam olish")
+    sent = await send(main.dp, bot, EMPLOYEE_ID, text="Oilaviy ish bor")
+
+    assert "qabul qilindi" in (sent[0].text or "")
+    assert any(HOME in keyboard for keyboard in _keyboards(sent))  # ReplyKeyboardRemove emas
+    assert len(_requests()) == 1  # so'rov bir marta yaratilgan
+    assert await _fsm_state(main, bot, EMPLOYEE_ID) is None
+
+    menu = await send(main.dp, bot, EMPLOYEE_ID, text=HOME)
+
+    assert any("💰 Kassa" in keyboard for keyboard in _keyboards(menu))
+    assert len(_requests()) == 1  # Home yangi so'rov yaratmaydi
+    assert await _fsm_state(main, bot, EMPLOYEE_ID) is None

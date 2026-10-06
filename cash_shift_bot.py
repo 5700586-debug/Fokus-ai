@@ -49,6 +49,7 @@ from services import (
     e2e_test_access,
     latency_probe,
     permissions,
+    rules as rules_service,
     shift_daily_report,
     shift_deficiency,
 )
@@ -98,6 +99,7 @@ _STATUS_LABELS = {
     cash_shift.STATUS_PENDING_HANDOVER: "🟡 Topshirish jarayonida (qabul qiluvchi tasdiqlashi kutilmoqda)",
     cash_shift.STATUS_RECHECK_REQUIRED: "🔴 Qayta tekshirish kerak",
     cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL: "🔴 Nazoratchi/Founder tekshiruvida",
+    cash_shift.STATUS_NEEDS_FINANCE_REVIEW: "🟠 Moliyachi tekshiruvida",
     cash_shift.STATUS_APPROVED_BY_SUPERVISOR: "✅ Nazoratchi/Founder tasdiqladi",
     cash_shift.STATUS_REJECTED_BY_SUPERVISOR: "❌ Rad etildi",
 }
@@ -138,6 +140,20 @@ def _employee_name(user_id: int) -> str:
 def _format_shift_summary(shift: dict, include_money: bool = True) -> str:
     if not include_money:
         return _format_shift_summary_no_money(shift)
+
+    if shift.get("difference") is None and shift.get("cash_sales") is not None:
+        # Qo'lda yopilgan smena: faqat kassir yozgan 2 summa bor, hisoblangan maydonlar yo'q.
+        return "\n".join([
+            "💰 KASSA — KUN YAKUNI",
+            "",
+            f"Kassir: {_employee_name(shift['employee_id'])}",
+            f"Sana: {shift['shift_date']}",
+            "",
+            f"Qabul qilingan naqd: {shift['cash_sales']}",
+            f"Kassada qoldirilgan naqd: {shift['actual_cash_balance']}",
+            "",
+            f"Status: {_STATUS_LABELS.get(shift['status'], shift['status'])}",
+        ])
 
     lines = [
         "💰 KASSA — KUN YAKUNI",
@@ -871,6 +887,12 @@ def _deficiency_yesterday_confirm_kb() -> InlineKeyboardMarkup:
 
 
 async def _enter_close_shift_photo_flow(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    if rules_service.is_manual_close_review_enabled():
+        import cash_close_review
+
+        await cash_close_review.enter_flow(reply_target, state, shift)
+        return
+
     if shift.get("sales_report_photo_ref") and shift.get("cash_report_photo_ref"):
         # Qayta urinish — rasmlar allaqachon yuborilgan, qayta so'ralmaydi.
         await state.set_state(CloseShiftStates.cash_sales)
@@ -1552,6 +1574,10 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         if shift["status"] == cash_shift.STATUS_NEEDS_SUPERVISOR_APPROVAL:
             await message.answer("⏳ Smenangiz hozir Nazoratchi/Founder tekshiruvida. Javobni kuting.")
+            return
+
+        if shift["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW:
+            await message.answer("⏳ Smenangiz moliyachi tekshiruvida. Javobni kuting.")
             return
 
         if shift["status"] == cash_shift.STATUS_PENDING_HANDOVER:

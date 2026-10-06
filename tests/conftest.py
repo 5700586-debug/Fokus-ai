@@ -94,3 +94,19 @@ def expense_enabled(monkeypatch):
         "kassir",
         _permissions.ROLE_PERMISSIONS["kassir"] | {_permissions.ACTION_LOG_CASH_EXPENSE},
     )
+
+
+@pytest.fixture(autouse=True)
+def legacy_cash_close_flow(monkeypatch):
+    """Kassa yopishning eski (AI rasm o'qiydigan) oqimi testlari o'zgarishsiz qoladi; yangi qo'lda
+    tekshiruv oqimi ``manual_close_review`` fixture bilan yoqiladi."""
+    from services import rules as _rules
+
+    monkeypatch.setattr(_rules, "is_manual_close_review_enabled", lambda: False)
+
+
+@pytest.fixture
+def manual_close_review(monkeypatch):
+    from services import rules as _rules
+
+    monkeypatch.setattr(_rules, "is_manual_close_review_enabled", lambda: True)

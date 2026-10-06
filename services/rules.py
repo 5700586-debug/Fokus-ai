@@ -58,6 +58,12 @@ def get_cash_shift_retry_limit() -> int:
     return int(value) if value is not None else 3
 
 
+def is_manual_close_review_enabled() -> bool:
+    """Kassa yopish: kassir 3 rasm + 2 summani qo'lda yuboradi, moliyachi tekshiradi (AI summa o'qimaydi).
+    ``/setrule cash_shift.manual_close_review 0`` eski (AI daftar o'qiydigan) oqimga qaytaradi."""
+    return performance_repo.get_rule("cash_shift.manual_close_review") != "0"
+
+
 def get_expense_baseline_min_observations() -> int:
     value = performance_repo.get_rule("cash_expense.baseline_min_observations")
     return int(value) if value is not None else 7

@@ -317,6 +317,24 @@ def set_shift_status(shift_id: int, status: str, close: bool, reset_retry: bool 
         conn.close()
 
 
+def submit_manual_close(shift_id: int, cash_received: int, cash_left: int, status: str) -> bool:
+    """Kassir qo'lda kiritgan 2 summa: ``cash_sales`` (qabul qilingan naqd) va ``actual_cash_balance``
+    (kassada qoldirilgan naqd). Hisoblanmagan maydonlar 0 EMAS, NULL qoladi. Atomik: faqat smena hali
+    ``open``/``recheck_required`` bo'lsa."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE cash_shifts SET cash_sales = ?, actual_cash_balance = ?, card_sales = NULL, "
+            "other_payments = NULL, total_sales = NULL, cash_expenses = NULL, expected_cash_balance = NULL, "
+            "difference = NULL, status = ?, updated_at = ? WHERE id = ? AND status IN ('open', 'recheck_required')",
+            (cash_received, cash_left, status, _now(), shift_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def set_shift_status_if(
     shift_id: int, expected_status: str, status: str, close: bool, reset_retry: bool = False
 ) -> bool:

@@ -1126,7 +1126,8 @@ async def test_openshift_without_previous_balance_keeps_manual_entry(bot_dp):
 
     sent = await send(main.dp, bot, 111, text="/openshift")
     assert "birinchi smenangiz" in sent[0].text
-    assert sent[0].reply_markup is None
+    # Inline tugma yo'q; faqat pastdagi "🏠 Asosiy menyu" klaviaturasi turadi.
+    assert [b.text for row in sent[0].reply_markup.keyboard for b in row] == ["🏠 Asosiy menyu"]
 
 
 async def test_openshift_previous_balance_zero_is_a_real_value(bot_dp):

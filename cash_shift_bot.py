@@ -56,6 +56,27 @@ from services import (
 
 _CLOSESHIFT_WORKFLOW = "cash_shift_close"
 
+HOME_TEXT = "🏠 Asosiy menyu"
+
+
+def home_keyboard() -> ReplyKeyboardMarkup:
+    """Kassir sana/rasm/summa kiritayotganda ham pastda doim turadigan yagona tugma."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=HOME_TEXT)]], resize_keyboard=True, is_persistent=True
+    )
+
+
+async def discard_unfinished_close_messages(bot, data: dict) -> None:
+    """"🏠 Asosiy menyu" bosilganda: HALI moliyachiga yuborilmagan (open/recheck_required) smenaning
+    vaqtinchalik xabarlari tozalanadi. Yuborilgan tekshiruvga (needs_finance_review) tegilmaydi."""
+    shift_id = data.get("shift_id")
+    shift = cash_shift.get_shift(shift_id) if shift_id else None
+    if shift is None or shift["status"] not in (cash_shift.STATUS_OPEN, cash_shift.STATUS_RECHECK_REQUIRED):
+        return
+
+    await chat_cleanup.cleanup(bot, _CLOSESHIFT_WORKFLOW, str(shift_id))
+    await chat_cleanup.cleanup(bot, "cash_close_review", str(shift_id))
+
 _SKIP_TEXT = "➖ O'tkazib yuborish"
 
 # ``_finish_expense``/``closeshift_amount_confirmed`` FSM holatni
@@ -898,7 +919,7 @@ async def _enter_close_shift_photo_flow(reply_target: Message, state: FSMContext
         await state.set_state(CloseShiftStates.cash_sales)
         sent = await reply_target.answer(
             "🔁 Qayta tekshiring. Bugungi naqd savdo summasini kiriting:",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=home_keyboard(),
         )
         chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
         return
@@ -906,7 +927,7 @@ async def _enter_close_shift_photo_flow(reply_target: Message, state: FSMContext
     await state.set_state(CloseShiftStates.sales_photo)
     sent = await reply_target.answer(
         "📸 Kompyuterdagi kunlik savdo hisobotining rasmini yuboring:",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=home_keyboard(),
     )
     chat_cleanup.track(_CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
 
@@ -1150,7 +1171,8 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await state.set_state(OpenShiftStates.manual_opening_balance)
             await message.answer(
                 "👋 Bu sizning birinchi smenangiz.\n"
-                "💵 Kassadagi pulni sanab, summani yozing. Pul bo'lmasa 0 yozing."
+                "💵 Kassadagi pulni sanab, summani yozing. Pul bo'lmasa 0 yozing.",
+                reply_markup=home_keyboard(),
             )
             return
 
@@ -1163,7 +1185,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         await state.set_state(OpenShiftStates.counted_cash_balance)
         await message.answer("💵 Kassadagi pulni o'zingiz sanang.")
-        await message.answer("Sanagan summangizni yozing:")
+        await message.answer("Sanagan summangizni yozing:", reply_markup=home_keyboard())
 
     async def _ask_previous_balance(message: Message, state: FSMContext, previous: dict) -> None:
         # Har bir so'rov o'z tokenini oladi — eski xabardagi tugma (shu

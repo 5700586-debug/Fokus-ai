@@ -54,6 +54,8 @@ ACTION_DRIVER_DAILY_CHECK = "driver_daily_check"
 ACTION_OPEN_CASH_SHIFT = "open_cash_shift"
 ACTION_CLOSE_CASH_SHIFT = "close_cash_shift"
 ACTION_LOG_CASH_EXPENSE = "log_cash_expense"
+# Kassa yopishdagi daftar/POS/chek rasmlari va 2 summani moliyachi tasdiqlaydi (Founder bypass).
+ACTION_REVIEW_CASH_CLOSE = "review_cash_close"
 ACTION_REVIEW_CASH_SHIFT = "review_cash_shift"
 ACTION_SUBMIT_INVENTORY_SNAPSHOT = "submit_inventory_snapshot"
 ACTION_REVIEW_INVENTORY_VARIANCE = "review_inventory_variance"
@@ -163,7 +165,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
     # Kassir faqat smenani boshlaydi/topshiradi; xarajatni rahbar/moliyachi kiritadi (ACTION_LOG_CASH_EXPENSE).
     "kassir": {ACTION_OPEN_CASH_SHIFT, ACTION_CLOSE_CASH_SHIFT},
-    "moliyachi": {ACTION_VIEW_CASH_SUMMARY, ACTION_VIEW_INVENTORY_SUMMARY},
+    "moliyachi": {ACTION_VIEW_CASH_SUMMARY, ACTION_VIEW_INVENTORY_SUMMARY, ACTION_REVIEW_CASH_CLOSE},
 }
 
 

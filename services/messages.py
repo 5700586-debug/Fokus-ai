@@ -25,6 +25,7 @@ CASH_FINANCE_ACTIONS = frozenset(
         "open_cash_shift",
         "close_cash_shift",
         "log_cash_expense",
+        "review_cash_close",
         "review_cash_shift",
         "view_cash_summary",
         "set_salary",

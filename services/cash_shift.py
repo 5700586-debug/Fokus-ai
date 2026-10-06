@@ -27,6 +27,8 @@ STATUS_REJECTED_BY_SUPERVISOR = "rejected_by_supervisor"
 # kutmoqda (qarang ``confirm_handover``). Faqat shundan keyin haqiqiy
 # yopiladi.
 STATUS_PENDING_HANDOVER = "pending_handover"
+# Kassir 3 rasm + 2 summani yubordi, moliyachi tasdig'ini kutmoqda (hisob-kitob/tafovut hisoblanmaydi).
+STATUS_NEEDS_FINANCE_REVIEW = "needs_finance_review"
 
 _FINAL_STATUSES = (STATUS_CLEAN_CLOSED, STATUS_WITHIN_TOLERANCE)
 
@@ -115,6 +117,8 @@ def submit_close_attempt(
         raise ValueError("Bu smena allaqachon yopilgan — qayta topshirib bo'lmaydi.")
     if shift["status"] == STATUS_NEEDS_SUPERVISOR_APPROVAL:
         raise ValueError("Bu smena hozir Nazoratchi/Founder tekshiruvida — kassir qayta urinolmaydi.")
+    if shift["status"] == STATUS_NEEDS_FINANCE_REVIEW:
+        raise ValueError("Bu smena hozir moliyachi tekshiruvida — kassir qayta urinolmaydi.")
 
     total_sales, expected_cash_balance, difference, status = _compute(
         shift["opening_balance"], cash_sales, card_sales, other_payments,
@@ -191,6 +195,28 @@ def apply_supervisor_decision(shift_id: int, reviewed_by: int, decision: str, co
     if applied:
         repo.record_shift_approval(shift_id, reviewed_by, decision, comment)
 
+    return applied
+
+
+def submit_manual_close(shift_id: int, cash_received: int, cash_left: int) -> bool:
+    """Yangi kassa yopish: faqat 2 summa (qabul qilingan va qoldirilgan naqd). Formula/tafovut
+    hisoblanmaydi — moliyachi rasmlar bilan tekshiradi. ``False`` — smena allaqachon yuborilgan/yopilgan."""
+    return repo.submit_manual_close(shift_id, cash_received, cash_left, STATUS_NEEDS_FINANCE_REVIEW)
+
+
+def apply_finance_decision(shift_id: int, reviewed_by: int, decision: str) -> bool:
+    """``"approved"`` -> ``PENDING_HANDOVER`` (mavjud topshirish zanjiri davom etadi); ``"rejected"`` ->
+    ``RECHECK_REQUIRED`` (kassir rasm/summani qayta yuboradi). Atomik; takroriy bosish ``False``."""
+    if decision == "approved":
+        target = STATUS_PENDING_HANDOVER
+    elif decision == "rejected":
+        target = STATUS_RECHECK_REQUIRED
+    else:
+        raise ValueError(f"Noma'lum qaror: {decision}")
+
+    applied = repo.set_shift_status_if(shift_id, STATUS_NEEDS_FINANCE_REVIEW, target, close=False)
+    if applied:
+        repo.record_shift_approval(shift_id, reviewed_by, f"finance_{decision}", None)
     return applied
 
 

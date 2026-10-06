@@ -162,15 +162,14 @@ def _format_shift_summary(shift: dict, include_money: bool = True) -> str:
     if not include_money:
         return _format_shift_summary_no_money(shift)
 
-    if shift.get("difference") is None and shift.get("cash_sales") is not None:
-        # Qo'lda yopilgan smena: faqat kassir yozgan 2 summa bor, hisoblangan maydonlar yo'q.
+    if shift.get("difference") is None and shift.get("actual_cash_balance") is not None:
+        # Qo'lda yopilgan smena: faqat kassir yozgan qoldirilgan naqd bor, hisoblangan maydonlar yo'q.
         return "\n".join([
             "💰 KASSA — KUN YAKUNI",
             "",
             f"Kassir: {_employee_name(shift['employee_id'])}",
             f"Sana: {shift['shift_date']}",
             "",
-            f"Qabul qilingan naqd: {shift['cash_sales']}",
             f"Kassada qoldirilgan naqd: {shift['actual_cash_balance']}",
             "",
             f"Status: {_STATUS_LABELS.get(shift['status'], shift['status'])}",
@@ -522,6 +521,38 @@ def _confirm_previous_balance_kb(token: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Ha, mos", callback_data=f"csui_open_prev_ok:{token}"),
         InlineKeyboardButton(text="❗ Farq bor", callback_data=f"csui_open_prev_diff:{token}"),
     ]])
+
+
+def _confirm_previous_balance_simple_kb(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, tasdiqlayman", callback_data=f"csui_open_prev_ok:{token}"),
+        InlineKeyboardButton(text="✏️ Summani o'zgartirish", callback_data=f"csui_open_prev_diff:{token}"),
+    ]])
+
+
+_MANUAL_OPENING_PROMPT = "Smenani nech pul bilan qabul qildingiz? (kassadagi boshlang'ich naqd)"
+
+
+def _opened_text(shift: dict) -> str:
+    return f"✅ Smena ochildi.\nBoshlang'ich naqd: {_format_amount(shift['opening_balance'])} so'm."
+
+
+async def _notify_opening_changed(bot, shift: dict, previous_balance: int) -> None:
+    """Kassir boshlang'ich naqdni o'zgartirdi: moliyachiga (bo'lmasa Founderga) ma'lumot — tugmalarsiz."""
+    from roles import find_user_by_role
+
+    text = "\n".join([
+        "⚠️ Boshlang'ich naqd o'zgartirildi",
+        "",
+        f"Filial: {shift.get('branch') or '-'}",
+        f"Kassir: {_employee_name(shift['employee_id'])}",
+        f"Oldingi qoldiq: {_format_amount(previous_balance)} so'm",
+        f"Kassir yozgan: {_format_amount(shift['opening_balance'])} so'm",
+    ])
+    try:
+        await bot.send_message(find_user_by_role("moliyachi") or FOUNDER_ID, text)
+    except Exception as error:  # noqa: BLE001
+        print(f"Boshlang'ich naqd o'zgarishini yuborib bo'lmadi: {error!r}")
 
 
 _STALE_PREVIOUS_BALANCE_BUTTON = "Bu tugma eskirgan. Oxirgi xabardagi tugmani bosing"
@@ -1155,9 +1186,13 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
         user_id = message.from_user.id
         today = company_time.today().isoformat()
 
+        simple = rules_service.is_manual_close_review_enabled()
         existing = cash_shift.get_open_shift(user_id, today)
         if existing is not None:
-            await message.answer("ℹ️ Bugungi smena allaqachon ochilgan.")
+            if simple and existing["status"] not in (cash_shift.STATUS_OPEN, cash_shift.STATUS_RECHECK_REQUIRED):
+                await message.answer("ℹ️ Bugungi smena allaqachon yopilgan.")
+            else:
+                await message.answer("ℹ️ Bugungi smena allaqachon ochilgan.")
             return
 
         profile = get_profile(user_id)
@@ -1165,6 +1200,17 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
 
         if cash_shift.get_unclosed_real_shift(user_id, branch) is not None:
             await message.answer("⚠️ Avval ochiq smenangizni topshiring.")
+            return
+
+        if simple:
+            from repositories import cash_shifts as cash_shifts_repo
+
+            previous = cash_shifts_repo.get_last_closed_shift(branch)
+            if previous is None or previous["actual_cash_balance"] is None:
+                await state.set_state(OpenShiftStates.manual_opening_balance)
+                await message.answer(_MANUAL_OPENING_PROMPT, reply_markup=home_keyboard())
+                return
+            await _ask_previous_balance(message, state, previous)
             return
 
         if cash_shift.is_first_ever_shift(branch):
@@ -1197,6 +1243,12 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             prev_token=token,
         )
         await state.set_state(OpenShiftStates.confirm_previous_balance)
+        if rules_service.is_manual_close_review_enabled():
+            await message.answer(
+                f"Kassada {_format_amount(previous['actual_cash_balance'])} so'm bor deb qabul qilyapsizmi?",
+                reply_markup=_confirm_previous_balance_simple_kb(token),
+            )
+            return
         await message.answer(
             f"Oldingi smenadan qoldiq: {_format_amount(previous['actual_cash_balance'])} so'm. "
             "Pulni sanang. Mosmi?",
@@ -1244,8 +1296,13 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await callback.answer(_STALE_PREVIOUS_BALANCE_BUTTON, show_alert=True)
             return
 
-        await state.set_state(OpenShiftStates.counted_cash_balance)
         await callback.message.edit_reply_markup(reply_markup=None)
+        if rules_service.is_manual_close_review_enabled():
+            await state.set_state(OpenShiftStates.manual_opening_balance)
+            await callback.message.answer(_MANUAL_OPENING_PROMPT, reply_markup=home_keyboard())
+            await callback.answer()
+            return
+        await state.set_state(OpenShiftStates.counted_cash_balance)
         await callback.message.answer("Sanagan summangizni yozing:")
         await callback.answer()
 
@@ -1256,15 +1313,25 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_close_restart_kb())
             return
 
+        data = await state.get_data()
         await state.clear()
         user_id = message.from_user.id
         profile = get_profile(user_id)
         branch = profile.get("branch") if profile else None
+        simple = rules_service.is_manual_close_review_enabled()
         shift = cash_shift.open_shift_for_today(
             user_id, branch, company_time.today().isoformat(),
             manual_opening_balance=amount, received_cash_balance=amount,
+            opening_override=amount if simple else None,
         )
-        await message.answer(f"✅ Smena ochildi.\nBoshlang'ich qoldiq: {shift['opening_balance']} so'm.")
+        if not simple:
+            await message.answer(f"✅ Smena ochildi.\nBoshlang'ich qoldiq: {shift['opening_balance']} so'm.")
+            return
+
+        await message.answer(_opened_text(shift), reply_markup=home_keyboard())
+        previous_balance = data.get("previous_balance")
+        if previous_balance is not None and previous_balance != amount:
+            await _notify_opening_changed(message.bot, shift, previous_balance)
 
     @dp.message(StateFilter(OpenShiftStates.counted_cash_balance))
     async def openshift_counted_balance(message: Message, state: FSMContext) -> None:
@@ -1325,8 +1392,11 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
                 cash_shift.confirm_handover(handed_over_shift["id"])
 
             await state.clear()
-            await callback.message.answer("✅ Kassa mos.")
-            await callback.message.answer("Smena topshirildi.")
+            if rules_service.is_manual_close_review_enabled():
+                await callback.message.answer(_opened_text(shift), reply_markup=home_keyboard())
+            else:
+                await callback.message.answer("✅ Kassa mos.")
+                await callback.message.answer("Smena topshirildi.")
             await callback.answer()
             return
 
@@ -1599,7 +1669,7 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             return
 
         if shift["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW:
-            await message.answer("⏳ Smenangiz moliyachi tekshiruvida. Javobni kuting.")
+            await message.answer("ℹ️ Bugungi smena allaqachon yopilgan.")  # moliyachiga yuborilgan: kassir uchun yopiq
             return
 
         if shift["status"] == cash_shift.STATUS_PENDING_HANDOVER:

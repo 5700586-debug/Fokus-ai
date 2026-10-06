@@ -107,7 +107,7 @@ async def test_home_after_sending_does_not_cancel_the_review_or_delete_its_messa
     assert _tracked_count("cash_close_review") == tracked_before
     assert _shift()["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
     await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{shift_id}", target_chat_id=MOLIYACHI)
-    assert _shift()["status"] == cash_shift.STATUS_PENDING_HANDOVER
+    assert _shift()["status"] == cash_shift.STATUS_CLEAN_CLOSED
 
 
 # ------------------------------------------------------------ tozalash --
@@ -118,17 +118,17 @@ async def test_cashier_photos_amounts_and_interim_messages_are_tracked_then_clea
     await _to_photo_prompt(main, bot)
     await _submit_to_moliyachi(main, bot)
     shift_id = _shift()["id"]
-    # kassir: 3 rasm + 2 summa + "yuborildi" xabari; moliyachi: 3 rasm
-    assert _tracked_count("cash_close_review") == 9
+    # kassir: 3 rasm + 1 summa; moliyachi: 3 rasm. "Smena yopildi" xabari kuzatilmaydi (qoladi).
+    assert _tracked_count("cash_close_review") == 7
 
     sent = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{shift_id}", target_chat_id=MOLIYACHI)
 
     assert _tracked_count("cash_close_review") == 0
     assert _tracked_count("cash_shift_close") == 0
     deleted_chats = [m.chat_id for m in sent if isinstance(m, DeleteMessage)]
-    assert deleted_chats.count(KASSIR) == 6 and deleted_chats.count(MOLIYACHI) == 3
+    assert deleted_chats.count(KASSIR) == 4 and deleted_chats.count(MOLIYACHI) == 3
     final = [m for m in sent if isinstance(m, SendMessage) and m.chat_id == KASSIR]
-    assert final and "Moliyachi tasdiqladi" in final[-1].text  # yakuniy javob qoladi (kuzatilmaydi)
+    assert final and "Moliyachi smenangizni tasdiqladi" in final[-1].text  # yakuniy javob qoladi (kuzatilmaydi)
     assert _tracked_count("cash_close_review") == 0
 
 
@@ -140,7 +140,7 @@ async def test_rejection_also_cleans_temporary_messages(bot_dp):
 
     sent = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_no:{shift_id}", target_chat_id=MOLIYACHI)
 
-    assert len([m for m in sent if isinstance(m, DeleteMessage)]) == 9
+    assert len([m for m in sent if isinstance(m, DeleteMessage)]) == 7
     assert _tracked_count("cash_close_review") == 0
 
 
@@ -156,8 +156,8 @@ async def test_failed_deletion_does_not_stop_the_main_flow(bot_dp):
     bot.delete_message = _fail
     sent = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{shift_id}", target_chat_id=MOLIYACHI)
 
-    assert _shift()["status"] == cash_shift.STATUS_PENDING_HANDOVER
-    assert any(isinstance(m, SendMessage) and m.chat_id == KASSIR and "Moliyachi tasdiqladi" in m.text for m in sent)
+    assert _shift()["status"] == cash_shift.STATUS_CLEAN_CLOSED
+    assert any(isinstance(m, SendMessage) and m.chat_id == KASSIR and "Moliyachi smenangizni tasdiqladi" in m.text for m in sent)
 
 
 # -------------------------------------------------------------------- rad --
@@ -172,7 +172,7 @@ async def test_rejection_message_is_clear_and_has_resubmit_button_that_restarts(
     sent = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_no:{shift_id}", target_chat_id=MOLIYACHI)
 
     notice = [m for m in sent if isinstance(m, SendMessage) and m.chat_id == KASSIR][-1]
-    assert "rad etdi" in notice.text and "qayta yuboring" in notice.text
+    assert notice.text == "❌ Moliyachi qayta tekshirishga qaytardi. Rasmlar va summani qayta yuboring."
     assert isinstance(notice.reply_markup, InlineKeyboardMarkup)
     button = notice.reply_markup.inline_keyboard[0][0]
     assert button.text == "🔄 Qayta yuborish" and button.callback_data == f"csui_rev_resubmit:{shift_id}"
@@ -185,7 +185,6 @@ async def test_rejection_message_is_clear_and_has_resubmit_button_that_restarts(
     await send(main.dp, bot, KASSIR, photo_file_id="n2")
     await send(main.dp, bot, KASSIR, photo_file_id="p2")
     await send(main.dp, bot, KASSIR, photo_file_id="r2")
-    await send(main.dp, bot, KASSIR, text="1")
     await send(main.dp, bot, KASSIR, text="2")
     await send_callback(main.dp, bot, KASSIR, data="csui_rev_send", target_chat_id=KASSIR)
     assert _shift()["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
@@ -194,7 +193,7 @@ async def test_rejection_message_is_clear_and_has_resubmit_button_that_restarts(
     assert _shift()["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
 
 
-async def test_approval_message_has_no_resubmit_button(bot_dp):
+async def test_approval_message_has_home_keyboard_and_no_resubmit_button(bot_dp):
     main, bot = bot_dp
     await _to_photo_prompt(main, bot)
     await _submit_to_moliyachi(main, bot)
@@ -204,7 +203,8 @@ async def test_approval_message_has_no_resubmit_button(bot_dp):
     )
 
     notice = [m for m in sent if isinstance(m, SendMessage) and m.chat_id == KASSIR][-1]
-    assert notice.reply_markup is None
+    assert isinstance(notice.reply_markup, ReplyKeyboardMarkup)  # inline "Qayta yuborish" yo'q, Home qoladi
+    assert [b.text for row in notice.reply_markup.keyboard for b in row] == [HOME]
 
 
 async def test_resubmit_button_pressed_by_someone_else_is_refused(bot_dp):

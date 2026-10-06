@@ -20,21 +20,40 @@ from services import cash_shift, chat_cleanup, permissions
 
 REVIEW_WORKFLOW = "cash_close_review"
 
+QUALITY_WARNING = (
+    "Xira yoki o'qib bo'lmaydigan rasm moliyachi tomonidan qaytarilishi va intizomiy minusga sabab bo'lishi mumkin."
+)
 _PHOTO_STEPS = (
-    ("review_notebook", "📒 Daftar rasmini yuboring:"),
-    ("review_pos", "🖥 Programma/POS rasmini yuboring:"),
-    ("review_receipts", "🧾 Cheklar rasmini yuboring:"),
+    (
+        "review_notebook",
+        "📒 Daftar rasmini yuboring.\n"
+        "Hisobot chiroyli yozilgan va rasm tiniq bo'lsin. Yuborishdan oldin o'zingiz tekshiring.\n\n"
+        + QUALITY_WARNING,
+    ),
+    (
+        "review_pos",
+        "🖥 Programma/POS rasmini yuboring.\nRaqamlar aniq ko'rinsin. Xira rasm yubormang.",
+    ),
+    (
+        "review_receipts",
+        "🧾 Cheklar rasmini yuboring.\nCheklar va summa aniq ko'rinsin. Yuborishdan oldin tekshiring.",
+    ),
 )
 _PHOTO_CAPTIONS = {"review_notebook": "📒 Daftar", "review_pos": "🖥 Programma/POS", "review_receipts": "🧾 Cheklar"}
-_CASH_RECEIVED_PROMPT = "💵 Bugun qabul qilgan naqd pulni yozing:"
-_CASH_LEFT_PROMPT = "💵 Kassada qoldirayotgan naqd pulni yozing:"
+_CASH_LEFT_PROMPT = "Kassada qancha naqd qoldiryapsiz?"
+CLOSED_THANKS = (
+    "✅ Smena yopildi. Ma'lumot moliyachiga yuborildi.\n\n"
+    "Bugungi ishingiz uchun rahmat.\n"
+    "Yaxshi dam oling. Saturn jamoasi sizni qadrlaydi."
+)
+APPROVED_TEXT = "✅ Moliyachi smenangizni tasdiqladi."
+REJECTED_TEXT = "❌ Moliyachi qayta tekshirishga qaytardi. Rasmlar va summani qayta yuboring."
 
 
 class CloseReviewStates(StatesGroup):
     notebook_photo = State()
     pos_photo = State()
     receipts_photo = State()
-    cash_received = State()
     cash_left = State()
     confirm = State()
 
@@ -57,7 +76,7 @@ def _confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Moliyachiga yuborish", callback_data="csui_rev_send"),
-            InlineKeyboardButton(text="🔄 Summalarni qayta yozaman", callback_data="csui_rev_retry"),
+            InlineKeyboardButton(text="🔄 Summani qayta yozaman", callback_data="csui_rev_retry"),
         ],
         [InlineKeyboardButton(text="📸 Rasmlarni qayta yuborish", callback_data="csui_rev_restart")],
     ])
@@ -79,7 +98,7 @@ def _decision_kb(shift_id: int) -> InlineKeyboardMarkup:
 async def clear_photo_data(state: FSMContext) -> None:
     """Eski ``file_id`` va summalar FSM'da qolib ketmasin (qayta boshlash/tashlab ketilgan oqim)."""
     await state.update_data(
-        review_notebook=None, review_pos=None, review_receipts=None, review_cash_received=None, review_cash_left=None,
+        review_notebook=None, review_pos=None, review_receipts=None, review_cash_left=None,
     )
 
 
@@ -90,7 +109,7 @@ async def enter_flow(reply_target: Message, state: FSMContext, shift: dict) -> N
     chat_cleanup.track(cash_bot._CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
 
 
-def _review_card(shift: dict, cash_received: int, cash_left: int) -> str:
+def _review_card(shift: dict, cash_left: int) -> str:
     return "\n".join([
         "🧾 KASSA YOPISH — TEKSHIRUV",
         "",
@@ -98,7 +117,6 @@ def _review_card(shift: dict, cash_received: int, cash_left: int) -> str:
         f"Kassir: {cash_bot._employee_name(shift['employee_id'])}",
         f"Sana: {shift['shift_date']} (smena #{shift['id']})",
         "",
-        f"Bugun qabul qilingan naqd: {cash_bot._format_amount(cash_received)} so'm",
         f"Kassada qoldirilgan naqd: {cash_bot._format_amount(cash_left)} so'm",
         "",
         "Rasmlar yuqorida: daftar, programma/POS, cheklar.",
@@ -131,8 +149,8 @@ def register(dp: Dispatcher) -> None:
             await state.set_state(_PHOTO_STATES[next_key])
             sent = await message.answer(prompt, reply_markup=cash_bot.home_keyboard())
         else:
-            await state.set_state(CloseReviewStates.cash_received)
-            sent = await message.answer(_CASH_RECEIVED_PROMPT, reply_markup=_restart_kb())
+            await state.set_state(CloseReviewStates.cash_left)
+            sent = await message.answer(_CASH_LEFT_PROMPT, reply_markup=_restart_kb())
         chat_cleanup.track(cash_bot._CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(
@@ -140,20 +158,6 @@ def register(dp: Dispatcher) -> None:
     )
     async def review_photo_missing(message: Message) -> None:
         await message.answer("❌ Iltimos, rasmni surat (photo) sifatida yuboring.")
-
-    @dp.message(StateFilter(CloseReviewStates.cash_received))
-    async def review_cash_received(message: Message, state: FSMContext) -> None:
-        amount = cash_bot._parse_amount(message.text or "")
-        if amount is None or amount < 0:
-            await message.answer("❌ Faqat musbat raqam kiriting.", reply_markup=_restart_kb())
-            return
-
-        await state.update_data(review_cash_received=amount)
-        await state.set_state(CloseReviewStates.cash_left)
-        data = await state.get_data()
-        await _track(message, data["shift_id"])
-        sent = await message.answer(_CASH_LEFT_PROMPT, reply_markup=_restart_kb())
-        chat_cleanup.track(cash_bot._CLOSESHIFT_WORKFLOW, str(data["shift_id"]), sent)
 
     @dp.message(StateFilter(CloseReviewStates.cash_left))
     async def review_cash_left(message: Message, state: FSMContext) -> None:
@@ -167,7 +171,6 @@ def register(dp: Dispatcher) -> None:
         data = await state.get_data()
         await _track(message, data["shift_id"])
         sent = await message.answer(
-            f"Qabul qilingan naqd: {cash_bot._format_amount(data['review_cash_received'])} so'm\n"
             f"Kassada qoldirilgan naqd: {cash_bot._format_amount(amount)} so'm\n\n"
             "Moliyachiga yuboraymi?",
             reply_markup=_confirm_kb(),
@@ -176,16 +179,14 @@ def register(dp: Dispatcher) -> None:
 
     @dp.callback_query(F.data == "csui_rev_retry", StateFilter(CloseReviewStates.confirm))
     async def review_retry(callback: CallbackQuery, state: FSMContext) -> None:
-        await state.set_state(CloseReviewStates.cash_received)
+        await state.set_state(CloseReviewStates.cash_left)
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(_CASH_RECEIVED_PROMPT, reply_markup=_restart_kb())
+        await callback.message.answer(_CASH_LEFT_PROMPT, reply_markup=_restart_kb())
         await callback.answer()
 
     @dp.callback_query(
         F.data == "csui_rev_restart",
-        StateFilter(
-            CloseReviewStates.cash_received, CloseReviewStates.cash_left, CloseReviewStates.confirm,
-        ),
+        StateFilter(CloseReviewStates.cash_left, CloseReviewStates.confirm),
     )
     async def review_restart(callback: CallbackQuery, state: FSMContext) -> None:
         data = await state.get_data()
@@ -211,13 +212,13 @@ def register(dp: Dispatcher) -> None:
             data = await state.get_data()
             shift_id = data["shift_id"]
             photos = [(key, data.get(key)) for key, _ in _PHOTO_STEPS]
-            cash_received, cash_left = data.get("review_cash_received"), data.get("review_cash_left")
-            if not all(file_id for _, file_id in photos) or cash_received is None or cash_left is None:
+            cash_left = data.get("review_cash_left")
+            if not all(file_id for _, file_id in photos) or cash_left is None:
                 await callback.answer("Ma'lumot to'liq emas. Qaytadan boshlang.", show_alert=True)
                 return
 
             # Avval smena holati (atomik): takroriy bosish ikkinchi marta yubormaydi.
-            if not cash_shift.submit_manual_close(shift_id, cash_received, cash_left):
+            if not cash_shift.submit_manual_close(shift_id, cash_left):
                 await state.clear()
                 await callback.message.edit_reply_markup(reply_markup=None)
                 await callback.answer("Bu smena allaqachon yuborilgan.", show_alert=True)
@@ -229,14 +230,14 @@ def register(dp: Dispatcher) -> None:
                 sent_photo = await callback.bot.send_photo(reviewer, file_id, caption=_PHOTO_CAPTIONS[key])
                 await _track(sent_photo, shift_id)
             await callback.bot.send_message(
-                reviewer, _review_card(shift, cash_received, cash_left), reply_markup=_decision_kb(shift_id)
+                reviewer, _review_card(shift, cash_left), reply_markup=_decision_kb(shift_id)
             )
 
             await state.clear()
             await callback.message.edit_reply_markup(reply_markup=None)
             await chat_cleanup.cleanup(callback.bot, cash_bot._CLOSESHIFT_WORKFLOW, str(shift_id))
-            sent_wait = await callback.message.answer("📤 Moliyachiga yuborildi. Tasdiqlashni kuting.")
-            await _track(sent_wait, shift_id)  # vaqtinchalik: qaror bilan o'chadi, yakuniy javob qoladi
+            # Yakuniy javob: kassir uchun smena yopilgan; kuzatilmaydi, shuning uchun qaror bilan o'chmaydi.
+            await callback.message.answer(CLOSED_THANKS, reply_markup=cash_bot.home_keyboard())
             await callback.answer()
         finally:
             _pending.discard(user_id)
@@ -286,17 +287,11 @@ def register(dp: Dispatcher) -> None:
             await callback.message.edit_text(f"{callback.message.text}\n\n{result_text}", reply_markup=None)
 
         if decision == "approved":
-            kassir_text = "✅ Moliyachi tasdiqladi. Smena topshirildi — qabul qiluvchi kassir tasdiqlashini kuting."
+            kassir_text, kassir_markup = APPROVED_TEXT, cash_bot.home_keyboard()
         else:
-            kassir_text = (
-                "❌ Moliyachi rad etdi: rasm yoki summa to'g'ri emas deb topildi.\n"
-                "Rasmlar va summalarni qayta yuboring."
-            )
+            kassir_text, kassir_markup = REJECTED_TEXT, _resubmit_kb(shift_id)
         try:
-            await callback.bot.send_message(
-                shift["employee_id"], kassir_text,
-                reply_markup=_resubmit_kb(shift_id) if decision == "rejected" else None,
-            )
+            await callback.bot.send_message(shift["employee_id"], kassir_text, reply_markup=kassir_markup)
         except Exception as error:  # noqa: BLE001
             print(f"Kassirga qaror xabarini yuborib bo'lmadi ({shift['employee_id']}): {error!r}")
         await callback.answer(result_text)

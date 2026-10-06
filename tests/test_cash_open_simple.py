@@ -197,3 +197,88 @@ async def test_approval_after_next_shift_opened_still_finalizes_previous_shift(b
 
     assert cash_shifts_repo.get_shift(night_shift_id)["status"] == cash_shift.STATUS_CLEAN_CLOSED
     assert _shift(MORNING)["status"] == cash_shift.STATUS_OPEN
+
+
+# ------------------------------------- A yopdi -> B ochdi -> moliyachi A ni rad etdi --
+
+
+def _confirm_token(sent, index: int = 0) -> str:
+    return [
+        b.callback_data for m in sent if getattr(m, "reply_markup", None) for row in m.reply_markup.inline_keyboard for b in row
+    ][index]
+
+
+async def test_rejecting_previous_shift_after_next_cashier_opened_keeps_both_consistent(bot_dp):
+    from aiogram.methods import SendPhoto
+
+    main, bot = bot_dp
+    await _night_closes_with(main, bot, "215000")
+    a_id = _shift(NIGHT)["id"]
+    _make_kassir(MORNING)
+    sent = await send(main.dp, bot, MORNING, text="/openshift")
+    await send_callback(main.dp, bot, MORNING, data=_confirm_token(sent), target_chat_id=MORNING)
+    b = _shift(MORNING)
+    assert (b["opening_balance"], b["status"]) == (215000, cash_shift.STATUS_OPEN)
+
+    rejected = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_no:{a_id}", target_chat_id=MOLIYACHI)
+
+    # B ning smenasi buzilmagan.
+    b_after = _shift(MORNING)
+    assert (b_after["id"], b_after["status"], b_after["opening_balance"]) == (b["id"], cash_shift.STATUS_OPEN, 215000)
+    a = cash_shifts_repo.get_shift(a_id)
+    assert a["status"] == cash_shift.STATUS_RECHECK_REQUIRED
+    # A "Qayta yuborish" tugmasini oladi va u ishlaydi.
+    notice = [m for m in rejected if isinstance(m, SendMessage) and m.chat_id == NIGHT][-1]
+    resubmit = notice.reply_markup.inline_keyboard[0][0]
+    assert resubmit.text == "🔄 Qayta yuborish"
+    restarted = await send_callback(main.dp, bot, NIGHT, data=resubmit.callback_data, target_chat_id=NIGHT)
+    assert "📒 Daftar rasmini yuboring" in _joined(restarted)
+
+    for file_id in ("n2", "p2", "r2"):
+        await send(main.dp, bot, NIGHT, photo_file_id=file_id)
+    await send(main.dp, bot, NIGHT, text="220000")
+    resent = await send_callback(main.dp, bot, NIGHT, data="csui_rev_send", target_chat_id=NIGHT)
+
+    # Moliyachi qayta ko'ra oladi: yangi 3 rasm + karta (yangi summa) + tugmalar.
+    assert [m.photo for m in resent if isinstance(m, SendPhoto) and m.chat_id == MOLIYACHI] == ["n2", "p2", "r2"]
+    card = next(m for m in resent if isinstance(m, SendMessage) and m.chat_id == MOLIYACHI)
+    assert "220000" in card.text.replace(" ", "").replace(" ", "")
+    assert [b.callback_data for row in card.reply_markup.inline_keyboard for b in row] == [
+        f"cashclose_ok:{a_id}", f"cashclose_no:{a_id}",
+    ]
+    assert cash_shifts_repo.get_shift(a_id)["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
+
+    await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{a_id}", target_chat_id=MOLIYACHI)
+
+    assert cash_shifts_repo.get_shift(a_id)["status"] == cash_shift.STATUS_CLEAN_CLOSED
+    b_final = _shift(MORNING)
+    assert (b_final["status"], b_final["opening_balance"]) == (cash_shift.STATUS_OPEN, 215000)  # B ga tegilmagan
+
+
+async def test_open_shift_of_next_cashier_is_never_picked_as_last_balance_while_previous_is_rejected(bot_dp):
+    main, bot = bot_dp
+    await _night_closes_with(main, bot, "215000")
+    a_id = _shift(NIGHT)["id"]
+    _make_kassir(MORNING)
+    sent = await send(main.dp, bot, MORNING, text="/openshift")
+    await send_callback(main.dp, bot, MORNING, data=_confirm_token(sent), target_chat_id=MORNING)
+    await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_no:{a_id}", target_chat_id=MOLIYACHI)
+
+    last = cash_shifts_repo.get_last_closed_shift("Filial-1")
+
+    # B hali ochiq (``status='open'`` chiqarib tashlanadi); oxirgi yopilgan — A (rad etilgan, qaytarilgan).
+    assert last["id"] == a_id and last["status"] == cash_shift.STATUS_RECHECK_REQUIRED
+    assert last["actual_cash_balance"] == 215000
+
+
+async def test_rejected_unverified_balance_is_still_offered_but_cashier_can_change_it(bot_dp):
+    main, bot = bot_dp
+    await _night_closes_with(main, bot, "215000")
+    a_id = _shift(NIGHT)["id"]
+    await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_no:{a_id}", target_chat_id=MOLIYACHI)
+    _make_kassir(MORNING)
+
+    sent = await send(main.dp, bot, MORNING, text="/openshift")
+
+    assert "bor deb qabul qilyapsizmi?" in _joined(sent)
+    assert "✏️ Summani o'zgartirish" in _buttons(sent)  # moliyachi shubhalangan raqamni kassir o'zgartira oladi

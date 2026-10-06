@@ -1,0 +1,44 @@
+name: Production read-only smoke E2E (real @Xoqandiy_ai_bot)
+
+# FAQAT qo'lda ishga tushadi (Actions -> Run workflow). Push/PR/schedule'da HECH QACHON ishlamaydi.
+# Real production botga faqat read-only xabarlar yuboradi (e2e/readonly_guard.py KODDA majburiy):
+# /start, /baholash, /kunniyop; baho/yopish/tasdiqlash/jarima hech qachon bosilmaydi.
+# Muhammadiy ruxsat bergandan keyingina ishga tushiring.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_readonly:
+        description: "Production botga READ-ONLY smoke yuborilishini tasdiqlang: PRODUCTION-READONLY deb yozing"
+        required: true
+        type: string
+      require_nazoratchi:
+        description: "Nazoratchi tekshiruvlari o'tkazib yuborilsa FAIL (tester nazoratchi rolida bo'lsa true)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-readonly-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: ${{ inputs.confirm_production_readonly == 'PRODUCTION-READONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r e2e/requirements.txt
+      - name: Run production read-only smoke
+        env:
+          E2E_TELEGRAM_API_ID: ${{ secrets.E2E_TELEGRAM_API_ID }}
+          E2E_TELEGRAM_API_HASH: ${{ secrets.E2E_TELEGRAM_API_HASH }}
+          E2E_TELEGRAM_SESSION: ${{ secrets.E2E_TELEGRAM_SESSION }}
+          SMOKE_REQUIRE_NAZORATCHI: ${{ inputs.require_nazoratchi }}
+        run: python -m e2e.run_production_readonly_smoke

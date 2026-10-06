@@ -2,9 +2,10 @@
 qo'lda yozadi; AI rasmlardan summa o'qimaydi va kassirga hech narsa tasdiqlatmaydi. Hammasi bitta
 tekshiruv xabari bilan moliyachiga (bo'lmasa Founderga) ketadi.
 
-Rasmlar DBga YOZILMAYDI: ``file_id``lar faqat FSM holatida turadi va moliyachiga darhol yuboriladi;
-qaror (tasdiq/rad) bilan ikkala chatdagi rasm xabarlari o'chiriladi (``chat_cleanup``). Bazada faqat
-2 summa va smena/tasdiq holati qoladi. Dasturga avtomatik ulash bu yerda YO'Q."""
+Bot bazasida rasm/file path saqlanmaydi: ``file_id``lar faqat FSM holatida turadi (har qayta boshlash,
+tashlab ketilgan oqim yoki yuborishdan keyin tozalanadi) va moliyachiga darhol yuboriladi. Qarordan
+keyin bot yuborgan va track qilingan chat xabarlari o'chiriladi (``chat_cleanup``); Telegram serveridagi
+``file_id`` saqlanishini biz kafolatlamaymiz. Bazada faqat 2 summa va smena/tasdiq holati qoladi. Dasturga avtomatik ulash bu yerda YO'Q."""
 
 from aiogram import Dispatcher, F
 from aiogram.filters import StateFilter
@@ -69,10 +70,15 @@ def _decision_kb(shift_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
-async def enter_flow(reply_target: Message, state: FSMContext, shift: dict) -> None:
+async def clear_photo_data(state: FSMContext) -> None:
+    """Eski ``file_id`` va summalar FSM'da qolib ketmasin (qayta boshlash/tashlab ketilgan oqim)."""
     await state.update_data(
         review_notebook=None, review_pos=None, review_receipts=None, review_cash_received=None, review_cash_left=None,
     )
+
+
+async def enter_flow(reply_target: Message, state: FSMContext, shift: dict) -> None:
+    await clear_photo_data(state)
     await state.set_state(CloseReviewStates.notebook_photo)
     sent = await reply_target.answer(_PHOTO_STEPS[0][1], reply_markup=ReplyKeyboardRemove())
     chat_cleanup.track(cash_bot._CLOSESHIFT_WORKFLOW, str(shift["id"]), sent)
@@ -225,6 +231,8 @@ def register(dp: Dispatcher) -> None:
             await callback.answer()
         finally:
             _pending.discard(user_id)
+            if await state.get_state() is not None:
+                await clear_photo_data(state)  # xato/rad etilgan yuborishda ham eski file_id qolmasin
 
     async def _decide(callback: CallbackQuery, decision: str, result_text: str) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_REVIEW_CASH_CLOSE):
@@ -240,7 +248,7 @@ def register(dp: Dispatcher) -> None:
             await callback.answer("Bu smena allaqachon hal qilingan.", show_alert=True)
             return
 
-        # Rasm xabarlari ikkala chatdan o'chiriladi; bazada rasm yo'q edi.
+        # Bot yuborgan va track qilingan rasm xabarlari ikkala chatdan o'chiriladi; bazada rasm izi yo'q edi.
         await chat_cleanup.cleanup(callback.bot, REVIEW_WORKFLOW, str(shift_id))
         if callback.message:
             await callback.message.edit_text(f"{callback.message.text}\n\n{result_text}", reply_markup=None)

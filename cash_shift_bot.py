@@ -1594,6 +1594,9 @@ def register(dp: Dispatcher, openai_client: AsyncOpenAI) -> None:
             return
 
         await state.update_data(shift_id=shift["id"])
+        import cash_close_review
+
+        await cash_close_review.clear_photo_data(state)  # oldingi yarim qolgan urinishdan file_id qolmasin
         await _enter_deficiency_step(message, state, shift)
 
     # ------------------------------------------------ kamchilik hisoboti (V1) --

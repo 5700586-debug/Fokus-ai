@@ -210,3 +210,84 @@ async def test_non_photo_and_bad_amount_do_not_advance(bot_dp):
     sent = await send(main.dp, bot, KASSIR, text="abc")
     assert "Faqat musbat raqam" in _joined(sent)
 
+
+
+async def _fsm_data(main, bot, user_id: int) -> dict:
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.base import StorageKey
+
+    context = FSMContext(storage=main.dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+    return await context.get_data()
+
+
+_PHOTO_KEYS = ("review_notebook", "review_pos", "review_receipts")
+
+
+async def test_restart_button_drops_old_file_ids_and_only_new_photos_reach_moliyachi(bot_dp):
+    main, bot = bot_dp
+    await _to_photo_prompt(main, bot)
+    await send(main.dp, bot, KASSIR, photo_file_id="old_notebook")
+    await send(main.dp, bot, KASSIR, photo_file_id="old_pos")
+    await send(main.dp, bot, KASSIR, photo_file_id="old_receipts")
+    await send(main.dp, bot, KASSIR, text="999")
+    assert (await _fsm_data(main, bot, KASSIR))["review_notebook"] == "old_notebook"
+
+    sent = await send_callback(main.dp, bot, KASSIR, data="csui_rev_restart", target_chat_id=KASSIR)
+    assert "📒 Daftar rasmini yuboring" in _joined(sent)
+    data = await _fsm_data(main, bot, KASSIR)
+    assert all(data[key] is None for key in _PHOTO_KEYS)
+    assert data["review_cash_received"] is None
+
+    resent = await _submit_to_moliyachi_with(main, bot, ("new_notebook", "new_pos", "new_receipts"))
+    photos = [m.photo for m in resent if isinstance(m, SendPhoto) and m.chat_id == MOLIYACHI]
+    assert photos == ["new_notebook", "new_pos", "new_receipts"]
+    assert not any("old_" in str(getattr(m, "photo", "")) for m in resent)
+
+
+async def test_restarting_closeshift_midway_clears_stale_file_ids(bot_dp):
+    main, bot = bot_dp
+    await _to_photo_prompt(main, bot)
+    await send(main.dp, bot, KASSIR, photo_file_id="abandoned_notebook")
+    assert (await _fsm_data(main, bot, KASSIR))["review_notebook"] == "abandoned_notebook"
+
+    sent = await send(main.dp, bot, KASSIR, text="/closeshift")  # tashlab ketib, qaytadan boshladi
+
+    assert "📒 Daftar rasmini yuboring" in _joined(sent)
+    data = await _fsm_data(main, bot, KASSIR)
+    assert all(data.get(key) is None for key in _PHOTO_KEYS)
+
+    resent = await _submit_to_moliyachi_with(main, bot, ("n2", "p2", "r2"))
+    assert [m.photo for m in resent if isinstance(m, SendPhoto) and m.chat_id == MOLIYACHI] == ["n2", "p2", "r2"]
+
+
+async def test_no_file_ids_remain_in_fsm_after_send_and_nothing_in_db(bot_dp):
+    main, bot = bot_dp
+    await _to_photo_prompt(main, bot)
+    await _submit_to_moliyachi(main, bot)
+
+    data = await _fsm_data(main, bot, KASSIR)
+    assert all(data.get(key) is None for key in _PHOTO_KEYS)
+    row = _shift()
+    assert not row.get("sales_report_photo_ref") and not row.get("cash_report_photo_ref")
+    conn = get_connection()
+    try:
+        tables = [r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()]
+        for table in tables:
+            for column in conn.execute(f"PRAGMA table_info({table})").fetchall():
+                if table == "bot_workflow_messages":
+                    continue
+                if conn.execute(
+                    f"SELECT COUNT(*) AS n FROM {table} WHERE CAST({column['name']} AS TEXT) IN "
+                    "('notebook_file', 'pos_file', 'receipts_file')"
+                ).fetchone()["n"]:
+                    raise AssertionError(f"rasm file_id bazaga tushgan: {table}.{column['name']}")
+    finally:
+        conn.close()
+
+
+async def _submit_to_moliyachi_with(main, bot, photos: tuple[str, str, str]):
+    for file_id in photos:
+        await send(main.dp, bot, KASSIR, photo_file_id=file_id)
+    await send(main.dp, bot, KASSIR, text="1500000")
+    await send(main.dp, bot, KASSIR, text="300000")
+    return await send_callback(main.dp, bot, KASSIR, data="csui_rev_send", target_chat_id=KASSIR)

@@ -49,6 +49,7 @@ def open_shift_for_today(
     employee_id: int, branch: str | None, shift_date: str,
     manual_opening_balance: int | None = None,
     received_cash_balance: int | None = None,
+    opening_override: int | None = None,
 ) -> dict:
     """Oxirgi yopilgan smenaning ``actual_cash_balance``i (topshiruvchi
     kassir sanagan real kassa summasi) — FILIAL bo'yicha (xodim emas,
@@ -65,7 +66,10 @@ def open_shift_for_today(
     solishtirish uchun.
     """
     last_closed = repo.get_last_closed_shift(branch)
-    if last_closed is not None:
+    if opening_override is not None:
+        # Kassir boshlang'ich naqdni o'zi yozdi (oldingi qoldiq topilmadi yoki o'zgartirildi).
+        opening_balance = opening_override
+    elif last_closed is not None:
         opening_balance = last_closed["actual_cash_balance"]
     else:
         opening_balance = manual_opening_balance if manual_opening_balance is not None else 0
@@ -198,23 +202,25 @@ def apply_supervisor_decision(shift_id: int, reviewed_by: int, decision: str, co
     return applied
 
 
-def submit_manual_close(shift_id: int, cash_received: int, cash_left: int) -> bool:
-    """Yangi kassa yopish: faqat 2 summa (qabul qilingan va qoldirilgan naqd). Formula/tafovut
-    hisoblanmaydi — moliyachi rasmlar bilan tekshiradi. ``False`` — smena allaqachon yuborilgan/yopilgan."""
-    return repo.submit_manual_close(shift_id, cash_received, cash_left, STATUS_NEEDS_FINANCE_REVIEW)
+def submit_manual_close(shift_id: int, cash_left: int) -> bool:
+    """Yangi kassa yopish: faqat kassada qoldirilgan naqd. Formula/tafovut hisoblanmaydi — moliyachi rasmlar
+    bilan tekshiradi; kassir uchun smena yopilgan hisoblanadi. ``False`` — smena allaqachon yuborilgan."""
+    return repo.submit_manual_close(shift_id, cash_left, STATUS_NEEDS_FINANCE_REVIEW)
 
 
 def apply_finance_decision(shift_id: int, reviewed_by: int, decision: str) -> bool:
-    """``"approved"`` -> ``PENDING_HANDOVER`` (mavjud topshirish zanjiri davom etadi); ``"rejected"`` ->
-    ``RECHECK_REQUIRED`` (kassir rasm/summani qayta yuboradi). Atomik; takroriy bosish ``False``."""
+    """``"approved"`` -> ``CLEAN_CLOSED`` (smena yakuniy yopiladi); ``"rejected"`` -> ``RECHECK_REQUIRED``
+    (kassir rasm/summani qayta yuboradi). Atomik; takroriy bosish ``False``."""
     if decision == "approved":
-        target = STATUS_PENDING_HANDOVER
+        target = STATUS_CLEAN_CLOSED
     elif decision == "rejected":
         target = STATUS_RECHECK_REQUIRED
     else:
         raise ValueError(f"Noma'lum qaror: {decision}")
 
-    applied = repo.set_shift_status_if(shift_id, STATUS_NEEDS_FINANCE_REVIEW, target, close=False)
+    applied = repo.set_shift_status_if(
+        shift_id, STATUS_NEEDS_FINANCE_REVIEW, target, close=decision == "approved"
+    )
     if applied:
         repo.record_shift_approval(shift_id, reviewed_by, f"finance_{decision}", None)
     return applied

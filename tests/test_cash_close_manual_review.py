@@ -46,11 +46,10 @@ async def _clear_daily_report_gate_and_get_prompt(main, bot):
     return await send_callback(main.dp, bot, KASSIR, data="csdr_staff_no", target_chat_id=KASSIR)
 
 
-async def _submit_to_moliyachi(main, bot, received="1500000", left="300000"):
+async def _submit_to_moliyachi(main, bot, left="300000"):
     await send(main.dp, bot, KASSIR, photo_file_id="notebook_file")
     await send(main.dp, bot, KASSIR, photo_file_id="pos_file")
     await send(main.dp, bot, KASSIR, photo_file_id="receipts_file")
-    await send(main.dp, bot, KASSIR, text=received)
     await send(main.dp, bot, KASSIR, text=left)
     return await send_callback(main.dp, bot, KASSIR, data="csui_rev_send", target_chat_id=KASSIR)
 
@@ -59,7 +58,7 @@ def _shift():
     return cash_shifts_repo.get_open_shift(KASSIR, __import__("company_time").today().isoformat())
 
 
-async def test_cashier_is_asked_three_photos_then_only_two_amounts(bot_dp, monkeypatch):
+async def test_cashier_is_asked_three_photos_then_only_the_cash_left(bot_dp, monkeypatch):
     main, bot = bot_dp
 
     async def _boom(*args, **kwargs):  # AI rasmdan summa o'qishga HECH QACHON chaqirilmasligi kerak
@@ -68,25 +67,32 @@ async def test_cashier_is_asked_three_photos_then_only_two_amounts(bot_dp, monke
     monkeypatch.setattr(cash_shift_bot, "_extract_cash_shift_fields", _boom)
 
     prompt = await _to_photo_prompt(main, bot)
-    assert "📒 Daftar rasmini yuboring" in _joined(prompt)
+    text = _joined(prompt)
+    assert "📒 Daftar rasmini yuboring." in text
+    assert "Hisobot chiroyli yozilgan va rasm tiniq bo'lsin. Yuborishdan oldin o'zingiz tekshiring." in text
+    assert (
+        "Xira yoki o'qib bo'lmaydigan rasm moliyachi tomonidan qaytarilishi va intizomiy minusga sabab bo'lishi mumkin."
+        in text
+    )
 
     sent = await send(main.dp, bot, KASSIR, photo_file_id="notebook_file")
-    assert "🖥 Programma/POS rasmini yuboring" in _joined(sent)
+    assert "🖥 Programma/POS rasmini yuboring.\nRaqamlar aniq ko'rinsin. Xira rasm yubormang." in _joined(sent)
     sent = await send(main.dp, bot, KASSIR, photo_file_id="pos_file")
-    assert "🧾 Cheklar rasmini yuboring" in _joined(sent)
+    assert "🧾 Cheklar rasmini yuboring.\nCheklar va summa aniq ko'rinsin. Yuborishdan oldin tekshiring." in _joined(sent)
     sent = await send(main.dp, bot, KASSIR, photo_file_id="receipts_file")
-    assert "Bugun qabul qilgan naqd pulni yozing" in _joined(sent)
-    sent = await send(main.dp, bot, KASSIR, text="1500000")
-    assert "Kassada qoldirayotgan naqd pulni yozing" in _joined(sent)
+    assert "Kassada qancha naqd qoldiryapsiz?" in _joined(sent)  # FAQAT shu summa
     sent = await send(main.dp, bot, KASSIR, text="300000")
 
     text = _joined(sent)
-    assert "Qabul qilingan naqd: 1 500 000" in text.replace(" ", " ") or "1500000" in text or "1 500 000" in text
-    for forbidden in ("AI o'qigan", "mos kelmadi", "qaysi biri to'g'ri", "karta", "Karta", "Boshqa to'lov"):
+    assert "300 000" in text.replace("\u00a0", " ") or "300000" in text
+    for forbidden in (
+        "qabul qilgan", "Qabul qilingan", "AI o'qigan", "mos kelmadi", "qaysi biri to'g'ri", "karta", "Karta",
+        "Boshqa to'lov",
+    ):
         assert forbidden not in text
 
 
-async def test_moliyachi_gets_three_photos_and_two_amounts_in_one_review_card(bot_dp):
+async def test_moliyachi_gets_three_photos_and_cash_left_in_one_review_card(bot_dp):
     main, bot = bot_dp
     await _to_photo_prompt(main, bot)
 
@@ -96,15 +102,24 @@ async def test_moliyachi_gets_three_photos_and_two_amounts_in_one_review_card(bo
     assert [p.photo for p in photos] == ["notebook_file", "pos_file", "receipts_file"]
     assert [p.caption for p in photos] == ["📒 Daftar", "🖥 Programma/POS", "🧾 Cheklar"]
     card = next(m for m in sent if isinstance(m, SendMessage) and m.chat_id == MOLIYACHI)
-    for expected in ("Filial: Filial-1", "Kassir: Kassirov Ali", "smena #", "1500000", "300000"):
-        assert expected in card.text.replace(" ", "").replace(" ", "") or expected in card.text
+    compact = card.text.replace(" ", "").replace("\u00a0", "")
+    assert "Filial:Filial-1" in compact and "Kassir:KassirovAli" in compact and "smena#" in compact
+    assert "Kassadaqoldirilgannaqd:300000" in compact
+    assert "qabul qilingan" not in card.text
     buttons = [b.callback_data for row in card.reply_markup.inline_keyboard for b in row]
     assert buttons == [f"cashclose_ok:{_shift()['id']}", f"cashclose_no:{_shift()['id']}"]
-    assert any("Moliyachiga yuborildi" in t for t in _texts(sent))
+
+    kassir_texts = _texts([m for m in sent if getattr(m, "chat_id", None) == KASSIR])
+    final = "\n".join(kassir_texts)
+    assert "✅ Smena yopildi. Ma'lumot moliyachiga yuborildi." in final
+    assert "Bugungi ishingiz uchun rahmat.\nYaxshi dam oling. Saturn jamoasi sizni qadrlaydi." in final
+    assert "tasdiqlashini kuting" not in final and "Tasdiqlashni kuting" not in final
+    home = [m for m in sent if isinstance(m, SendMessage) and m.chat_id == KASSIR and "Smena yopildi" in m.text][0]
+    assert [b.text for row in home.reply_markup.keyboard for b in row] == ["🏠 Asosiy menyu"]
 
     shift = _shift()
     assert shift["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
-    assert (shift["cash_sales"], shift["actual_cash_balance"]) == (1500000, 300000)
+    assert shift["cash_sales"] is None and shift["actual_cash_balance"] == 300000
     assert shift["card_sales"] is None and shift["difference"] is None  # hisoblanmagan: 0 emas, NULL
     assert not shift.get("sales_report_photo_ref") and not shift.get("cash_report_photo_ref")
 
@@ -122,7 +137,7 @@ async def test_without_moliyachi_review_goes_to_founder(bot_dp):
     assert {m.chat_id for m in sent if isinstance(m, (SendPhoto, SendMessage)) and m.chat_id != KASSIR} == {FOUNDER_ID}
 
 
-async def test_approval_moves_to_handover_deletes_photo_messages_and_keeps_no_photo_records(bot_dp):
+async def test_approval_closes_shift_deletes_photo_messages_and_keeps_no_photo_records(bot_dp):
     main, bot = bot_dp
     await _to_photo_prompt(main, bot)
     await _submit_to_moliyachi(main, bot)
@@ -130,11 +145,11 @@ async def test_approval_moves_to_handover_deletes_photo_messages_and_keeps_no_ph
 
     sent = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{shift_id}", target_chat_id=MOLIYACHI)
 
-    assert _shift()["status"] == cash_shift.STATUS_PENDING_HANDOVER
+    assert _shift()["status"] == cash_shift.STATUS_CLEAN_CLOSED
     deleted = [m for m in sent if isinstance(m, DeleteMessage)]
     assert {m.chat_id for m in deleted} == {KASSIR, MOLIYACHI}  # kassir va moliyachi chatidagi rasm xabarlari
     assert len(deleted) >= 4
-    assert any(m.chat_id == KASSIR and "Moliyachi tasdiqladi" in (getattr(m, "text", "") or "") for m in sent)
+    assert any(m.chat_id == KASSIR and "Moliyachi smenangizni tasdiqladi" in (getattr(m, "text", "") or "") for m in sent)
 
     conn = get_connection()
     try:
@@ -151,7 +166,7 @@ async def test_approval_moves_to_handover_deletes_photo_messages_and_keeps_no_ph
 
     again = await send_callback(main.dp, bot, MOLIYACHI, data=f"cashclose_ok:{shift_id}", target_chat_id=MOLIYACHI)
     assert not any(isinstance(m, DeleteMessage) for m in again)  # takroriy bosish hech narsa qilmaydi
-    assert _shift()["status"] == cash_shift.STATUS_PENDING_HANDOVER
+    assert _shift()["status"] == cash_shift.STATUS_CLEAN_CLOSED
 
 
 async def test_rejection_asks_to_resend_and_photos_are_still_not_stored(bot_dp):
@@ -192,10 +207,10 @@ async def test_only_finance_or_founder_can_decide_and_cashier_waits(bot_dp):
     assert _shift()["status"] == cash_shift.STATUS_NEEDS_FINANCE_REVIEW
 
     waiting = await send(main.dp, bot, KASSIR, text="/closeshift")
-    assert "moliyachi tekshiruvida" in _joined(waiting)
+    assert "allaqachon yopilgan" in _joined(waiting) and "tekshiruvida" not in _joined(waiting)
 
     await send_callback(main.dp, bot, FOUNDER_ID, data=f"cashclose_ok:{shift_id}", target_chat_id=FOUNDER_ID)
-    assert _shift()["status"] == cash_shift.STATUS_PENDING_HANDOVER
+    assert _shift()["status"] == cash_shift.STATUS_CLEAN_CLOSED
 
 
 async def test_non_photo_and_bad_amount_do_not_advance(bot_dp):
@@ -229,14 +244,12 @@ async def test_restart_button_drops_old_file_ids_and_only_new_photos_reach_moliy
     await send(main.dp, bot, KASSIR, photo_file_id="old_notebook")
     await send(main.dp, bot, KASSIR, photo_file_id="old_pos")
     await send(main.dp, bot, KASSIR, photo_file_id="old_receipts")
-    await send(main.dp, bot, KASSIR, text="999")
     assert (await _fsm_data(main, bot, KASSIR))["review_notebook"] == "old_notebook"
 
     sent = await send_callback(main.dp, bot, KASSIR, data="csui_rev_restart", target_chat_id=KASSIR)
     assert "📒 Daftar rasmini yuboring" in _joined(sent)
     data = await _fsm_data(main, bot, KASSIR)
     assert all(data[key] is None for key in _PHOTO_KEYS)
-    assert data["review_cash_received"] is None
 
     resent = await _submit_to_moliyachi_with(main, bot, ("new_notebook", "new_pos", "new_receipts"))
     photos = [m.photo for m in resent if isinstance(m, SendPhoto) and m.chat_id == MOLIYACHI]
@@ -288,6 +301,5 @@ async def test_no_file_ids_remain_in_fsm_after_send_and_nothing_in_db(bot_dp):
 async def _submit_to_moliyachi_with(main, bot, photos: tuple[str, str, str]):
     for file_id in photos:
         await send(main.dp, bot, KASSIR, photo_file_id=file_id)
-    await send(main.dp, bot, KASSIR, text="1500000")
     await send(main.dp, bot, KASSIR, text="300000")
     return await send_callback(main.dp, bot, KASSIR, data="csui_rev_send", target_chat_id=KASSIR)

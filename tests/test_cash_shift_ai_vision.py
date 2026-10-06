@@ -675,7 +675,7 @@ async def test_ledger_mismatch_buttons_not_accepted_after_choice_made(bot_dp, mo
 
     await send_callback(main.dp, bot, 111, data="csui_ledger_items", target_chat_id=111)
     sent = await send_callback(main.dp, bot, 111, data="csui_ledger_written", target_chat_id=111)  # eski tugma
-    assert not [m for m in sent if getattr(m, "text", None)]
+    assert [m.text for m in sent if getattr(m, "text", None)] == ["Bu tugma eskirgan. Jarayonni qaytadan boshlang."]
 
     ctx = main.dp.fsm.get_context(bot=bot, chat_id=111, user_id=111)
     assert (await ctx.get_data())["ledger_total_status"] == "cashier_accepted_items_sum"

@@ -47,3 +47,31 @@ def pop_messages(workflow: str, workflow_key: str) -> list[dict]:
         conn.close()
 
     return [dict(row) for row in rows]
+
+
+def list_older_than(workflows: tuple[str, ...], before_iso: str) -> list[dict]:
+    """``before_iso``dan eski (``sent_at``) kuzatilgan xabarlar — faqat berilgan workflowlar. O'chirmaydi."""
+    placeholders = ", ".join("?" for _ in workflows)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, workflow, workflow_key, chat_id, message_id FROM bot_workflow_messages "
+            f"WHERE workflow IN ({placeholders}) AND sent_at < ?",
+            (*workflows, before_iso),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def delete_by_ids(ids: list[int]) -> None:
+    if not ids:
+        return
+    placeholders = ", ".join("?" for _ in ids)
+    conn = get_connection()
+    try:
+        conn.execute(f"DELETE FROM bot_workflow_messages WHERE id IN ({placeholders})", tuple(ids))
+        conn.commit()
+    finally:
+        conn.close()

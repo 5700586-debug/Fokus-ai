@@ -1096,9 +1096,10 @@ async def test_openshift_previous_balance_match_uses_existing_acceptance(bot_dp)
     assert shift["opening_balance"] == 600000
     assert shift["received_cash_balance"] == 600000
 
-    # Takroriy bosish — holat tozalangan, hech narsa qayta bajarilmaydi.
+    # Takroriy bosish — holat tozalangan, hech narsa qayta bajarilmaydi; faqat "Bu tugma eskirgan" javobi.
     sent = await _click_prev(main, bot, 111, "ok")
-    assert not [m for m in sent if getattr(m, "text", None)]
+    assert [m.text for m in sent if getattr(m, "text", None)] == ["Bu tugma eskirgan. Jarayonni qaytadan boshlang."]
+    assert cash_shift.get_open_shift(111, company_time.today().isoformat())["opening_balance"] == 600000
 
 
 async def test_openshift_previous_balance_diff_asks_counted_amount_and_checks_discrepancy(bot_dp):

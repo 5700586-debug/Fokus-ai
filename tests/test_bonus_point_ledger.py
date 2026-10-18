@@ -59,3 +59,21 @@ def test_get_period_point_totals_reflects_grade_and_penalty():
     assert totals["minus"] >= 20
     assert totals["net"] == totals["bonus"] - totals["minus"]
     assert "period_key" in totals
+
+
+def test_daily_evaluation_entries_net_out_instead_of_counting_as_minus():
+    discipline_repo.adjust_bonus_bank(_USER_ID, 3, "Kunlik baho", "daily_evaluation", None)
+    discipline_repo.adjust_bonus_bank(_USER_ID, -1, "Kunlik baho tuzatildi", "daily_evaluation", None)
+
+    totals = discipline_repo.get_bonus_ledger_totals_since(_USER_ID, "1970-01-01T00:00:00+00:00")
+
+    assert (totals["bonus"], totals["minus"], totals["net"]) == (2, 0, 2)
+
+
+def test_real_penalty_stays_minus_next_to_daily_evaluation():
+    discipline_repo.adjust_bonus_bank(_USER_ID, 2, "Kunlik baho", "daily_evaluation", None)
+    discipline_repo.adjust_bonus_bank(_USER_ID, -1, "Nizom", "penalty", 7)
+
+    totals = discipline_repo.get_bonus_ledger_totals_since(_USER_ID, "1970-01-01T00:00:00+00:00")
+
+    assert (totals["bonus"], totals["minus"], totals["net"]) == (2, 1, 1)

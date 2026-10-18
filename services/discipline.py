@@ -8,14 +8,19 @@ Jarima va kunlik baho FAQAT ``bonus_bank``ga ta'sir qiladi
 audit sifatida qoladi).
 """
 
+import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import company_time
+import employees
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from repositories import discipline as discipline_repo
 from repositories import rule_learning as rule_learning_repo
 from services import rules as rules_service
+
+logger = logging.getLogger(__name__)
 
 GRADE_BAJARILMAGAN = "bajarilmagan"
 GRADE_CHALA = "chala"
@@ -163,6 +168,10 @@ class EvaluationResult:
     grade_key: str
     grade_points: int
     bonus_bank_balance: int
+    eval_date: str = ""
+    changed: bool = True
+    old_grade_key: str | None = None
+    old_grade_points: int | None = None
 
 
 def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> EvaluationResult:
@@ -171,12 +180,21 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
         raise ValueError(f"noma'lum baho: {grade_key}")
 
     grade_points = grade_points_map[grade_key]
-    previous = discipline_repo.get_daily_evaluation(employee_id, eval_date)
-    discipline_repo.upsert_daily_evaluation(employee_id, supervisor_id, eval_date, grade_key, grade_points)
+    claim = discipline_repo.claim_daily_evaluation(employee_id, supervisor_id, eval_date, grade_key, grade_points)
+    previous = claim["previous"]
+    old_key = previous["grade_key"] if previous else None
+    old_points = previous["grade_points"] if previous else None
+
+    if not claim["changed"]:
+        # Xuddi shu baho takroriy bosilgan: ledger/tarix yozilmaydi.
+        return EvaluationResult(
+            grade_key, grade_points, get_salary(employee_id)["bonus_bank"], eval_date, False, old_key, old_points
+        )
+
     # Qayta baholashda eski baho yo'qolmaydi: har baho alohida tarix qatori.
     discipline_repo.add_evaluation_history(employee_id, supervisor_id, eval_date, grade_key, grade_points)
 
-    delta = grade_points - (previous["grade_points"] if previous else 0)
+    delta = grade_points - (old_points or 0)
     if delta:
         balance = discipline_repo.adjust_bonus_bank(
             employee_id, delta, f"Kunlik baho: {GRADE_LABELS[grade_key]}", "daily_evaluation", None
@@ -184,7 +202,91 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
     else:
         balance = get_salary(employee_id)["bonus_bank"]
 
-    return EvaluationResult(grade_key=grade_key, grade_points=grade_points, bonus_bank_balance=balance)
+    return EvaluationResult(grade_key, grade_points, balance, eval_date, True, old_key, old_points)
+
+
+# ------------------------------------------------- xodimga baho xabari --
+
+NOTICE_SENT = "sent"
+NOTICE_UNCHANGED = "unchanged"
+NOTICE_NOT_LINKED = "not_linked"
+NOTICE_FAILED = "failed"
+NOTICE_UNKNOWN_EMPLOYEE = "unknown_employee"
+
+_QUIET_FROM_HOUR = 22
+_QUIET_UNTIL_HOUR = 7
+
+_NOTICE_REPLIES = {
+    NOTICE_SENT: "Saqlandi",
+    NOTICE_UNCHANGED: "Bu baho allaqachon saqlangan.",
+    NOTICE_NOT_LINKED: "Xodim botga ulanmagan — baho saqlandi, xabar yuborilmadi.",
+    NOTICE_FAILED: "Baho saqlandi, lekin xodimga xabar yuborib bo'lmadi.",
+    NOTICE_UNKNOWN_EMPLOYEE: "Xodim topilmadi.",
+}
+
+
+def grade_notice_reply(outcome: str) -> str:
+    """Nazoratchiga qisqa javob matni (callback.answer)."""
+    return _NOTICE_REPLIES[outcome]
+
+
+def is_quiet_time(local_now: datetime) -> bool:
+    """22:00 <= vaqt yoki vaqt < 07:00 (kompaniya mahalliy vaqti) — xabar ovozsiz."""
+    return local_now.hour >= _QUIET_FROM_HOUR or local_now.hour < _QUIET_UNTIL_HOUR
+
+
+def format_grade_notice(result: EvaluationResult, totals: dict) -> str:
+    day = date.fromisoformat(result.eval_date).strftime("%d.%m.%Y")
+    if result.changed and result.old_grade_points is not None:
+        head = f"✏️ Tuzatildi: {result.old_grade_points} → {result.grade_points}"
+    else:
+        head = f"⭐ Baho: {result.grade_points} — {GRADE_LABELS[result.grade_key]}"
+    return (
+        f"📅 Sana: {day}\n"
+        f"{head}\n"
+        f"Shu oy bonus: {totals['bonus']}\n"
+        f"Shu oy minus: {totals['minus']}\n"
+        f"Shu oy jami: {totals['net']}"
+    )
+
+
+def employee_telegram_chat_id(employee_id: int) -> int | None:
+    """Xodimning Telegram chat_id'si. ``employees.user_id`` — PRIMARY KEY va xodim
+    profili Telegram'dan kelgan ``from_user.id`` bilan yaratiladi (onboarding, rekruting),
+    ya'ni shaxsiy chat_id shu qiymatning o'zi. Profil yo'q yoki qiymat yaroqsiz bo'lsa ``None``."""
+    profile = employees.get_profile(employee_id)
+    if profile is None:
+        return None
+    user_id = profile.get("user_id")
+    return user_id if isinstance(user_id, int) and user_id > 0 else None
+
+
+async def notify_employee_of_grade(bot, employee_id: int, result: EvaluationResult) -> str:
+    """Baho DBga yozilgandan KEYIN xodimning shaxsiy chatiga xabar yuboradi. Faqat yuborish
+    atrofidagi xato ushlanadi (baho/ledger bekor qilinmaydi); log'ga faqat operatsiya va xato turi."""
+    if not result.changed:
+        return NOTICE_UNCHANGED
+    if employees.get_profile(employee_id) is None:
+        return NOTICE_UNKNOWN_EMPLOYEE
+
+    chat_id = employee_telegram_chat_id(employee_id)
+    if chat_id is None:
+        return NOTICE_NOT_LINKED
+
+    try:
+        text = format_grade_notice(result, get_period_point_totals(employee_id))
+        await bot.send_message(chat_id, text, disable_notification=is_quiet_time(company_time.now()))
+    except TelegramForbiddenError:
+        logger.error("grade_notice: yuborib bo'lmadi (bot bloklangan/ulanmagan)")
+        return NOTICE_NOT_LINKED
+    except TelegramBadRequest as error:
+        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
+        return NOTICE_NOT_LINKED if "chat not found" in str(error).lower() else NOTICE_FAILED
+    except Exception as error:  # noqa: BLE001
+        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
+        return NOTICE_FAILED
+
+    return NOTICE_SENT
 
 
 def get_grade_history(employee_id: int, eval_date: str) -> list[dict]:

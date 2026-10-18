@@ -371,3 +371,110 @@ def test_penalize_supervisor_for_late_close_same_day_is_idempotent():
     discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40)
     assert discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40) is False
     assert discipline.get_salary(999)["bonus_bank"] == -40
+
+
+# ---------------------------------------------- kunlik baho: takror/tuzatish --
+
+from datetime import datetime  # noqa: E402
+
+_DAY = "2026-10-18"
+
+
+def _ledger_count(user_id: int) -> int:
+    return len(discipline.get_bonus_ledger(user_id, limit=100))
+
+
+def _history_count(user_id: int, day: str = _DAY) -> int:
+    return len(discipline.get_grade_history(user_id, day))
+
+
+def test_same_grade_twice_changes_nothing_the_second_time():
+    first = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    second = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+
+    assert first.changed is True and first.old_grade_points is None and first.eval_date == _DAY
+    assert second.changed is False and second.old_grade_points == 3
+    assert discipline.get_salary(111)["bonus_bank"] == 3
+    assert _ledger_count(111) == 1 and _history_count(111) == 1
+
+
+def test_correction_keeps_history_and_applies_only_the_delta():
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    result = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+
+    assert result.changed and (result.old_grade_points, result.grade_points) == (3, 2)
+    assert discipline.get_daily_grade(111, _DAY)["grade_points"] == 2
+    assert discipline.get_salary(111)["bonus_bank"] == 2
+    assert [row["grade_points"] for row in discipline.get_grade_history(111, _DAY)] == [3, 2]
+
+
+def test_zero_grade_is_saved_recorded_and_not_repeated():
+    first = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_BAJARILMAGAN)
+    again = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_BAJARILMAGAN)
+
+    assert first.changed is True and first.grade_points == 0
+    assert again.changed is False
+    assert discipline.get_daily_grade(111, _DAY)["grade_points"] == 0  # 0 "baho yo'q" emas
+    assert _history_count(111) == 1 and _ledger_count(111) == 0  # delta 0 — ledger yozuvi yo'q
+
+
+def test_correction_three_to_zero():
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    result = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_BAJARILMAGAN)
+
+    assert result.changed and (result.old_grade_points, result.grade_points) == (3, 0)
+    assert discipline.get_salary(111)["bonus_bank"] == 0
+    assert discipline.get_daily_grade(111, _DAY)["grade_points"] == 0
+
+
+def test_claim_is_won_by_exactly_one_of_two_identical_attempts():
+    first = discipline_repo.claim_daily_evaluation(111, 1, _DAY, "alo", 3)
+    second = discipline_repo.claim_daily_evaluation(111, 1, _DAY, "alo", 3)
+
+    assert (first["changed"], second["changed"]) == (True, False)
+
+
+def test_grade_correction_is_not_a_disciplinary_minus():
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    assert _totals(111) == {"bonus": 3, "minus": 0, "net": 3}
+
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+
+    assert _totals(111) == {"bonus": 2, "minus": 0, "net": 2}
+
+
+def test_real_minus_and_other_bonus_are_kept_next_to_a_correction():
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+    discipline.adjust_bonus_bank(111, -1, "nizom", "penalty", 1)  # haqiqiy intizomiy minus
+    discipline.adjust_bonus_bank(111, 4, "boshqa bonus", "other_bonus", None)
+
+    assert _totals(111) == {"bonus": 6, "minus": 1, "net": 5}
+
+
+def _totals(user_id: int) -> dict:
+    totals = discipline.get_period_point_totals(user_id)
+    return {"bonus": totals["bonus"], "minus": totals["minus"], "net": totals["net"]}
+
+
+def test_notice_text_for_new_grade_and_correction():
+    new = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    text = discipline.format_grade_notice(new, {"bonus": 3, "minus": 0, "net": 3})
+    assert text == (
+        "📅 Sana: 18.10.2026\n⭐ Baho: 3 — A'lo\nShu oy bonus: 3\nShu oy minus: 0\nShu oy jami: 3"
+    )
+
+    fixed = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+    text = discipline.format_grade_notice(fixed, {"bonus": 2, "minus": 0, "net": 2})
+    assert text == (
+        "📅 Sana: 18.10.2026\n✏️ Tuzatildi: 3 → 2\nShu oy bonus: 2\nShu oy minus: 0\nShu oy jami: 2"
+    )
+    assert "⭐ Baho" not in text
+
+
+@pytest.mark.parametrize(
+    "hour, minute, quiet",
+    [(21, 59, False), (22, 0, True), (23, 30, True), (0, 0, True), (6, 59, True), (7, 0, False), (12, 0, False)],
+)
+def test_quiet_hours_boundaries(hour, minute, quiet):
+    assert discipline.is_quiet_time(datetime(2026, 10, 18, hour, minute)) is quiet

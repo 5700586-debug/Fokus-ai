@@ -1,3 +1,5 @@
+Har yangi vazifadan oldin FOKUS_AI_XOTIRA.md va FOKUS_AI_STATE.md ni o'qi.
+
 @.claude/rules.md
 @docs/FOKUS_MEMORY.md
 @docs/IS_MODE.md

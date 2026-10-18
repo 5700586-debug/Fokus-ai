@@ -5,6 +5,8 @@ Bu fayl FOKUS AI uchun aytilgan, lekin hali to'liq bajarilmagan KELAJAK G'OYALAR
 QOIDA: g'oya bu yerga tushgach, bajarilmaguncha o'chirilmaydi. Holati o'zgartiriladi.
 
 ## Holatlar
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 - NEW — yangi g'oya, hali tahlil/reja qilinmagan
 - PLANNED — rejalashtirilgan
 - IN_PROGRESS — ustida ish ketmoqda
@@ -12,6 +14,8 @@ QOIDA: g'oya bu yerga tushgach, bajarilmaguncha o'chirilmaydi. Holati o'zgartiri
 - REJECTED — ongli ravishda rad etilgan; sabab yoziladi
 
 ## Saqlangan g'oyalar
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 
 ### [PLANNED] BONUS / MINUS BALL tizimini yakunlash
 - Ball ledger va dashboard asoslari mavjud.
@@ -44,4 +48,6 @@ QOIDA: g'oya bu yerga tushgach, bajarilmaguncha o'chirilmaydi. Holati o'zgartiri
 - Maxfiylik va qonuniy rozilik talablari amalga oshirishdan oldin tekshiriladi.
 
 ## Qo'shish qoidasi
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 Foydalanuvchi `G'oya:` yoki `G'oyani saqla:` desa, yangi bandni shu faylga qo'sh. Eski bandlarni yo'qotma.

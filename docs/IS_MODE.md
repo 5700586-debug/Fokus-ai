@@ -4,6 +4,8 @@ Bu rejim FOKUS AI bilan ishlashda doimiy ustuvor ish tartibi.
 
 ## Qat'iy qoidalar
 
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
+
 1. Eng kam token, vaqt va pul bilan ishlash.
 2. Avval real kod va eng oxirgi holatni ko'rish.
 3. Bir vaqtda faqat bitta kichik, aniq vazifa bajarish.
@@ -16,9 +18,13 @@ Bu rejim FOKUS AI bilan ishlashda doimiy ustuvor ish tartibi.
 
 ## Qisqa tamoyil
 
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
+
 Kam xarajat. Aniq vazifa. Nazoratli natija.
 
 ## Ishlash tartibi
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 
 - Foydalanuvchi `I/S` yoki `Iqtisodchi Sodiq rejimi` desa, shu fayldagi qoidalar darhol yoqiladi.
 - Avval `docs/NEXT_STEP.md`, `docs/PROJECT_STATE.md` va real Git/GitHub holati tekshiriladi.

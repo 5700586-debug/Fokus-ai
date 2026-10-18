@@ -4,6 +4,8 @@ Bu fayl yangi chat/sessiyada FOKUS AI holatini tez tiklash uchun KANONIK KIRISH 
 
 ## Yangi sessiya qoidasi
 
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
+
 Foydalanuvchi faqat:
 
 `FOKUS AI, davom et.`
@@ -26,6 +28,8 @@ Shundan keyin:
 
 ## Claude'ga ulanish — KANONIK USUL
 
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
+
 Claude bilan FOKUS AI uchun ishlash usuli doim shu:
 
 1. Vazifani `.claude/tasks/<sana>-<qisqa-nom>.md` fayliga yoz.
@@ -43,6 +47,8 @@ Muhim:
 
 ## Rejim buyrug'i
 
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
+
 ### `I/S` yoki `Iqtisodchi Sodiq rejimi`
 - `docs/IS_MODE.md`dagi qoidalarni darhol yoq;
 - eng kam token, vaqt va pul sarfla;
@@ -52,6 +58,8 @@ Muhim:
 - joriy ish tugamaguncha keyingi vazifaga o'tma.
 
 ## Saqlash buyruqlari
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 
 ### `G'oya:` yoki `G'oyani saqla:`
 Foydalanuvchi shu ibora bilan yangi fikr aytsa:
@@ -75,6 +83,8 @@ Har muhim commit/deploy/qarordan keyin:
 - yangi kelajak g'oyasi paydo bo'lsa `docs/IDEAS.md`ga qo'sh.
 
 ## Ustuvorlik
+
+> Bu bo'lim FOKUS_AI_XOTIRA.md ga ko'chirildi.
 
 1. Real Git/GitHub/Render holati
 2. `docs/IS_MODE.md`

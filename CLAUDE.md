@@ -1,15 +1,13 @@
 Har yangi vazifadan oldin FOKUS_AI_XOTIRA.md va FOKUS_AI_STATE.md ni o'qi.
 
 @.claude/rules.md
-@docs/FOKUS_MEMORY.md
-@docs/IS_MODE.md
 @FOKUS_AI_XOTIRA.md
 @FOKUS_AI_STATE.md
 
 # Ish tartibi
 
-- Yangi sessiyada avval `docs/FOKUS_MEMORY.md` qoidalariga amal qil.
-- `I/S` yoki `Iqtisodchi Sodiq rejimi` deyilsa `docs/IS_MODE.md` darhol yoqiladi va barcha keyingi ishda ustuvor bo'ladi.
+- Yangi sessiyada avval `FOKUS_AI_XOTIRA.md` qoidalariga amal qil.
+- `I/S` yoki `Iqtisodchi Sodiq rejimi` deyilsa `FOKUS_AI_XOTIRA.md` 2-bo'limi (I/S1) darhol yoqiladi va barcha keyingi ishda ustuvor bo'ladi.
 - `FOKUS AI, davom et.` deyilsa `FOKUS_AI_STATE.md` + `FOKUS_AI_XOTIRA.md` + real Git/GitHub holatidan oxirgi nuqtani tikla; boshidan boshlama va foydalanuvchidan eski ma'lumotni qayta so'rama.
 - `G'oya:` yoki `G'oyani saqla:` deyilsa g'oyani `FOKUS_AI_XOTIRA.md` ning 5-bo'limiga (💡, sana, manba) yo'qolmaydigan qilib qo'sh; kodni avtomatik boshlama.
 - `Oxirgi qadamni saqla:` deyilsa `FOKUS_AI_STATE.md`ni real checkpoint bilan yangila.

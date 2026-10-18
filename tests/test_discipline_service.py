@@ -427,11 +427,12 @@ def test_correction_three_to_zero():
     assert discipline.get_daily_grade(111, _DAY)["grade_points"] == 0
 
 
-def test_claim_is_won_by_exactly_one_of_two_identical_attempts():
-    first = discipline_repo.claim_daily_evaluation(111, 1, _DAY, "alo", 3)
-    second = discipline_repo.claim_daily_evaluation(111, 1, _DAY, "alo", 3)
+def test_save_is_won_by_exactly_one_of_two_identical_attempts():
+    first = discipline_repo.save_daily_grade(111, 1, _DAY, "alo", 3, "sinov")
+    second = discipline_repo.save_daily_grade(111, 1, _DAY, "alo", 3, "sinov")
 
     assert (first["changed"], second["changed"]) == (True, False)
+    assert first["balance"] == 3 and second["balance"] is None
 
 
 def test_grade_correction_is_not_a_disciplinary_minus():
@@ -478,3 +479,143 @@ def test_notice_text_for_new_grade_and_correction():
 )
 def test_quiet_hours_boundaries(hour, minute, quiet):
     assert discipline.is_quiet_time(datetime(2026, 10, 18, hour, minute)) is quiet
+
+
+# ----------------------------------------- bitta baholash = bitta tranzaksiya --
+
+import sqlite3  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
+from db import get_connection  # noqa: E402
+
+
+def _ddl(sql: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _break_inserts_into(table: str) -> None:
+    """Haqiqiy DB darajasida shu jadvalga INSERT paytida xato (tranzaksiya ICHIDAGI yozuv bosqichida)."""
+    _ddl(
+        f"CREATE TRIGGER break_{table} BEFORE INSERT ON {table} "
+        "BEGIN SELECT RAISE(ABORT, 'sinov: yozuv xatosi'); END"
+    )
+
+
+def _repair(table: str) -> None:
+    _ddl(f"DROP TRIGGER break_{table}")
+
+
+def _state(user_id: int = 111) -> dict:
+    conn = get_connection()
+    try:
+        evaluation = conn.execute(
+            "SELECT grade_key, grade_points FROM daily_evaluations WHERE employee_id = ? AND eval_date = ?",
+            (user_id, _DAY),
+        ).fetchone()
+        salary = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (user_id,)).fetchone()
+        history = [r["grade_points"] for r in conn.execute(
+            "SELECT grade_points FROM daily_evaluation_history WHERE employee_id = ? ORDER BY id", (user_id,)
+        ).fetchall()]
+        ledger = [r["change_amount"] for r in conn.execute(
+            "SELECT change_amount FROM bonus_bank_ledger WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()]
+    finally:
+        conn.close()
+    return {
+        "grade": (evaluation["grade_key"], evaluation["grade_points"]) if evaluation else None,
+        "balance": salary["bonus_bank"] if salary else None,
+        "history": history,
+        "ledger": ledger,
+    }
+
+
+@pytest.mark.parametrize("failing_table", ["daily_evaluation_history", "bonus_bank_ledger"])
+def test_first_grade_failure_leaves_nothing_half_written_and_retry_succeeds_once(failing_table):
+    _break_inserts_into(failing_table)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+
+    assert _state() == {"grade": None, "balance": None, "history": [], "ledger": []}  # hech biri yarim qolmagan
+
+    _repair(failing_table)
+    result = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)  # qayta bosish
+
+    assert result.changed is True and result.bonus_bank_balance == 3
+    assert _state() == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
+    assert discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO).changed is False  # endi haqiqatan takror
+
+
+def test_salary_write_failure_rolls_back_evaluation_and_history_too():
+    _ddl("CREATE TRIGGER break_salaries BEFORE INSERT ON salaries BEGIN SELECT RAISE(ABORT, 'sinov: balans xatosi'); END")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+
+    assert _state() == {"grade": None, "balance": None, "history": [], "ledger": []}
+    _ddl("DROP TRIGGER break_salaries")
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    assert _state() == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
+
+
+@pytest.mark.parametrize("failing_table", ["bonus_bank_ledger", "daily_evaluation_history"])
+def test_failed_correction_keeps_old_grade_balance_and_history_and_retry_has_no_fake_minus(failing_table):
+    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
+    before = _state()
+    _break_inserts_into(failing_table)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)  # 3 -> 2
+
+    assert _state() == before == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
+
+    _repair(failing_table)
+    result = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+
+    assert result.changed and (result.old_grade_points, result.grade_points) == (3, 2)
+    assert _state() == {"grade": ("norma", 2), "balance": 2, "history": [3, 2], "ledger": [3, -1]}
+    totals = discipline.get_period_point_totals(111)
+    assert (totals["bonus"], totals["minus"], totals["net"]) == (2, 0, 2)  # soxta intizomiy minus yo'q
+
+
+def test_parallel_identical_grades_apply_exactly_one_change(tmp_path):
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(
+            lambda _: discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO), range(6)
+        ))
+
+    assert sum(1 for r in results if r.changed) == 1
+    assert _state() == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
+
+
+def test_parallel_balance_updates_do_not_lose_each_other():
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(lambda i: discipline.adjust_bonus_bank(222, 1, f"sinov {i}", "test", None), range(12)))
+
+    assert discipline.get_salary(222)["bonus_bank"] == 12  # atomik delta: yangilanish yo'qolmagan
+    assert len(discipline.get_bonus_ledger(222, limit=100)) == 12
+
+
+def test_adjust_bonus_bank_keeps_its_contract():
+    assert discipline.adjust_bonus_bank(333, 5, "a", "test", None) == 5
+    assert discipline.adjust_bonus_bank(333, -2, "b", "test", 9) == 3
+    ledger = discipline.get_bonus_ledger(333)
+    assert sorted((row["change_amount"], row["balance_after"]) for row in ledger) == [(-2, 3), (5, 5)]
+
+
+def test_employee_model_has_no_telegram_less_employee_unit_proof():
+    """Mavjud model: ``employees.user_id`` — PRIMARY KEY va Telegram ID'ning o'zi; alohida ichki ID yoki
+    Telegram bog'lanishi ustuni yo'q. Telegram ID'siz xodimni saqlash/baholash MODELDA QO'LLANMAYDI."""
+    conn = get_connection()
+    try:
+        columns = {row["name"]: row for row in conn.execute("PRAGMA table_info(employees)").fetchall()}
+    finally:
+        conn.close()
+
+    assert columns["user_id"]["pk"] == 1
+    assert not {"telegram_id", "chat_id", "internal_id", "employee_id"} & set(columns)

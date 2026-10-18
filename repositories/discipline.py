@@ -40,6 +40,29 @@ def get_salary(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def _apply_bonus_delta(conn, user_id: int, delta: int, reason: str, ref_type: str, ref_id: int | None) -> int:
+    """Berilgan ulanishda (COMMIT QILMASDAN) bonus balansiga ATOMIK delta qo'shadi va ledgerga audit
+    yozuvi qo'shadi; yangi balansni qaytaradi. ``salaries`` qatori yo'q bo'lsa ``fixed_salary=0`` bilan
+    yaratiladi. Delta bitta ``UPSERT`` bilan qo'shiladi (o'qib-keyin-yozish emas), shuning uchun parallel
+    o'zgarishlar bir-birining yangilanishini yo'qotmaydi."""
+    now = _now()
+    conn.execute(
+        "INSERT INTO salaries (user_id, fixed_salary, bonus_bank, updated_by, updated_at) "
+        "VALUES (?, 0, ?, NULL, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET "
+        "bonus_bank = salaries.bonus_bank + excluded.bonus_bank, updated_at = excluded.updated_at",
+        (user_id, delta, now),
+    )
+    new_balance = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (user_id,)).fetchone()["bonus_bank"]
+    conn.execute(
+        "INSERT INTO bonus_bank_ledger "
+        "(user_id, change_amount, balance_after, reason, ref_type, ref_id, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, delta, new_balance, reason, ref_type, ref_id, now),
+    )
+    return new_balance
+
+
 def adjust_bonus_bank(
     user_id: int, delta: int, reason: str, ref_type: str, ref_id: int | None
 ) -> int:
@@ -47,36 +70,11 @@ def adjust_bonus_bank(
     yangi balansni yozadi va ``bonus_bank_ledger``ga audit yozuvi qo'shadi.
     Yangi balansni qaytaradi.
     """
-    now = _now()
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT bonus_bank FROM salaries WHERE user_id = ?", (user_id,)
-        ).fetchone()
-
-        if row is None:
-            conn.execute(
-                "INSERT INTO salaries (user_id, fixed_salary, bonus_bank, updated_by, updated_at) "
-                "VALUES (?, 0, 0, NULL, ?)",
-                (user_id, now),
-            )
-            current_balance = 0
-        else:
-            current_balance = row["bonus_bank"]
-
-        new_balance = current_balance + delta
-        conn.execute(
-            "UPDATE salaries SET bonus_bank = ?, updated_at = ? WHERE user_id = ?",
-            (new_balance, now, user_id),
-        )
-        conn.execute(
-            "INSERT INTO bonus_bank_ledger "
-            "(user_id, change_amount, balance_after, reason, ref_type, ref_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, delta, new_balance, reason, ref_type, ref_id, now),
-        )
+        balance = _apply_bonus_delta(conn, user_id, delta, reason, ref_type, ref_id)
         conn.commit()
-        return new_balance
+        return balance
     finally:
         conn.close()
 
@@ -256,15 +254,18 @@ def upsert_daily_evaluation(
         conn.close()
 
 
-def claim_daily_evaluation(
-    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int
+def save_daily_grade(
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int, ledger_reason: str
 ) -> dict:
-    """Bahoni ATOMIK "egallaydi": ``{"changed": bool, "previous": dict | None}``.
-    Xuddi shu baho (kalit + ball) allaqachon saqlangan bo'lsa hech narsa yozmaydi
-    (``changed=False``). Aks holda faqat holat hali o'qilgan qiymatda bo'lsagina
-    yozadi (``UPDATE ... WHERE grade_key = ? AND grade_points = ?``), shuning uchun
-    parallel (hatto boshqa worker'dagi) bir xil bosishlardan faqat BITTASI g'olib
-    bo'ladi va hisob/tarix/xabar bir marta bajariladi."""
+    """Bitta baholash — BITTA tranzaksiya: ``daily_evaluations`` + ``daily_evaluation_history`` +
+    ``salaries.bonus_bank`` + ``bonus_bank_ledger``. Hammasi muvaffaqiyatli bo'lsagina commit; istalgan
+    yozuv xato bersa hammasi bekor qilinadi (ulanish yopilganda yozilmagan o'zgarishlar tashlanadi) va
+    qayta urinish noldan to'liq ishlaydi. Qaytadi: ``{"changed", "previous", "balance"}``.
+
+    Xuddi shu baho (kalit + ball) allaqachon saqlangan bo'lsa hech narsa yozilmaydi (``changed=False``).
+    Aks holda baho faqat o'qilgan qiymatda bo'lsagina o'zgaradi (``UPDATE ... WHERE grade_key/ball``;
+    yangi qator uchun ``INSERT ... ON CONFLICT DO NOTHING``), shuning uchun parallel bir xil bosishlardan
+    faqat BITTASI g'olib bo'ladi — tarix, ball va xabar bir marta."""
     conn = get_connection()
     try:
         for _ in range(3):
@@ -275,36 +276,54 @@ def claim_daily_evaluation(
             now = _now()
 
             if row is None:
-                cursor = conn.execute(
+                previous = None
+                claimed = conn.execute(
                     "INSERT INTO daily_evaluations "
                     "(employee_id, supervisor_id, eval_date, grade_key, grade_points, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(employee_id, eval_date) DO NOTHING",
                     (employee_id, supervisor_id, eval_date, grade_key, grade_points, now, now),
                 )
-                conn.commit()
-                if cursor.rowcount > 0:
-                    return {"changed": True, "previous": None}
-                continue  # boshqa so'rov oldinroq yozdi — qayta o'qiladi
+            else:
+                previous = dict(row)
+                if previous["grade_key"] == grade_key and previous["grade_points"] == grade_points:
+                    return {"changed": False, "previous": previous, "balance": None}
+                claimed = conn.execute(
+                    "UPDATE daily_evaluations SET supervisor_id = ?, grade_key = ?, grade_points = ?, "
+                    "updated_at = ? WHERE employee_id = ? AND eval_date = ? AND grade_key = ? AND grade_points = ?",
+                    (
+                        supervisor_id, grade_key, grade_points, now, employee_id, eval_date,
+                        previous["grade_key"], previous["grade_points"],
+                    ),
+                )
 
-            previous = dict(row)
-            if previous["grade_key"] == grade_key and previous["grade_points"] == grade_points:
-                return {"changed": False, "previous": previous}
+            if claimed.rowcount <= 0:
+                continue  # boshqa so'rov oldinroq o'zgartirdi — qayta o'qiladi
 
-            cursor = conn.execute(
-                "UPDATE daily_evaluations SET supervisor_id = ?, grade_key = ?, grade_points = ?, updated_at = ? "
-                "WHERE employee_id = ? AND eval_date = ? AND grade_key = ? AND grade_points = ?",
-                (
-                    supervisor_id, grade_key, grade_points, now, employee_id, eval_date,
-                    previous["grade_key"], previous["grade_points"],
-                ),
+            conn.execute(
+                "INSERT INTO daily_evaluation_history "
+                "(employee_id, supervisor_id, eval_date, grade_key, grade_points, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (employee_id, supervisor_id, eval_date, grade_key, grade_points, now),
             )
+
+            delta = grade_points - (previous["grade_points"] if previous else 0)
+            if delta:
+                balance = _apply_bonus_delta(conn, employee_id, delta, ledger_reason, "daily_evaluation", None)
+            else:
+                salary = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (employee_id,)).fetchone()
+                balance = salary["bonus_bank"] if salary else 0
+
             conn.commit()
-            if cursor.rowcount > 0:
-                return {"changed": True, "previous": previous}
+            return {"changed": True, "previous": previous, "balance": balance}
+    except BaseException:
+        rollback = getattr(conn, "rollback", None)  # PgConnection.close() ham yozilmaganini bekor qiladi
+        if rollback is not None:
+            rollback()
+        raise
     finally:
         conn.close()
 
-    raise RuntimeError("daily_evaluations: parallel o'zgarishlar tufayli baho egallanmadi")
+    raise RuntimeError("daily_evaluations: parallel o'zgarishlar tufayli baho saqlanmadi")
 
 
 def add_evaluation_history(

@@ -180,29 +180,21 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
         raise ValueError(f"noma'lum baho: {grade_key}")
 
     grade_points = grade_points_map[grade_key]
-    claim = discipline_repo.claim_daily_evaluation(employee_id, supervisor_id, eval_date, grade_key, grade_points)
-    previous = claim["previous"]
+    # Baho + tarix + bonus balansi + ledger — repository'da BITTA tranzaksiya (xato bo'lsa hammasi bekor).
+    saved = discipline_repo.save_daily_grade(
+        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}"
+    )
+    previous = saved["previous"]
     old_key = previous["grade_key"] if previous else None
     old_points = previous["grade_points"] if previous else None
 
-    if not claim["changed"]:
-        # Xuddi shu baho takroriy bosilgan: ledger/tarix yozilmaydi.
+    if not saved["changed"]:
+        # Xuddi shu baho takroriy bosilgan: tarix/ledger yozilmagan.
         return EvaluationResult(
             grade_key, grade_points, get_salary(employee_id)["bonus_bank"], eval_date, False, old_key, old_points
         )
 
-    # Qayta baholashda eski baho yo'qolmaydi: har baho alohida tarix qatori.
-    discipline_repo.add_evaluation_history(employee_id, supervisor_id, eval_date, grade_key, grade_points)
-
-    delta = grade_points - (old_points or 0)
-    if delta:
-        balance = discipline_repo.adjust_bonus_bank(
-            employee_id, delta, f"Kunlik baho: {GRADE_LABELS[grade_key]}", "daily_evaluation", None
-        )
-    else:
-        balance = get_salary(employee_id)["bonus_bank"]
-
-    return EvaluationResult(grade_key, grade_points, balance, eval_date, True, old_key, old_points)
+    return EvaluationResult(grade_key, grade_points, saved["balance"], eval_date, True, old_key, old_points)
 
 
 # ------------------------------------------------- xodimga baho xabari --

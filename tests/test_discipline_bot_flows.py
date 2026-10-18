@@ -711,7 +711,10 @@ async def test_blocked_bot_is_reported_as_not_linked_and_grade_is_kept(bot_dp, m
 
 
 @pytest.mark.parametrize("entry", [_bos, _nzr])
-async def test_employee_without_telegram_link_gets_grade_saved_but_no_send_message(bot_dp, entry, monkeypatch):
+async def test_send_is_skipped_when_chat_id_resolves_to_none_UNIT_ONLY(bot_dp, entry, monkeypatch):
+    """FAQAT yuborishni tashlab o'tish unit testi (`employee_telegram_chat_id` mock). Bu haqiqiy
+    "Telegram ID'siz xodim" sinovi EMAS: mavjud modelda bunday xodim saqlanmaydi/baholanmaydi
+    (qarang tests/test_discipline_service.py::test_employee_model_has_no_telegram_less_employee_unit_proof)."""
     main, bot = bot_dp
     _setup()
     monkeypatch.setattr(discipline, "employee_telegram_chat_id", lambda employee_id: None)

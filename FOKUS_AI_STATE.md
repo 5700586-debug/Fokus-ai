@@ -26,13 +26,13 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 ## Bajarilgan ish
 
 - `FOKUS_AI_XOTIRA.md` qo'shildi (PR #47, merge qilingan).
-- Baho qo'yilgan zahoti xodimga shaxsiy xabar (branch `feature/grade-instant-notice`, PR ochiq, merge qilinmagan): `bos:grade` va `nzr_grade` ikkalasi `record_daily_grade` → `notify_employee_of_grade` orqali ishlaydi. Xabar: sana, baho nomi/ball, shu oy bonus/minus/jami; tuzatishda "✏️ Tuzatildi: 3 → 2"; 22:00–07:00 (kompaniya vaqti) ovozsiz. Bir xil baho takrori ledger/tarix/xabar qo'shmaydi (DBda atomik `claim_daily_evaluation`). Baho tuzatishi (`daily_evaluation`) intizomiy minus sifatida sanalmaydi. Telegram yuborish xatosi bahoni bekor qilmaydi. Targeted test (5 ta fayl): 169 passed; qo'shimcha: dashboard/yopish hisoboti/timezone/scheduler testlari 34 passed. Real E2E va deploy — bajarilmagan.
+- Baho qo'yilgan zahoti xodimga shaxsiy xabar (branch `feature/grade-instant-notice`, PR ochiq, merge qilinmagan): `bos:grade` va `nzr_grade` ikkalasi `record_daily_grade` → `notify_employee_of_grade` orqali ishlaydi. Baho, tarix, bonus balansi va ledger BITTA DB tranzaksiyasida (`repositories/discipline.py::save_daily_grade`): istalgan yozuv xato bersa hammasi bekor, qayta bosish noldan to'liq ishlaydi; xabar faqat commit'dan keyin. Balans atomik delta bilan (parallel yangilanish yo'qolmaydi). Xabar: sana, baho nomi/ball, shu oy bonus/minus/jami; tuzatishda "✏️ Tuzatildi: 3 → 2"; 22:00–07:00 (kompaniya vaqti) ovozsiz. Bir xil baho takrori ledger/tarix/xabar qo'shmaydi. Baho tuzatishi (`daily_evaluation`) intizomiy minus sifatida sanalmaydi. Telegram yuborish xatosi commit qilingan bahoni bekor qilmaydi. Targeted test (5 ta fayl): 178 passed (rollback testlari haqiqiy DB trigger xatolari bilan, SQLite); qo'shimcha dashboard/yopish hisoboti/timezone/davomat testlari 48 passed. PostgreSQL, ko'p worker, real E2E va deploy — tekshirilmagan.
 
 ## Qolgan cheklovlar (baho xabari)
 
 - Oy yig'indisi `bonus_bank_ledger.created_at` bo'yicha (yozilgan oy), `eval_date` bo'yicha emas: o'tgan oy sanasiga baho qo'yilsa xabardagi "shu oy" joriy oyni ko'rsatadi.
-- Telegram bog'lanishi: `employees.user_id` — Telegram ID (alohida bog'lanish maydoni yo'q). "Botga ulanmagan" = bot bloklangan yoki chat topilmadi; navbat/qayta yuborish yo'q.
-- Parallel bosish: bitta jarayonda va DB darajasida (optimistik `UPDATE ... WHERE grade_key/ball`) himoyalangan; ko'p worker bilan real sinov o'tkazilmagan.
+- Telegram ID'siz xodim: `employees.user_id` PRIMARY KEY va o'zi Telegram ID; alohida ichki ID yoki bog'lanish maydoni yo'q. Telegram ID'siz xodimni saqlash/baholash mavjud modelda qo'llanmaydi — alohida vazifa. Bloklangan yoki chat topilmagan Telegram foydalanuvchisida baho saqlanadi (nazoratchiga "Xodim botga ulanmagan — baho saqlandi, xabar yuborilmadi."); navbat/qayta yuborish yo'q. "Bog'lanish None" testi faqat yuborishni tashlab o'tish unit testi.
+- Parallel bosish: SQLite'da bir nechta thread/ulanish bilan sinalgan (bitta o'zgarish, bitta tarix); PostgreSQL va ko'p worker bilan real sinov o'tkazilmagan (kod PG sintaksisiga mos yozilgan, tekshirilmagan).
 
 ## Keyingi qadam
 

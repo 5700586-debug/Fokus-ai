@@ -1152,9 +1152,11 @@ def register(dp: Dispatcher, openai_client) -> None:
     # --------------------------------------------------------- ball ayirish --
 
     @dp.callback_query(F.data.startswith(_CB_PENALTY_PREFIX))
-    async def penalty_menu(callback: CallbackQuery) -> None:
+    async def penalty_menu(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
+
+        await state.update_data(cat_confirm=None, cat_gate=None, cat_gate_ok=None)
 
         user_id = int(callback.data.split(":", 1)[1])
         profile = employees.get_profile(user_id)
@@ -1243,7 +1245,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        await state.update_data(penalty_other_employee_id=user_id)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1292,7 +1294,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             numbers = [number for number in suggestion.rule_numbers if number in by_number]
             quotes = suggestion.quotes
 
-        await state.update_data(penalty_other_text=text)
+        await state.update_data(penalty_other_text=text, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
         if not numbers:
             await message.answer(
                 _no_candidates_text(name, status),
@@ -1305,7 +1307,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(
             cat_quotes={str(entry["rule_number"]): quote for entry, quote in zip(picked, shown)},
             cat_considered=", ".join(f"{_rule_label(entry)} — {entry['title']}" for entry in picked),
-            cat_confirm=None,
+            cat_confirm=None, cat_gate=None, cat_gate_ok=None,
         )
         await state.set_state(PenaltyOtherStates.confirming_match)
         await message.answer(
@@ -1320,7 +1322,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if employees.get_profile(user_id) is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
-        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1368,6 +1370,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         name = _full_name(profile, user_id)
         option_id = option["id"] if option else 0
         if _needs_gate(entry, option, _employee_section(user_id)):
+            await state.update_data(cat_gate=f"{user_id}:{entry['rule_number']}:{option_id}", cat_gate_ok=None, cat_confirm=None)
             markup = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="✅ Ha, shart bajarilgan", callback_data=f"{_CB_CAT_GATE}{user_id}:{entry['rule_number']}:{option_id}")],
@@ -1413,7 +1416,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if ids is None:
             await callback.answer()
             return
-        await state.update_data(penalty_other_employee_id=ids[0], cat_confirm=None)
+        await state.update_data(penalty_other_employee_id=ids[0], cat_confirm=None, cat_gate=None, cat_gate_ok=None)
         await _show_item(callback, state, ids[0], ids[1])
 
     @dp.callback_query(F.data.startswith(_CB_CAT_VARIANT))
@@ -1447,6 +1450,11 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Bu variant xodimga qo'llanmaydi.", show_alert=True)
             return
         data = await state.get_data()
+        token = ":".join(str(part) for part in ids)
+        if data.get("cat_gate") != token:
+            await callback.answer("Shart tasdig'i eskirgan — bandni qayta tanlang.", show_alert=True)
+            return
+        await state.update_data(cat_gate_ok=token)
         quote = (data.get("cat_quotes") or {}).get(str(ids[1])) or discipline.default_quote(entry)
         await _show_confirm(callback, state, ids[0], entry, option, quote)
 
@@ -1466,7 +1474,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             if ids is None or data.get("cat_confirm") != ":".join(str(part) for part in ids):
                 await callback.answer("Tasdiq eskirgan yoki allaqachon qo'llangan.", show_alert=True)
                 return
-            await state.update_data(cat_confirm=None)
+            await state.update_data(cat_confirm=None, cat_gate=None, cat_gate_ok=None)
             user_id, rule_number, option_id = ids
             profile = employees.get_profile(user_id)
             resolved = _resolve(rule_number, option_id)
@@ -1476,6 +1484,9 @@ def register(dp: Dispatcher, openai_client) -> None:
             entry, option = resolved
             if option is not None and not option["apply_allowed"]:
                 await callback.answer("Bu variant xodimga qo'llanmaydi.", show_alert=True)
+                return
+            if _needs_gate(entry, option, _employee_section(user_id)) and data.get("cat_gate_ok") != ":".join(str(part) for part in ids):
+                await callback.answer("Shart tasdiqlanmagan — bandni qayta tanlang.", show_alert=True)
                 return
             amount = option["points"] if option else entry["default_penalty_amount"]
             original = data.get("penalty_other_text")

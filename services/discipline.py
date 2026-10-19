@@ -391,12 +391,10 @@ def apply_penalty(
         if amount not in get_penalty_amounts() and amount != rule.get("default_penalty_amount"):
             raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
-    penalty_id = discipline_repo.create_penalty(
+    saved = discipline_repo.create_penalty_with_balance(
         employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note
     )
-    balance = discipline_repo.adjust_bonus_bank(
-        employee_id, -amount, f"Jarima: {rule_number}-nizom", "penalty", penalty_id
-    )
+    penalty_id, balance = saved["penalty_id"], saved["balance"]
 
     return {"penalty_id": penalty_id, "bonus_bank_balance": balance, "rule": rule}
 

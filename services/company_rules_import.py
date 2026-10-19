@@ -165,7 +165,8 @@ OPTION_META: dict[int, dict] = {
     185: {"skip": True},  # 181-qatordagi o'sha natijaning "NATIJA:" xulosasi — alohida variant emas
     228: {"target": "responsible", "gate": (228, 228)},
     306: {"target": "responsible", "gate": (306, 306)},
-    390: {"written_warning": True},
+    388: {"gate": (394, 394)},  # 26-nizom: bandning oxiridagi umumiy shart ("ikki tomonning gapi...") yakuniy tasdiqdan oldin ko'rsatiladi
+    390: {"written_warning": True, "gate": (394, 394)},
     425: {"gate": (425, 425)},
     452: {"target": "responsible", "condition": (451, 452), "gate": (451, 452)},
     518: {"condition": (517, 518), "gate": (517, 518)},

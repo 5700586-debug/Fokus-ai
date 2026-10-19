@@ -181,3 +181,70 @@ def discipline_options(rule_number: int) -> list[dict]:
     from repositories import discipline as repo
 
     return repo.list_penalty_options(rule_number)
+
+
+# ---------------------------------- minus + balans + ledger BITTA tranzaksiya (PgConnection) --
+
+
+def _penalty_state() -> tuple:
+    return (
+        _scalar(f"SELECT COUNT(*) FROM discipline_penalties WHERE employee_id = {EMPLOYEE}"),
+        _scalar(f"SELECT COUNT(*) FROM bonus_bank_ledger WHERE user_id = {EMPLOYEE}"),
+        _scalar(f"SELECT COALESCE(SUM(bonus_bank), 0) FROM salaries WHERE user_id = {EMPLOYEE}"),
+    )
+
+
+def _set_trigger(table: str, event: str) -> None:
+    admin = _admin()
+    try:
+        cur = admin.cursor()
+        cur.execute(
+            "CREATE OR REPLACE FUNCTION fokus_pgtest_fail() RETURNS trigger LANGUAGE plpgsql AS "
+            "$$ BEGIN RAISE EXCEPTION 'sinov: yozuv xatosi'; END $$"
+        )
+        cur.execute(f"CREATE TRIGGER fokus_break BEFORE {event} ON {table} FOR EACH ROW EXECUTE FUNCTION fokus_pgtest_fail()")
+    finally:
+        admin.close()
+
+
+def _drop_trigger(table: str) -> None:
+    admin = _admin()
+    try:
+        admin.cursor().execute(f"DROP TRIGGER IF EXISTS fokus_break ON {table}")
+    finally:
+        admin.close()
+
+
+def test_penalty_success_writes_all_three_records_on_postgres(pg):
+    discipline.add_rule(1, "Band", "Matn", created_by=FOUNDER)
+
+    result = discipline.apply_penalty(EMPLOYEE, FOUNDER, "2026-10-19", 10, 1, "izoh", None)
+
+    assert result["bonus_bank_balance"] == -10 and _penalty_state() == (1, 1, -10)
+    assert _scalar(f"SELECT ref_id FROM bonus_bank_ledger WHERE user_id = {EMPLOYEE}") == result["penalty_id"]
+
+
+@pytest.mark.parametrize(
+    ("table", "event", "preexisting_salary"),
+    [
+        ("discipline_penalties", "INSERT", False),
+        ("salaries", "INSERT", False),
+        ("salaries", "UPDATE", True),
+        ("bonus_bank_ledger", "INSERT", False),
+        ("bonus_bank_ledger", "INSERT", True),
+    ],
+)
+def test_penalty_failure_at_each_stage_rolls_back_everything_on_postgres(pg, table, event, preexisting_salary):
+    discipline.add_rule(1, "Band", "Matn", created_by=FOUNDER)
+    if preexisting_salary:
+        discipline.adjust_bonus_bank(EMPLOYEE, 50, "boshlang'ich", "test", None)
+    before = _penalty_state()
+    _set_trigger(table, event)
+    try:
+        with pytest.raises(Exception):
+            discipline.apply_penalty(EMPLOYEE, FOUNDER, "2026-10-19", 10, 1, "izoh", None)
+        assert _penalty_state() == before
+    finally:
+        _drop_trigger(table)
+
+    assert discipline.apply_penalty(EMPLOYEE, FOUNDER, "2026-10-19", 10, 1, None, None)["bonus_bank_balance"] == before[2] - 10

@@ -2213,7 +2213,10 @@
    ],
    "condition_start": 18099,
    "condition_end": 18198,
-   "gate_lines": null,
+   "gate_lines": [
+    394,
+    394
+   ],
    "target": "offender",
    "apply_allowed": true,
    "written_warning": false
@@ -2231,7 +2234,10 @@
    ],
    "condition_start": 18200,
    "condition_end": 18327,
-   "gate_lines": null,
+   "gate_lines": [
+    394,
+    394
+   ],
    "target": "offender",
    "apply_allowed": true,
    "written_warning": true

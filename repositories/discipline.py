@@ -632,6 +632,37 @@ def create_penalty(
         conn.close()
 
 
+def create_penalty_with_balance(
+    employee_id: int,
+    supervisor_id: int,
+    penalty_date: str,
+    amount: int,
+    rule_number: int,
+    comment: str | None,
+    ai_note: str | None,
+) -> dict:
+    """Minus BITTA tranzaksiyada: ``discipline_penalties`` + ``salaries.bonus_bank`` + ``bonus_bank_ledger``.
+    Uchalasi muvaffaqiyatli bo'lsagina commit; istalgan yozuv xato bersa ulanish yopilganda hammasi bekor
+    bo'ladi (qisman saqlanmaydi). Qaytadi: ``{"penalty_id", "balance"}``."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO discipline_penalties "
+            "(employee_id, supervisor_id, penalty_date, amount, rule_number, comment, "
+            "ai_note, appeal_status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'none', ?)",
+            (employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note, _now()),
+        )
+        penalty_id = cursor.lastrowid
+        balance = _apply_bonus_delta(
+            conn, employee_id, -amount, f"Jarima: {rule_number}-nizom", "penalty", penalty_id
+        )
+        conn.commit()
+        return {"penalty_id": penalty_id, "balance": balance}
+    finally:
+        conn.close()
+
+
 def list_active_penalties_for_date(employee_id: int, penalty_date: str) -> list[dict]:
     """Shu kundagi AMALDAGI minuslar: apellyatsiya qondirilgan (bekor qilingan) yozuv chiqarilgan."""
     conn = get_connection()

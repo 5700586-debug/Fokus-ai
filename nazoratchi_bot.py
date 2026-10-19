@@ -1165,7 +1165,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
         keyboard = _penalty_rule_keyboard(user_id)
         text = f"👤 {full_name}\n\n➖ Qaysi nizom bandi bo'yicha ball ayiriladi?"
-        if len(keyboard.inline_keyboard) <= 2:
+        if len(keyboard.inline_keyboard) <= 3 and not discipline.get_catalog_entries():
             text += "\n\nℹ️ Hozircha tasdiqlangan ball miqdori bilan nizom bandi yo'q — Asoschi /setnizombahosi orqali belgilashi kerak."
 
         if callback.message:

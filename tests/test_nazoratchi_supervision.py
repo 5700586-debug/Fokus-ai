@@ -415,7 +415,8 @@ async def test_penalty_other_reports_to_founder_without_deducting_bonus(bot_dp):
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700022", target_chat_id=_NAZORATCHI_ID)
-    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Nazoratchini haqorat qildi")
+    await send(main.dp, bot, _NAZORATCHI_ID, text="Nazoratchini haqorat qildi")
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_px:700022", target_chat_id=_NAZORATCHI_ID)
 
     assert discipline_service.get_salary(700022)["bonus_bank"] == 0
     founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
@@ -460,15 +461,15 @@ async def test_penalty_other_ai_match_asks_for_confirmation_first(bot_dp, monkey
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700025", target_chat_id=_NAZORATCHI_ID)
-    _mock_openai_text(monkeypatch, main, "3")
+    _mock_openai_text(monkeypatch, main, '[{"id": 3, "quote": ""}]')
     sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
 
     # AI mos topsa ham, tasdiqlanmaguncha ball ayirilmasligi kerak.
     assert discipline_service.get_salary(700025)["bonus_bank"] == 0
-    assert "mos kelishi mumkin" in sent[0].text
+    assert "qaysi biri buzilgan" in sent[0].text
     buttons = {btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
-    assert "nzr_match_yes:700025:3" in buttons
-    assert "nzr_match_no:700025" in buttons
+    assert "nzr_pc:700025:3" in buttons
+    assert "nzr_px:700025" in buttons
 
 
 async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypatch):
@@ -479,10 +480,11 @@ async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypa
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700026", target_chat_id=_NAZORATCHI_ID)
-    _mock_openai_text(monkeypatch, main, "3")
+    _mock_openai_text(monkeypatch, main, '[{"id": 3, "quote": ""}]')
     await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_pc:700026:3", target_chat_id=_NAZORATCHI_ID)
 
-    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_yes:700026:3", target_chat_id=_NAZORATCHI_ID)
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_pa:700026:3:0", target_chat_id=_NAZORATCHI_ID)
 
     assert discipline_service.get_salary(700026)["bonus_bank"] == -30
     employee_texts = [m for m in sent if getattr(m, "chat_id", None) == 700026]
@@ -498,10 +500,10 @@ async def test_penalty_other_ai_match_rejected_goes_to_founder_with_original_tex
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700027", target_chat_id=_NAZORATCHI_ID)
-    _mock_openai_text(monkeypatch, main, "3")
+    _mock_openai_text(monkeypatch, main, '[{"id": 3, "quote": ""}]')
     await send(main.dp, bot, _NAZORATCHI_ID, text="Aslida bu boshqa narsa edi")
 
-    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_no:700027", target_chat_id=_NAZORATCHI_ID)
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_px:700027", target_chat_id=_NAZORATCHI_ID)
 
     assert discipline_service.get_salary(700027)["bonus_bank"] == 0
     founder_texts = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
@@ -521,12 +523,13 @@ async def test_penalty_other_no_ai_match_falls_back_to_founder_directly(bot_dp, 
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700028", target_chat_id=_NAZORATCHI_ID)
-    _mock_openai_text(monkeypatch, main, "YOQ")
-    sent = await send(main.dp, bot, _NAZORATCHI_ID, text="Mutlaqo aloqasi yo'q holat")
+    _mock_openai_text(monkeypatch, main, "[]")
+    await send(main.dp, bot, _NAZORATCHI_ID, text="Mutlaqo aloqasi yo'q holat")
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_px:700028", target_chat_id=_NAZORATCHI_ID)
 
     assert discipline_service.get_salary(700028)["bonus_bank"] == 0
     assert any(
-        "tasdiqlangan nizom bandiga mos kelmagani" in (getattr(m, "text", None) or "")
+        "ball ayirilmadi" in (getattr(m, "text", None) or "")
         for m in sent
         if getattr(m, "chat_id", None) == _NAZORATCHI_ID
     )

@@ -67,3 +67,11 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar â€
 ## Keyingi qadam
 
 - 3-qadam: xodimning kunma-kun "Oylik baholarim" oynasi. Muhammadiy belgilaydi.
+
+## Production import tasdiq xatosi (2026-10-20, Asia/Tashkent)
+
+- Main `b6d106f` (PR #50) Render LIVE; keyin `PYTHONUNBUFFERED=1` Render sozlamasi yoqildi, xatolar endi stdout'da darhol ko'rinadi.
+- Founder import tugmasini bosganda umumiy xato ko'rindi. Render logidagi aniq sabab: TelegramBadRequest â€” query is too old / response timeout expired. Eski handler import tugagandan KEYIN callback.answer chaqirgan. Import commit qilingan bo'lishi mumkin; production katalog sonlari mustaqil tekshirilmagan, takroriy import idempotent.
+- Fix: callback avval javoblanadi; dry-run va apply asyncio.to_thread orqali event loop'dan tashqarida ishlaydi; yakuniy natija edit_text bilan beriladi. Muddat o'tgan callback javobi importning final hisobotini to'xtatmaydi; versiya/ruxsat/konflikt/idempotent tranzaksiya himoyalari saqlangan.
+- Mustaqil targeted SQLite: 55 passed (import UI, catalog va minus tranzaksiya regressiyalari; callback javobi DB ishidan oldin, DB boshqa threadda, expired callbackdan keyin ham yakuniy hisobot tekshirildi). Real Telegram xabari yoki production DB yozuvi bu testlarda yo'q.
+- Keyingi amal: deploydan keyin Founder /nizomimport ko'rigida haqiqiy 97 band / 88 variant holatini tekshiradi; konflikt bo'lsa ustidan yozilmaydi.

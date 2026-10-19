@@ -1,7 +1,10 @@
 """/listnizom sahifalari va Founder-only /nizomimport (ko'rik + qo'llash)."""
 
 import pytest
-from aiogram.methods import EditMessageText, SendMessage
+import asyncio
+import threading
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage
 
 from config import FOUNDER_ID
 from services import company_rules_import as importer
@@ -149,3 +152,40 @@ async def test_preview_with_conflict_offers_no_apply_button(bot_dp):
 
 async def test_import_is_never_run_at_startup(bot_dp):
     assert _count_rules() == 0
+
+
+@pytest.mark.parametrize("expired", [False, True])
+async def test_import_acknowledges_before_database_work_and_reports_afterwards(bot_dp, monkeypatch, expired):
+    from tests.bot_harness import RecordingBot
+
+    main, bot = bot_dp
+    events = []
+    original_call = RecordingBot.__call__
+    original_import = importer.run_import
+    loop_thread = threading.get_ident()
+
+    async def recording(self, method, request_timeout=None):
+        if isinstance(method, AnswerCallbackQuery):
+            events.append("ack")
+            if expired:
+                raise TelegramBadRequest(method=method, message="Bad Request: query is too old and response timeout expired or query ID is invalid")
+        elif isinstance(method, EditMessageText):
+            events.append("result")
+        return await original_call(self, method, request_timeout)
+
+    def importing(**kwargs):
+        assert events == ["ack"]
+        assert threading.get_ident() != loop_thread
+        with pytest.raises(RuntimeError):
+            asyncio.get_running_loop()
+        events.append("import")
+        return original_import(**kwargs)
+
+    monkeypatch.setattr(RecordingBot, "__call__", recording)
+    monkeypatch.setattr(importer, "run_import", importing)
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, data=f"rimp:{importer.import_version()}", target_chat_id=FOUNDER_ID)
+
+    assert events == ["ack", "import", "result"]
+    assert _count_rules() == 97
+    assert any(isinstance(m, EditMessageText) and "Import bajarildi" in m.text for m in sent)
+    assert not any("Kutilmagan" in (getattr(m, "text", "") or "") for m in sent)

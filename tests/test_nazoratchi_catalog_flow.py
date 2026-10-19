@@ -79,108 +79,249 @@ def _screen(sent):
     return [m for m in sent if hasattr(m, "text") and getattr(m, "chat_id", None) == NAZORATCHI][-1]
 
 
-async def test_candidates_are_at_most_three_unique_and_database_derived(bot_dp, monkeypatch):
+GATE_26 = "Har qanday shikoyatda ikki tomonning gapi eshitiladi. Minus ball dalil, kamera, guvoh yoki aniq tasdiqlangan holat asosida yoziladi."
+CONDITIONS_BUTTON = "✅ Shartlar bajarilganini tasdiqlayman va minusni qo'llayman"
+
+
+def _kb(message) -> dict:
+    return {b.callback_data: b.text for b in _buttons(message)}
+
+
+def _apply_data(screen) -> str | None:
+    return next((c for c in _kb(screen) if c.startswith("nzr_pa:")), None)
+
+
+def _option(rule_number: int, points: int) -> dict:
+    return next(o for o in discipline.get_catalog_entry(rule_number)["options"] if o["points"] == points)
+
+
+async def test_clear_band_and_variant_goes_straight_to_one_final_screen(bot_dp, monkeypatch):
     main, bot = bot_dp
     _employee(EMPLOYEE)
-    kassa = _rule("KASSA APPARATI", "kassir")
-    n26 = discipline.get_catalog_entry(26)
-    _ai(monkeypatch, main, [
-        {"id": kassa["rule_number"], "quote": "o'ylab topilgan iqtibos"},
-        {"id": kassa["rule_number"]}, {"id": 26}, {"id": 99999}, {"id": 17}, {"id": 3}, {"id": 1},
-    ])
+    calls: list = []
+    six = _option(26, 6)
+    _ai(monkeypatch, main, [{"id": 26, "variant": six["id"]}], calls)
 
-    sent = await _start(main, bot, EMPLOYEE, "kassada telefon bilan o'ynab tursa")
+    sent = await _start(main, bot, EMPLOYEE, "xaridor oldida bachkana o'ynadi")
 
-    numbers = [int(b.callback_data.split(":")[2]) for b in _buttons(sent[0]) if b.callback_data.startswith("nzr_pc:")]
-    assert len(numbers) == len(set(numbers)) <= 3
-    assert 99999 not in numbers
-    assert "o'ylab topilgan iqtibos" not in sent[0].text  # iqtibos kanonik matndan aynan topilmadi
-    assert kassa["title"] in sent[0].text
-    if 26 in numbers:
-        assert f"№{n26['display_number']}" in sent[0].text
-    assert _bank(EMPLOYEE) == 0
+    assert len(sent) == 1 and calls  # katalog bo‘laklari bo‘yicha AI chaqiruvlari; nazoratchiga faqat bitta ekran
+    screen = sent[0]
+    assert "Aniqlashtiring" not in screen.text and "Shu bandmi" not in screen.text
+    assert "−6 ball" in screen.text and "«" in screen.text and "Valiyev" in screen.text
+    assert _apply_data(screen) == f"nzr_pa:{EMPLOYEE}:26:{six['id']}"
+    assert {"📚 Boshqa band", "❌ Bekor qilish"} <= set(_kb(screen).values())
+    assert _bank(EMPLOYEE) == 0  # tasdiqdan oldin minus yo'q
+
+    await _cb(main, bot, _apply_data(screen))
+    assert _bank(EMPLOYEE) == -6
 
 
-async def test_verified_quote_from_canonical_text_is_shown(bot_dp, monkeypatch):
+async def test_single_band_without_variants_needs_no_question(bot_dp, monkeypatch):
     main, bot = bot_dp
-    _employee(EMPLOYEE)
+    _employee(EMPLOYEE, "kassir")
     entry = _rule("KASSA APPARATI", "kassir")
-    real = next(line for line in entry["content"].split("\n") if len(line.strip()) > 20).strip()
-    _ai(monkeypatch, main, [{"id": entry["rule_number"], "quote": real}])
+    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
 
     sent = await _start(main, bot, EMPLOYEE, "terminalni bilmaydi")
 
-    assert real[:60] in sent[0].text
+    assert "Aniqlashtiring" not in sent[0].text and _apply_data(sent[0])
+    assert _bank(EMPLOYEE) == 0
+    token = _apply_data(sent[0])
+    await _cb(main, bot, token)
+    await _cb(main, bot, token)  # takroriy bosish
+    assert _bank(EMPLOYEE) == -entry["default_penalty_amount"]
 
 
-async def test_employee_role_checklist_first_others_not_excluded(bot_dp, monkeypatch):
+async def test_ambiguous_variant_asks_one_short_question_then_applies_chosen_points(bot_dp, monkeypatch):
     main, bot = bot_dp
-    _employee(EMPLOYEE, "kassir")
-    omborchi = _rule("YUKNI TO'G'RI", "omborchi")
+    _employee(EMPLOYEE)
+    _ai(monkeypatch, main, [{"id": 26, "variant": None}])
+
+    sent = await _start(main, bot, EMPLOYEE, "ish joyida odobsizlik qildi")
+
+    assert "Aniqlashtiring" in sent[0].text
+    choices = [c for c in _kb(sent[0]) if c.startswith("nzr_pv:")]
+    assert len(choices) == 2 and _apply_data(sent[0]) is None  # taxminan variant tanlanmaydi
+    ten = _option(26, 10)
+    final = _screen(await _cb(main, bot, f"nzr_pv:{EMPLOYEE}:26:{ten['id']}"))
+    assert "Aniqlashtiring" not in final.text and "−10 ball" in final.text
+    assert _bank(EMPLOYEE) == 0
+    await _cb(main, bot, _apply_data(final))
+    assert _bank(EMPLOYEE) == -10
+
+
+async def test_several_bands_give_at_most_three_choices_then_single_final_screen(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
     kassa = _rule("KASSA APPARATI", "kassir")
-    calls: list = []
-    _ai(monkeypatch, main, [{"id": omborchi["rule_number"]}, {"id": kassa["rule_number"]}], calls)
+    _ai(monkeypatch, main, [{"id": 17}, {"id": 26}, {"id": kassa["rule_number"]}, {"id": 1}, {"id": 99999}])
 
-    sent = await _start(main, bot, EMPLOYEE, "yukni noto'g'ri qo'ydi")
+    sent = await _start(main, bot, EMPLOYEE, "biror holat")
 
-    pc = [int(b.callback_data.split(":")[2]) for b in _buttons(sent[0]) if b.callback_data.startswith("nzr_pc:")]
-    assert pc == [kassa["rule_number"], omborchi["rule_number"]]  # kassir bo'limi oldin, omborchi chiqarilmagan
-    assert "boshqa lavozim" in sent[0].text.lower()
-    assert str(omborchi["rule_number"]) in calls[0]["input"]  # butun katalog AI'ga ketdi
+    choices = [c for c in _kb(sent[0]) if c.startswith("nzr_pv:")]
+    assert 2 <= len(choices) <= 3 and len(choices) == len(set(choices))
+    assert "99999" not in "".join(choices) and _bank(EMPLOYEE) == 0
+    final = _screen(await _cb(main, bot, choices[0]))
+    assert _apply_data(final) and _bank(EMPLOYEE) == 0
 
 
-async def test_other_role_band_requires_gate_and_selection_changes_no_balance(bot_dp, monkeypatch):
+@pytest.mark.parametrize("points", [6, 10])
+async def test_rule_26_original_condition_is_on_the_final_screen_without_extra_gate(bot_dp, monkeypatch, points):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    option = _option(26, points)
+    _ai(monkeypatch, main, [{"id": 26, "variant": option["id"]}])
+
+    sent = await _start(main, bot, EMPLOYEE, "26-band buzildi")
+
+    screen = sent[0]
+    assert GATE_26 in screen.text  # asl manbadagi shart aynan
+    assert _kb(screen)[_apply_data(screen)] == CONDITIONS_BUTTON
+    assert not any(c.startswith("nzr_pg:") for c in _kb(screen))
+    # yakuniy ekransiz/soxta tugma bilan minus yozilmaydi
+    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{_option(26, 16 - points)['id']}")
+    assert _bank(EMPLOYEE) == 0
+    await _cb(main, bot, _apply_data(screen))
+    assert _bank(EMPLOYEE) == -points
+
+
+async def test_other_role_checklist_band_shows_responsibility_hint_on_same_screen(bot_dp, monkeypatch):
     main, bot = bot_dp
     _employee(EMPLOYEE, "kassir")
     omborchi = _rule("YUKNI TO'G'RI", "omborchi")
     _ai(monkeypatch, main, [{"id": omborchi["rule_number"]}])
-    await _start(main, bot, EMPLOYEE, "yukni noto'g'ri qo'ydi")
 
-    sent = await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{omborchi['rule_number']}")
+    sent = await _start(main, bot, EMPLOYEE, "yukni noto'g'ri qo'ydi")
 
-    gate = _screen(sent)
-    assert "Shartlarni tekshiring" in gate.text
-    assert any(b.callback_data.startswith("nzr_pg:") for b in _buttons(gate))
-    assert not any(b.callback_data.startswith("nzr_pa:") for b in _buttons(gate))
+    assert "Boshqa lavozim chek-listi" in sent[0].text
+    assert _kb(sent[0])[_apply_data(sent[0])] == CONDITIONS_BUTTON
     assert _bank(EMPLOYEE) == 0
 
 
-async def test_full_flow_applies_exactly_once_after_final_confirmation(bot_dp, monkeypatch):
+async def test_responsible_target_variant_keeps_its_condition_visible(bot_dp, monkeypatch):
     main, bot = bot_dp
     _employee(EMPLOYEE, "kassir")
-    entry = _rule("KASSA APPARATI", "kassir")
-    points = entry["default_penalty_amount"]
-    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
-    await _start(main, bot, EMPLOYEE, "terminalni bilmaydi")
+    option = next(
+        (o, e) for e in discipline.get_catalog_entries() for o in e["options"]
+        if o["target"] == "responsible" and o["apply_allowed"] and o["gate_text"]
+    )
+    opt, entry = option
+    _ai(monkeypatch, main, [{"id": entry["rule_number"], "variant": opt["id"]}])
 
-    sent = await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{entry['rule_number']}")
-    confirm = _screen(sent)
-    assert "Tasdiqlaysizmi?" in confirm.text
-    assert _bank(EMPLOYEE) == 0  # tanlash faqat tanlaydi
+    sent = await _start(main, bot, EMPLOYEE, "ta'minotchi tovar")
 
-    token = next(b.callback_data for b in _buttons(confirm) if b.callback_data.startswith("nzr_pa:"))
-    await _cb(main, bot, token)
-    assert _bank(EMPLOYEE) == -points
-    await _cb(main, bot, token)  # eskirgan/ikki marta bosilgan tugma
-    assert _bank(EMPLOYEE) == -points
+    assert opt["gate_text"] in sent[0].text and "MAS'UL" in sent[0].text
+    assert _kb(sent[0])[_apply_data(sent[0])] == CONDITIONS_BUTTON
 
 
-async def test_rule_26_has_two_variants_and_user_must_pick_one(bot_dp, monkeypatch):
+async def test_no_match_offers_rewrite_other_band_and_founder(bot_dp, monkeypatch):
     main, bot = bot_dp
     _employee(EMPLOYEE)
-    _ai(monkeypatch, main, "[]")
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
+    _ai(monkeypatch, main, [{"id": 99999}])
 
-    sent = await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:26")
+    sent = await _start(main, bot, EMPLOYEE, "mutlaqo aloqasiz")
 
-    picker = _screen(sent)
-    variants = [b for b in _buttons(picker) if b.callback_data.startswith("nzr_pv:")]
-    assert {b.text.split(":")[0].lstrip("🚫 ") for b in variants} >= {"−6", "−10"}
-    assert not any(b.callback_data.startswith("nzr_pa:") for b in _buttons(picker))
+    assert "Aniq mos band topilmadi" in sent[0].text
+    assert set(_kb(sent[0]).values()) >= {"✏️ Qayta yozish", "📚 Boshqa band", "🚫 Asoschiga yuborish"}
+    assert _apply_data(sent[0]) is None and _bank(EMPLOYEE) == 0
+
+
+async def test_amountless_band_is_never_applied(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    entry = next(e for e in discipline.get_catalog_entries() if e["amount_status"] == "none")
+    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
+
+    sent = await _start(main, bot, EMPLOYEE, "biror narsa")
+
+    assert "Ball miqdori belgilanmagan" in sent[0].text and _apply_data(sent[0]) is None
+    browse = _screen(await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{entry['rule_number']}"))
+    assert "Ball miqdori belgilanmagan" in browse.text and _apply_data(browse) is None
+    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:{entry['rule_number']}:0")
     assert _bank(EMPLOYEE) == 0
 
 
-async def test_reference_to_rule_26_finds_it_without_ai(bot_dp, monkeypatch):
+async def test_foreign_or_missing_band_and_variant_are_rejected(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _ai(monkeypatch, main, [{"id": 26, "variant": _option(17, 10)["id"]}])  # boshqa bandning varianti
+
+    sent = await _start(main, bot, EMPLOYEE, "odobsizlik")
+    assert "Aniqlashtiring" in sent[0].text and _apply_data(sent[0]) is None  # variant taxmin qilinmadi
+
+    for data in (
+        f"nzr_pv:{EMPLOYEE}:26:{_option(17, 10)['id']}",   # variant boshqa bandniki
+        f"nzr_pv:{EMPLOYEE}:99999:0",                        # band yo'q
+        f"nzr_pv:{EMPLOYEE}:26:99999",                       # variant yo'q
+        f"nzr_pa:{EMPLOYEE}:99999:0",
+    ):
+        await _cb(main, bot, data)
+    assert _bank(EMPLOYEE) == 0
+
+
+async def test_stale_buttons_new_incident_other_employee_cancel_and_variant_switch(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _employee(OTHER_ROLE_EMPLOYEE)
+    six, ten = _option(26, 6), _option(26, 10)
+    _ai(monkeypatch, main, [{"id": 26, "variant": six["id"]}])
+
+    # variant almashtirildi: eski (−6) tugma ishlamaydi
+    old_six = _apply_data((await _start(main, bot, EMPLOYEE, "hodisa 1"))[0])
+    ten_screen = _screen(await _cb(main, bot, f"nzr_pv:{EMPLOYEE}:26:{ten['id']}"))
+    await _cb(main, bot, old_six)
+    assert _bank(EMPLOYEE) == 0
+    # bekor qilindi
+    await _cb(main, bot, f"nzr_penalty:{EMPLOYEE}")
+    await _cb(main, bot, _apply_data(ten_screen))
+    assert _bank(EMPLOYEE) == 0
+    # yangi hodisa eski ekranni bekor qiladi
+    first = _apply_data((await _start(main, bot, EMPLOYEE, "hodisa 2"))[0])
+    await _start(main, bot, EMPLOYEE, "hodisa 3")
+    await _start(main, bot, OTHER_ROLE_EMPLOYEE, "hodisa 4")  # boshqa xodim
+    await _cb(main, bot, first)
+    assert _bank(EMPLOYEE) == 0 and _bank(OTHER_ROLE_EMPLOYEE) == 0
+
+
+async def test_telegram_notice_failure_keeps_the_saved_penalty(bot_dp, monkeypatch):
+    from tests.bot_harness import RecordingBot
+
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    entry = _rule("KASSA APPARATI", "kassir")
+    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
+    sent = await _start(main, bot, EMPLOYEE, "terminalni bilmaydi")
+    apply_data = _apply_data(sent[0])
+
+    original = RecordingBot.__call__
+
+    async def failing(self, method, request_timeout=None):
+        if isinstance(method, SendMessage) and method.chat_id == EMPLOYEE:
+            raise RuntimeError("Telegram yuborish xatosi")
+        return await original(self, method, request_timeout)
+
+    monkeypatch.setattr(RecordingBot, "__call__", failing)
+    await _cb(main, bot, apply_data)
+
+    assert _bank(EMPLOYEE) == -entry["default_penalty_amount"]
+
+
+async def test_employee_notice_is_neutral_and_keeps_appeal_button(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    entry = _rule("KASSA APPARATI", "kassir")
+    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
+    sent = await _start(main, bot, EMPLOYEE, "terminalni bilmaydi")
+
+    after = await _cb(main, bot, _apply_data(sent[0]))
+
+    notice = next(m for m in after if isinstance(m, SendMessage) and m.chat_id == EMPLOYEE)
+    assert f"-{entry['default_penalty_amount']} ball" in notice.text and entry["title"] in notice.text
+    assert "terminalni bilmaydi" in notice.text and "e'tiroz" in notice.text
+    assert any(c.startswith("nzr_appeal:") for c in _kb(notice))
+
+
+async def test_reference_to_rule_26_asks_only_for_the_variant(bot_dp, monkeypatch):
     main, bot = bot_dp
     _employee(EMPLOYEE)
     calls: list = []
@@ -188,51 +329,20 @@ async def test_reference_to_rule_26_finds_it_without_ai(bot_dp, monkeypatch):
 
     sent = await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
 
-    assert f"nzr_pc:{EMPLOYEE}:26" in {b.callback_data for b in _buttons(sent[0])}
-    assert calls == []
+    assert calls == [] and len([c for c in _kb(sent[0]) if c.startswith("nzr_pv:")]) == 2
+    assert _apply_data(sent[0]) is None and _bank(EMPLOYEE) == 0
 
 
-async def test_variant_then_final_confirmation_applies_chosen_points(bot_dp, monkeypatch):
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    _ai(monkeypatch, main, "[]")
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
-    picker = _screen(await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:26"))
-    six = next(b for b in _buttons(picker) if b.callback_data.startswith("nzr_pv:") and "−6" in b.text)
-
-    gate = _screen(await _cb(main, bot, six.callback_data))
-    confirm = _screen(await _cb(main, bot, next(b.callback_data for b in _buttons(gate) if b.callback_data.startswith("nzr_pg:"))))
-    assert "Ball: −6" in confirm.text
-    apply_data = next(b.callback_data for b in _buttons(confirm) if b.callback_data.startswith("nzr_pa:"))
-    await _cb(main, bot, apply_data)
-
-    assert _bank(EMPLOYEE) == -6
-
-
-async def test_amountless_band_shows_notice_and_no_apply_button(bot_dp, monkeypatch):
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    entry = next(e for e in discipline.get_catalog_entries() if e["amount_status"] == "none")
-    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
-    sent = await _start(main, bot, EMPLOYEE, "biror narsa")
-    assert "Ball miqdori belgilanmagan" in sent[0].text
-
-    screen = _screen(await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{entry['rule_number']}"))
-
-    assert "Ball miqdori belgilanmagan" in screen.text
-    assert not any(b.callback_data.startswith(("nzr_pa:", "nzr_pv:", "nzr_pg:")) for b in _buttons(screen))
-    assert _bank(EMPLOYEE) == 0
-
-
-async def test_forged_apply_without_confirmation_screen_is_rejected(bot_dp, monkeypatch):
+async def test_browse_other_band_leads_to_one_final_screen(bot_dp):
     main, bot = bot_dp
     _employee(EMPLOYEE)
     entry = _rule("KASSA APPARATI", "kassir")
-    _ai(monkeypatch, main, "[]")
 
-    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:{entry['rule_number']}:0")
+    screen = _screen(await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{entry['rule_number']}"))
 
-    assert _bank(EMPLOYEE) == 0
+    assert _apply_data(screen) and _bank(EMPLOYEE) == 0
+    await _cb(main, bot, _apply_data(screen))
+    assert _bank(EMPLOYEE) == -entry["default_penalty_amount"]
 
 
 async def test_none_of_them_goes_to_founder_with_original_text_and_no_minus(bot_dp, monkeypatch):
@@ -316,132 +426,3 @@ async def test_legacy_apply_refuses_catalog_rule(bot_dp):
     await _cb(main, bot, f"nzr_penalty_apply:{EMPLOYEE}:{entry['rule_number']}")
 
     assert _bank(EMPLOYEE) == 0
-
-
-# ------------------------------------------------ 26-band: shart tasdig'i (gate) --
-
-_GATE_26 = "Har qanday shikoyatda ikki tomonning gapi eshitiladi. Minus ball dalil, kamera, guvoh yoki aniq tasdiqlangan holat asosida yoziladi."
-
-
-def _variant(entry_buttons, points: int):
-    return next(b.callback_data for b in entry_buttons if b.callback_data.startswith("nzr_pv:") and f"−{points}" in b.text)
-
-
-async def _to_variant(main, bot, user_id: int, points: int):
-    picker = _screen(await _cb(main, bot, f"nzr_pc:{user_id}:26"))
-    return _screen(await _cb(main, bot, _variant(_buttons(picker), points)))
-
-
-def _gate_and_apply(screen):
-    callbacks = [b.callback_data for b in _buttons(screen)]
-    return (
-        next((c for c in callbacks if c.startswith("nzr_pg:")), None),
-        next((c for c in callbacks if c.startswith("nzr_pa:")), None),
-    )
-
-
-@pytest.mark.parametrize("points", [6, 10])
-async def test_rule_26_original_condition_must_be_confirmed_before_any_minus(bot_dp, monkeypatch, points):
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    _ai(monkeypatch, main, "[]")
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
-
-    gate = await _to_variant(main, bot, EMPLOYEE, points)
-
-    assert _GATE_26 in gate.text  # asl manbadagi shart aynan
-    pg, pa = _gate_and_apply(gate)
-    assert pg and pa is None
-    # shartni bosmay yakuniy tugmani soxtalashtirish ham ishlamaydi
-    option_id = pg.split(":")[3]
-    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{option_id}")
-    assert _bank(EMPLOYEE) == 0
-
-    confirm = _screen(await _cb(main, bot, pg))
-    _, pa = _gate_and_apply(confirm)
-    assert pa and _bank(EMPLOYEE) == 0
-    await _cb(main, bot, pa)
-    assert _bank(EMPLOYEE) == -points
-
-
-async def test_gate_confirmation_does_not_carry_over_to_another_variant(bot_dp, monkeypatch):
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    _ai(monkeypatch, main, "[]")
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
-    gate6 = await _to_variant(main, bot, EMPLOYEE, 6)
-    pg6, _ = _gate_and_apply(gate6)
-    await _cb(main, bot, pg6)  # −6 sharti tasdiqlandi
-
-    gate10 = await _to_variant(main, bot, EMPLOYEE, 10)  # boshqa variantga o'tildi
-    pg10, _ = _gate_and_apply(gate10)
-    option10 = pg10.split(":")[3]
-
-    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{option10}")  # eski tasdiq −10 ni ochmaydi
-    await _cb(main, bot, pg6)                                # eskirgan −6 tugmasi ham ishlamaydi
-    assert _bank(EMPLOYEE) == 0
-    confirm = _screen(await _cb(main, bot, pg10))
-    await _cb(main, bot, _gate_and_apply(confirm)[1])
-    assert _bank(EMPLOYEE) == -10
-
-
-async def test_cancel_new_incident_and_other_employee_require_new_gate(bot_dp, monkeypatch):
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    _employee(OTHER_ROLE_EMPLOYEE)
-    _ai(monkeypatch, main, "[]")
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
-
-    # 1) gate ko'rsatildi -> bekor qilindi -> eskirgan tugma
-    pg, _ = _gate_and_apply(await _to_variant(main, bot, EMPLOYEE, 6))
-    await _cb(main, bot, f"nzr_penalty:{EMPLOYEE}")
-    stale_gate = await _cb(main, bot, pg)
-    assert any(getattr(m, "show_alert", False) for m in stale_gate)
-    assert _bank(EMPLOYEE) == 0
-    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{pg.split(':')[3]}")
-    assert _bank(EMPLOYEE) == 0
-
-    # 2) tasdiq berildi, keyin yangi hodisa boshlandi -> qayta tasdiq kerak
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")
-    pg, _ = _gate_and_apply(await _to_variant(main, bot, EMPLOYEE, 6))
-    confirm = _screen(await _cb(main, bot, pg))
-    apply_data = _gate_and_apply(confirm)[1]
-    await _start(main, bot, EMPLOYEE, "26-nizomga amal qilmadi")  # yangi hodisa
-    await _cb(main, bot, apply_data)
-    await _cb(main, bot, pg)
-    await _cb(main, bot, apply_data)
-    assert _bank(EMPLOYEE) == 0
-
-    # 3) boshqa xodimga o'tilsa eski xodimning tasdig'i ishlamaydi
-    pg, _ = _gate_and_apply(await _to_variant(main, bot, EMPLOYEE, 6))
-    await _cb(main, bot, pg)
-    await _start(main, bot, OTHER_ROLE_EMPLOYEE, "26-nizomga amal qilmadi")
-    option = pg.split(":")[3]
-    await _cb(main, bot, f"nzr_pa:{OTHER_ROLE_EMPLOYEE}:26:{option}")
-    await _cb(main, bot, f"nzr_pg:{OTHER_ROLE_EMPLOYEE}:26:{option}")  # shu xodim uchun gate ko'rsatilmagan
-    await _cb(main, bot, f"nzr_pa:{OTHER_ROLE_EMPLOYEE}:26:{option}")
-    assert _bank(EMPLOYEE) == 0 and _bank(OTHER_ROLE_EMPLOYEE) == 0
-
-
-async def test_telegram_notice_failure_keeps_the_saved_penalty(bot_dp, monkeypatch):
-    from tests.bot_harness import RecordingBot
-
-    main, bot = bot_dp
-    _employee(EMPLOYEE)
-    entry = _rule("KASSA APPARATI", "kassir")
-    _ai(monkeypatch, main, [{"id": entry["rule_number"]}])
-    await _start(main, bot, EMPLOYEE, "terminalni bilmaydi")
-    confirm = _screen(await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{entry['rule_number']}"))
-    apply_data = _gate_and_apply(confirm)[1]
-
-    original = RecordingBot.__call__
-
-    async def failing(self, method, request_timeout=None):
-        if isinstance(method, SendMessage) and method.chat_id == EMPLOYEE:
-            raise RuntimeError("Telegram yuborish xatosi")
-        return await original(self, method, request_timeout)
-
-    monkeypatch.setattr(RecordingBot, "__call__", failing)
-    await _cb(main, bot, apply_data)
-
-    assert _bank(EMPLOYEE) == -entry["default_penalty_amount"]

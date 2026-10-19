@@ -466,10 +466,10 @@ async def test_penalty_other_ai_match_asks_for_confirmation_first(bot_dp, monkey
 
     # AI mos topsa ham, tasdiqlanmaguncha ball ayirilmasligi kerak.
     assert discipline_service.get_salary(700025)["bonus_bank"] == 0
-    assert "qaysi biri buzilgan" in sent[0].text
+    assert "−30 ball" in sent[0].text
     buttons = {btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
-    assert "nzr_pc:700025:3" in buttons
-    assert "nzr_px:700025" in buttons
+    assert "nzr_pa:700025:3:0" in buttons
+    assert "nzr_pm:700025" in buttons
 
 
 async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypatch):
@@ -482,7 +482,6 @@ async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypa
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_other:700026", target_chat_id=_NAZORATCHI_ID)
     _mock_openai_text(monkeypatch, main, '[{"id": 3, "quote": ""}]')
     await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
-    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_pc:700026:3", target_chat_id=_NAZORATCHI_ID)
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_pa:700026:3:0", target_chat_id=_NAZORATCHI_ID)
 

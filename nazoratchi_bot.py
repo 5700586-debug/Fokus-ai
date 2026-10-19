@@ -98,8 +98,7 @@ _CB_MATCH_CONFIRM_PREFIX = "nzr_match_yes:"
 _CB_MATCH_REJECT_PREFIX = "nzr_match_no:"
 # Nizom katalogi bo'yicha minus oqimi (band tanlash -> variant -> shart -> yakuniy tasdiq).
 _CB_CAT_ITEM = "nzr_pc:"        # nzr_pc:<xodim>:<rule_number>
-_CB_CAT_VARIANT = "nzr_pv:"     # nzr_pv:<xodim>:<rule_number>:<variant_id>
-_CB_CAT_GATE = "nzr_pg:"        # nzr_pg:<xodim>:<rule_number>:<variant_id|0>  (shart/javobgarlik tasdig'i)
+_CB_CAT_VARIANT = "nzr_pv:"     # nzr_pv:<xodim>:<rule_number>:<variant_id|0>  (tanlov -> yakuniy ekran)
 _CB_CAT_APPLY = "nzr_pa:"       # nzr_pa:<xodim>:<rule_number>:<variant_id|0>  (YAKUNIY tasdiq)
 _CB_CAT_BROWSE = "nzr_pm:"      # nzr_pm:<xodim>[:<bo'lim>:<sahifa>]
 _CB_CAT_FOUNDER = "nzr_px:"     # "Hech biri" / "Asoschiga yuborish"
@@ -892,24 +891,38 @@ def _candidate_hint(entry: dict, employee_section: str | None) -> str | None:
     return None
 
 
-def _candidates_text(name: str, incident: str, entries: list[dict], quotes: list[str], employee_section: str | None) -> str:
-    lines = [f"👤 {name}", f"📝 Izoh: «{incident[:300]}»", "", "Shu bandlardan qaysi biri buzilgan?",
-             "(AI faqat nomzod tavsiya qiladi — qoidabuzarlik isbotlangani degani emas.)"]
-    for index, (entry, quote) in enumerate(zip(entries, quotes), 1):
-        lines += ["", f"{index}) {_rule_label(entry)}", f"📌 {entry['title']}", f"💬 «{quote}»", f"➖ {discipline.entry_amount_text(entry)}"]
-        hint = _candidate_hint(entry, employee_section)
-        if hint:
-            lines.append(hint)
-        if entry["amount_status"] == "none":
-            lines.append("ℹ️ Ball miqdori belgilanmagan — avtomatik ball qo'llanmaydi.")
+def _first_line(text: str) -> str:
+    return next((line.strip() for line in text.split("\n") if line.strip()), "")
+
+
+def _choice_quote(entry: dict, option: dict | None, ai_quote: str | None = None) -> str:
+    """Iqtibos: AI taklifi faqat bandning kanonik matnidan aynan topilsa; aks holda variant sharti yoki matn boshi."""
+    verified = discipline.verified_quote(entry, ai_quote)
+    if verified:
+        return verified
+    if option is not None:
+        return discipline._cut_quote(_first_line(option["condition_text"]))
+    return discipline.default_quote(entry)
+
+
+def _choice_line(index: int, entry: dict, option: dict | None, quote: str) -> list[str]:
+    points = f"−{option['points']}" if option else f"−{entry['default_penalty_amount']}"
+    return ["", f"{index}) {_rule_label(entry)} — {entry['title']}", f"«{quote}»", f"➖ {points} ball"]
+
+
+def _choices_text(name: str, incident: str, choices: list[tuple[dict, dict | None, str]]) -> str:
+    lines = [f"👤 {name}", f"📝 «{incident[:300]}»", "", "Aniqlashtiring — qaysi biri to'g'ri?"]
+    for index, (entry, option, quote) in enumerate(choices, 1):
+        lines += _choice_line(index, entry, option, quote)
     return "\n".join(lines)
 
 
-def _candidates_keyboard(user_id: int, entries: list[dict]) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=f"{index}) {_button_label(entry)}", callback_data=f"{_CB_CAT_ITEM}{user_id}:{entry['rule_number']}")]
-        for index, entry in enumerate(entries, 1)
-    ]
+def _choices_keyboard(user_id: int, choices: list[tuple[dict, dict | None, str]]) -> InlineKeyboardMarkup:
+    rows = []
+    for index, (entry, option, _quote) in enumerate(choices, 1):
+        points = option["points"] if option else entry["default_penalty_amount"]
+        label = f"{index}) −{points} · {_button_label(entry)}"[:60]
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"{_CB_CAT_VARIANT}{user_id}:{entry['rule_number']}:{option['id'] if option else 0}")])
     rows += _catalog_footer(user_id)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -917,70 +930,66 @@ def _candidates_keyboard(user_id: int, entries: list[dict]) -> InlineKeyboardMar
 def _catalog_footer(user_id: int, *, founder: bool = True) -> list[list[InlineKeyboardButton]]:
     rows = [[InlineKeyboardButton(text="📚 Boshqa band", callback_data=f"{_CB_CAT_BROWSE}{user_id}")]]
     if founder:
-        rows.append([InlineKeyboardButton(text="🚫 Hech biri — Asoschiga yuborish", callback_data=f"{_CB_CAT_FOUNDER}{user_id}")])
+        rows.append([InlineKeyboardButton(text="🚫 Asoschiga yuborish", callback_data=f"{_CB_CAT_FOUNDER}{user_id}")])
     rows.append([InlineKeyboardButton(text="✏️ Qayta yozish", callback_data=f"{_CB_CAT_REWRITE}{user_id}")])
     return rows
 
 
-def _no_candidates_text(name: str, status: str) -> str:
+def _no_candidates_text(name: str, status: str, amountless: str | None = None) -> str:
+    if amountless:
+        return f"👤 {name}\n\n📚 {amountless}\nBall miqdori belgilanmagan — bu bandga minus yozilmaydi."
     reason = {
         discipline_ai.STATUS_AI_ERROR: "AI hozir ishlamadi.",
         discipline_ai.STATUS_EMPTY_CATALOG: "Nizom katalogi hali bo'sh.",
-    }.get(status, "Mos band topilmadi.")
-    return f"👤 {name}\n\n{reason}\nAniqroq yozing: nima bo'ldi va kim nima qildi?"
+    }.get(status, "")
+    return f"👤 {name}\n\nAniq mos band topilmadi." + (f" {reason}" if reason else "")
 
 
 def _options_text(name: str, entry: dict, quote: str) -> str:
-    lines = [f"👤 {name}", f"📚 {_rule_label(entry)}", f"📌 {entry['title']}", f"💬 «{quote}»", "", "Qaysi holat/variant buzilgan?"]
-    return "\n".join(lines)
+    return f"👤 {name}\n📚 {_rule_label(entry)} — {entry['title']}\n«{quote}»\n\nQaysi variant?"
 
 
 def _option_button_text(option: dict) -> str:
-    first = next((line for line in option["condition_text"].split("\n") if line.strip()), "")
     marker = "" if option["apply_allowed"] else "🚫 "
-    return f"{marker}−{option['points']}: {first}"[:60]
+    return f"{marker}−{option['points']}: {_first_line(option['condition_text'])}"[:60]
 
 
-def _confirm_text(name: str, entry: dict, option: dict | None, points: int, quote: str) -> str:
-    lines = [
-        "🧾 Yakuniy tasdiq", f"👤 {name}", f"📚 {_rule_label(entry)}", f"📌 {entry['title']}", f"💬 «{quote}»",
-        f"➖ Ball: −{points}" + (" va yozma ogohlantirish" if option and option["written_warning"] else ""),
-    ]
-    if option:
-        lines.append(f"Shart (manbadan): «{option['condition_text']}»")
-    lines += ["", "Tasdiqlaysizmi?"]
-    return "\n".join(lines)
-
-
-def _confirm_keyboard(user_id: int, rule_number: int, option_id: int, points: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=f"✅ Tasdiqlayman (−{points} ball)", callback_data=f"{_CB_CAT_APPLY}{user_id}:{rule_number}:{option_id}")],
-            [
-                InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_CAT_ITEM}{user_id}:{rule_number}"),
-                InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}"),
-            ],
-        ]
-    )
-
-
-def _needs_gate(entry: dict, option: dict | None, employee_section: str | None) -> bool:
+def _needs_conditions(entry: dict, option: dict | None, employee_section: str | None) -> bool:
     if option is not None and (option["gate_text"] or option["target"] != "offender"):
         return True
     return entry.get("catalog_kind") == "checklist" and entry["section"] != employee_section
 
 
-def _gate_text(name: str, entry: dict, option: dict | None, employee_section: str | None) -> str:
-    lines = ["⚠️ Shartlarni tekshiring", f"👤 {name}", f"📚 {_rule_label(entry)}", f"📌 {entry['title']}"]
+_CONFIRM_PLAIN = "✅ Tasdiqlash"
+_CONFIRM_CONDITIONS = "✅ Shartlar bajarilganini tasdiqlayman va minusni qo'llayman"
+
+
+def _confirm_text(name: str, entry: dict, option: dict | None, points: int, quote: str, employee_section: str | None) -> str:
+    lines = [
+        f"👤 {name}", f"📚 {_rule_label(entry)} — {entry['title']}", f"«{quote}»",
+        f"➖ −{points} ball" + (" va yozma ogohlantirish" if option and option["written_warning"] else ""),
+    ]
     if option is not None and option["gate_text"]:
-        lines.append(f"Shart (manbadan): «{option['gate_text']}»")
+        lines.append(f"📋 Shart: «{option['gate_text']}»")
     if option is not None and option["target"] in _TARGET_LABELS:
         lines.append(f"👥 {_TARGET_LABELS[option['target']]}")
     hint = _candidate_hint(entry, employee_section)
     if hint:
         lines.append(hint)
-    lines += ["", "Shart bajarilganmi va javobgar aynan shu xodimmi?"]
     return "\n".join(lines)
+
+
+def _confirm_keyboard(user_id: int, rule_number: int, option_id: int, with_conditions: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text=_CONFIRM_CONDITIONS if with_conditions else _CONFIRM_PLAIN,
+                callback_data=f"{_CB_CAT_APPLY}{user_id}:{rule_number}:{option_id}",
+            )],
+            [InlineKeyboardButton(text="📚 Boshqa band", callback_data=f"{_CB_CAT_BROWSE}{user_id}")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")],
+        ]
+    )
 
 
 def register(dp: Dispatcher, openai_client) -> None:
@@ -1156,7 +1165,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        await state.update_data(cat_confirm=None, cat_gate=None, cat_gate_ok=None)
+        await state.update_data(cat_confirm=None)
 
         user_id = int(callback.data.split(":", 1)[1])
         profile = employees.get_profile(user_id)
@@ -1245,7 +1254,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1259,6 +1268,17 @@ def register(dp: Dispatcher, openai_client) -> None:
         if callback.message:
             await callback.message.edit_text(text[:4000], reply_markup=markup)
 
+    def _expand(entry: dict, variant_id: int | None) -> list[tuple[dict, dict | None]]:
+        """Band -> qo'llanadigan (band, variant) tanlovlari. Variant AI tomonidan aniq va shu bandga tegishli bo'lsagina
+        bitta; aks holda barcha qo'llanadigan variantlar (taxmin qilinmaydi). Miqdorsiz band — tanlov emas."""
+        if entry["amount_status"] == "none":
+            return []
+        if entry["amount_status"] == "default":
+            return [(entry, None)]
+        allowed = [option for option in entry["options"] if option["apply_allowed"]]
+        chosen = [option for option in allowed if option["id"] == variant_id]
+        return [(entry, option) for option in (chosen or allowed)]
+
     @dp.message(StateFilter(PenaltyOtherStates.waiting_reason))
     async def penalty_other_reason(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
@@ -1270,20 +1290,19 @@ def register(dp: Dispatcher, openai_client) -> None:
             await message.answer("❌ Bekor qilindi.")
             return
 
-        # AI faqat nomzod tavsiya qiladi (butun katalogdan, eng ko'pi 3 ta); ball bandning o'zidan olinadi va
-        # nazoratchi variant + yakuniy tasdiqni o'zi beradi. Matn ma'lumot sifatida uzatiladi, ko'rsatma emas.
+        # Nazoratchi holatni xodim bilan aniqlab bo'lgan: AI faqat band/variant id'sini katalogdan taklif qiladi,
+        # ball va shart bazadan olinadi. Savol faqat band yoki variantni ajratib bo'lmaganda beriladi.
         profile = employees.get_profile(user_id)
         name = _full_name(profile, user_id)
         section = _employee_section(user_id)
         entries = discipline.get_catalog_entries()
         by_number = {entry["rule_number"]: entry for entry in entries}
 
-        numbers: list[int] = []
-        quotes: dict[int, str | None] = {}
+        picks: list[tuple[int, int | None, str | None]] = []
         status = discipline_ai.STATUS_NO_MATCH
         reference = discipline.parse_rule_reference(text)
         if reference is not None and reference in by_number:
-            numbers, status = [reference], discipline_ai.STATUS_OK
+            picks, status = [(reference, None, None)], discipline_ai.STATUS_OK
         else:
             try:
                 suggestion = await discipline_ai.suggest_catalog_candidates(openai_client, text, entries, section)
@@ -1291,28 +1310,38 @@ def register(dp: Dispatcher, openai_client) -> None:
                 print(f"Katalog nomzodlarini olishda xatolik: {error!r}")
                 suggestion = discipline_ai.CandidateSuggestion(discipline_ai.STATUS_AI_ERROR)
             status = suggestion.status
-            numbers = [number for number in suggestion.rule_numbers if number in by_number]
-            quotes = suggestion.quotes
+            picks = [
+                (number, suggestion.variants.get(number), suggestion.quotes.get(number))
+                for number in suggestion.rule_numbers if number in by_number
+            ]
 
-        await state.update_data(penalty_other_text=text, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
-        if not numbers:
+        choices: list[tuple[dict, dict | None, str]] = []
+        amountless: list[dict] = []
+        for number, variant_id, ai_quote in picks:
+            entry = by_number[number]
+            expanded = _expand(entry, variant_id)
+            if not expanded and entry["amount_status"] == "none":
+                amountless.append(entry)
+            choices += [(entry, option, _choice_quote(entry, option, ai_quote)) for entry, option in expanded]
+
+        await state.update_data(
+            penalty_other_text=text, cat_confirm=None,
+            cat_considered=", ".join(f"{_rule_label(entry)} — {entry['title']}" for entry in (by_number[n] for n, _, _ in picks)),
+        )
+        if not choices:
             await message.answer(
-                _no_candidates_text(name, status),
+                _no_candidates_text(name, status, f"{_rule_label(amountless[0])} — {amountless[0]['title']}" if amountless else None),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=_catalog_footer(user_id)),
             )
             return
 
-        picked = [by_number[number] for number in numbers]
-        shown = [discipline.verified_quote(entry, quotes.get(entry["rule_number"])) or discipline.default_quote(entry) for entry in picked]
-        await state.update_data(
-            cat_quotes={str(entry["rule_number"]): quote for entry, quote in zip(picked, shown)},
-            cat_considered=", ".join(f"{_rule_label(entry)} — {entry['title']}" for entry in picked),
-            cat_confirm=None, cat_gate=None, cat_gate_ok=None,
-        )
         await state.set_state(PenaltyOtherStates.confirming_match)
-        await message.answer(
-            _candidates_text(name, text, picked, shown, section), reply_markup=_candidates_keyboard(user_id, picked)
-        )
+        if len(choices) == 1:
+            entry, option, quote = choices[0]
+            await _present_confirm(message, state, user_id, entry, option, quote)
+            return
+        choices = choices[:discipline_ai.MAX_CANDIDATES]
+        await message.answer(_choices_text(name, text, choices), reply_markup=_choices_keyboard(user_id, choices))
 
     @dp.callback_query(F.data.startswith(_CB_CAT_REWRITE))
     async def cat_rewrite(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1322,7 +1351,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if employees.get_profile(user_id) is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
-        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_gate=None, cat_gate_ok=None)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1335,66 +1364,45 @@ def register(dp: Dispatcher, openai_client) -> None:
             return None
         return parts if len(parts) == count else None
 
+    async def _present_confirm(target, state: FSMContext, user_id: int, entry: dict, option: dict | None, quote: str) -> None:
+        """BITTA yakuniy ekran. Tasdiq tokeni shu xodim+band+variantga bog'lanadi; yangi hodisa/almashtirish/bekor
+        qilish uni o'chiradi. ``target`` — Message (yangi ekran) yoki CallbackQuery (tahrir)."""
+        points = option["points"] if option else entry["default_penalty_amount"]
+        option_id = option["id"] if option else 0
+        section = _employee_section(user_id)
+        await state.update_data(cat_confirm=f"{user_id}:{entry['rule_number']}:{option_id}")
+        name = _full_name(employees.get_profile(user_id), user_id)
+        text = _confirm_text(name, entry, option, points, quote, section)
+        markup = _confirm_keyboard(user_id, entry["rule_number"], option_id, _needs_conditions(entry, option, section))
+        if isinstance(target, CallbackQuery):
+            await _edit(target, text, markup)
+            await target.answer()
+        else:
+            await target.answer(text[:4000], reply_markup=markup)
+
     async def _show_item(callback: CallbackQuery, state: FSMContext, user_id: int, rule_number: int) -> None:
+        """"Boshqa band" yo'li: band tanlandi. Miqdorsiz — izoh; bir nechta variant — variant tanlash; aks holda yakuniy ekran."""
         profile = employees.get_profile(user_id)
         entry = discipline.get_catalog_entry(rule_number)
         if profile is None or entry is None:
             await callback.answer("Xodim yoki band topilmadi (eskirgan tugma).", show_alert=True)
             return
-        data = await state.get_data()
-        quote = (data.get("cat_quotes") or {}).get(str(rule_number)) or discipline.default_quote(entry)
         name = _full_name(profile, user_id)
-        section = _employee_section(user_id)
-        options = entry["options"]
+        expanded = _expand(entry, None)
         if entry["amount_status"] == "none":
-            text = _options_text(name, entry, quote).split("\n\nQaysi")[0] + "\n\nℹ️ Ball miqdori belgilanmagan — avtomatik ball qo'llanmaydi."
-            hint = _candidate_hint(entry, section)
-            if hint:
-                text += "\n" + hint
+            text = f"👤 {name}\n📚 {_rule_label(entry)} — {entry['title']}\n\nBall miqdori belgilanmagan — bu bandga minus yozilmaydi."
             await _edit(callback, text, InlineKeyboardMarkup(inline_keyboard=_catalog_footer(user_id)))
-        elif len(options) > 1 or (options and not options[0]["apply_allowed"]):
+        elif len(expanded) > 1 or (entry["options"] and not expanded):
             rows = [
                 [InlineKeyboardButton(text=_option_button_text(option), callback_data=f"{_CB_CAT_VARIANT}{user_id}:{rule_number}:{option['id']}")]
-                for option in options
+                for option in entry["options"]
             ]
             rows += _catalog_footer(user_id)
-            await _edit(callback, _options_text(name, entry, quote), InlineKeyboardMarkup(inline_keyboard=rows))
+            await _edit(callback, _options_text(name, entry, discipline.default_quote(entry)), InlineKeyboardMarkup(inline_keyboard=rows))
         else:
-            option = options[0] if options else None
-            await _go_next(callback, state, user_id, entry, option, quote)
+            chosen_entry, option = expanded[0]
+            await _present_confirm(callback, state, user_id, chosen_entry, option, _choice_quote(chosen_entry, option))
             return
-        await callback.answer()
-
-    async def _go_next(callback: CallbackQuery, state: FSMContext, user_id: int, entry: dict, option: dict | None, quote: str) -> None:
-        profile = employees.get_profile(user_id)
-        name = _full_name(profile, user_id)
-        option_id = option["id"] if option else 0
-        if _needs_gate(entry, option, _employee_section(user_id)):
-            await state.update_data(cat_gate=f"{user_id}:{entry['rule_number']}:{option_id}", cat_gate_ok=None, cat_confirm=None)
-            markup = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Ha, shart bajarilgan", callback_data=f"{_CB_CAT_GATE}{user_id}:{entry['rule_number']}:{option_id}")],
-                    [
-                        InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_CAT_ITEM}{user_id}:{entry['rule_number']}"),
-                        InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}"),
-                    ],
-                ]
-            )
-            await _edit(callback, _gate_text(name, entry, option, _employee_section(user_id)), markup)
-        else:
-            await _show_confirm(callback, state, user_id, entry, option, quote)
-            return
-        await callback.answer()
-
-    async def _show_confirm(callback: CallbackQuery, state: FSMContext, user_id: int, entry: dict, option: dict | None, quote: str) -> None:
-        points = option["points"] if option else entry["default_penalty_amount"]
-        option_id = option["id"] if option else 0
-        await state.update_data(cat_confirm=f"{user_id}:{entry['rule_number']}:{option_id}")
-        name = _full_name(employees.get_profile(user_id), user_id)
-        await _edit(
-            callback, _confirm_text(name, entry, option, points, quote),
-            _confirm_keyboard(user_id, entry["rule_number"], option_id, points),
-        )
         await callback.answer()
 
     def _resolve(rule_number: int, option_id: int) -> tuple[dict, dict | None] | None:
@@ -1416,7 +1424,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if ids is None:
             await callback.answer()
             return
-        await state.update_data(penalty_other_employee_id=ids[0], cat_confirm=None, cat_gate=None, cat_gate_ok=None)
+        await state.update_data(penalty_other_employee_id=ids[0], cat_confirm=None)
         await _show_item(callback, state, ids[0], ids[1])
 
     @dp.callback_query(F.data.startswith(_CB_CAT_VARIANT))
@@ -1432,31 +1440,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         if option is not None and not option["apply_allowed"]:
             await callback.answer("Bu variant xodimga qo'llanmaydi (boshqa shaxsga tegishli).", show_alert=True)
             return
-        data = await state.get_data()
-        quote = (data.get("cat_quotes") or {}).get(str(ids[1])) or discipline.default_quote(entry)
-        await _go_next(callback, state, ids[0], entry, option, quote)
-
-    @dp.callback_query(F.data.startswith(_CB_CAT_GATE))
-    async def cat_gate(callback: CallbackQuery, state: FSMContext) -> None:
-        if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
-            return
-        ids = _parse_ids(callback, _CB_CAT_GATE, 3)
-        resolved = _resolve(ids[1], ids[2]) if ids else None
-        if resolved is None or employees.get_profile(ids[0]) is None:
-            await callback.answer("Band yoki variant topilmadi (eskirgan tugma).", show_alert=True)
-            return
-        entry, option = resolved
-        if option is not None and not option["apply_allowed"]:
-            await callback.answer("Bu variant xodimga qo'llanmaydi.", show_alert=True)
-            return
-        data = await state.get_data()
-        token = ":".join(str(part) for part in ids)
-        if data.get("cat_gate") != token:
-            await callback.answer("Shart tasdig'i eskirgan — bandni qayta tanlang.", show_alert=True)
-            return
-        await state.update_data(cat_gate_ok=token)
-        quote = (data.get("cat_quotes") or {}).get(str(ids[1])) or discipline.default_quote(entry)
-        await _show_confirm(callback, state, ids[0], entry, option, quote)
+        await state.update_data(penalty_other_employee_id=ids[0])
+        await _present_confirm(callback, state, ids[0], entry, option, _choice_quote(entry, option))
 
     @dp.callback_query(F.data.startswith(_CB_CAT_APPLY))
     async def cat_apply(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1474,7 +1459,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             if ids is None or data.get("cat_confirm") != ":".join(str(part) for part in ids):
                 await callback.answer("Tasdiq eskirgan yoki allaqachon qo'llangan.", show_alert=True)
                 return
-            await state.update_data(cat_confirm=None, cat_gate=None, cat_gate_ok=None)
+            await state.update_data(cat_confirm=None)
             user_id, rule_number, option_id = ids
             profile = employees.get_profile(user_id)
             resolved = _resolve(rule_number, option_id)
@@ -1484,9 +1469,6 @@ def register(dp: Dispatcher, openai_client) -> None:
             entry, option = resolved
             if option is not None and not option["apply_allowed"]:
                 await callback.answer("Bu variant xodimga qo'llanmaydi.", show_alert=True)
-                return
-            if _needs_gate(entry, option, _employee_section(user_id)) and data.get("cat_gate_ok") != ":".join(str(part) for part in ids):
-                await callback.answer("Shart tasdiqlanmagan — bandni qayta tanlang.", show_alert=True)
                 return
             amount = option["points"] if option else entry["default_penalty_amount"]
             original = data.get("penalty_other_text")
@@ -1513,7 +1495,9 @@ def register(dp: Dispatcher, openai_client) -> None:
             try:
                 await callback.bot.send_message(
                     user_id,
-                    f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {entry['title']}\nSabab: {discipline.default_quote(entry)}",
+                    f"⚠️ Sizga -{amount} ball yozildi.\n📚 Band: {_rule_label(entry)} — {entry['title']}\n"
+                    f"📝 Holat (nazoratchi yozuvi): {(original or '-')[:300]}\n«{_choice_quote(entry, option)}»\n"
+                    "Agar rozi bo'lmasangiz, quyidagi tugma orqali e'tiroz bildirishingiz mumkin.",
                     reply_markup=_employee_notice_keyboard(result["penalty_id"]),
                 )
             except Exception as error:  # noqa: BLE001

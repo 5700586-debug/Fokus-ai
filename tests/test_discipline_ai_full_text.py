@@ -86,3 +86,30 @@ async def test_invalid_duplicate_and_excess_ids_are_rejected_by_the_server():
     result = await discipline_ai.suggest_catalog_candidates(client, "hodisa", entries)
 
     assert result.rule_numbers == [2, 3, 4]
+
+
+def _with_options(number: int, option_ids: list[int]) -> dict:
+    options = [
+        {"id": oid, "points": 6 + index, "condition_text": f"shart {oid}", "gate_text": None, "target": "offender", "apply_allowed": True}
+        for index, oid in enumerate(option_ids)
+    ]
+    return _entry(number, f"matn {number}", options)
+
+
+async def test_variant_ids_are_shown_to_ai_and_only_own_variants_are_accepted():
+    entries = [_with_options(1, [11, 12]), _with_options(2, [21, 22])]
+    client = _Client([{"id": 1, "variant": 12}, {"id": 2, "variant": 11}])  # 2-bandga begona variant
+
+    result = await discipline_ai.suggest_catalog_candidates(client, "hodisa", entries)
+
+    assert "Variant #12 −7: shart 12" in client.calls[0]
+    assert result.variants == {1: 12, 2: None}
+
+
+async def test_same_band_with_different_variants_or_missing_variant_stays_undecided():
+    entries = [_with_options(1, [11, 12])]
+    client = _Client([{"id": 1, "variant": 11}, {"id": 1, "variant": 12}])
+
+    result = await discipline_ai.suggest_catalog_candidates(client, "hodisa", entries)
+
+    assert result.rule_numbers == [1] and result.variants == {1: None}

@@ -538,7 +538,7 @@ def get_catalog_entries(*, candidates_only: bool = True) -> list[dict]:
     entries = []
     for rule in rules:
         legacy = rule.get("catalog_kind") is None
-        if legacy and rule.get("default_penalty_amount") is None:
+        if candidates_only and legacy and rule.get("default_penalty_amount") is None:
             continue  # eski, miqdori tasdiqlanmagan band — minus katalogida emas (avvalgi xulq)
         entry = dict(rule)
         entry["section"] = _section_of(rule)

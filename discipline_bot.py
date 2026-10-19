@@ -27,6 +27,7 @@ import employees
 from config import COMPANY_TIMEZONE, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import is_authorized, list_users
 from services import chat_cleanup, discipline, discipline_ai, nazoratchi_close_report as close_report, nazoratchi_day, permissions, rule_learning
+from services import company_rules_import as discipline_import
 from services import rules as rules_service
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,9 @@ _MANAGEMENT_ROLES = {"founder", "nazoratchi"}
 # Bitta nazoratchi bir vaqtning o'zida faqat bitta jarima
 # yozuvini qayta ishlashi mumkin.
 _PENDING_PENALTY_APPLICATIONS: set[int] = set()
+_PENDING_CATALOG_IMPORTS: set[int] = set()
+_LISTNIZOM_SINGLE_LIMIT = 3800
+_LISTNIZOM_PAGE_SIZE = 8
 
 
 def _resolve_timezone():
@@ -539,6 +543,13 @@ def register(dp: Dispatcher, openai_client) -> None:
                 return
 
             rule = discipline.get_rule(rule_number)
+            if rule is not None and rule.get("catalog_kind") is not None:
+                await message.answer(
+                    "ℹ️ Bu band nizom katalogidan — ball variantlari bor. Nazoratchi kartasidan "
+                    "\"Ball ayirish\" orqali variantni tanlab tasdiqlang."
+                )
+                await state.clear()
+                return
             if rule is None:
                 await message.answer(
                     f"❌ {rule_number}-nizom bazada topilmadi. Boshqa raqam kiriting yoki "
@@ -743,7 +754,140 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         lines = [f"{rule['rule_number']}. {rule['title']} — {rule['content']}" for rule in rules]
-        await message.answer("📖 Korxona nizomlari:\n\n" + "\n".join(lines))
+        text = "📖 Korxona nizomlari:\n\n" + "\n".join(lines)
+        if all(rule.get("catalog_kind") is None for rule in rules) and len(text) <= _LISTNIZOM_SINGLE_LIMIT:
+            await message.answer(text)
+            return
+        screen_text, screen_markup = _catalog_sources_screen()
+        await message.answer(screen_text, reply_markup=screen_markup)
+
+    def _item_label(entry: dict) -> str:
+        title = entry["title"]
+        if entry.get("catalog_kind") == "culture":
+            title = next((line for line in entry["content"].split("\n") if line.strip()), title)
+        prefix = f"№{entry['display_number']} " if entry.get("display_number") else ""
+        return (prefix + title)[:56]
+
+    def _catalog_sources_screen() -> tuple[str, InlineKeyboardMarkup]:
+        entries = discipline.get_catalog_entries(candidates_only=False)
+        rows = [
+            [InlineKeyboardButton(text=f"{source['name']} ({source['count']})"[:60], callback_data=f"nzl:l:{source['section']}:0")]
+            for source in discipline.list_catalog_sources(entries)
+        ]
+        return "📖 Korxona nizomlari — manbani tanlang:", InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data.startswith("nzl:"))
+    async def catalog_reading_handler(callback: CallbackQuery) -> None:
+        if not callback.from_user or not is_authorized(callback.from_user.id) or callback.message is None:
+            await callback.answer()
+            return
+        parts = callback.data.split(":")
+        entries = discipline.get_catalog_entries(candidates_only=False)
+        try:
+            if parts[1] == "s":
+                text, markup = _catalog_sources_screen()
+            elif parts[1] == "l":
+                section, page = parts[2], max(0, int(parts[3]))
+                items = discipline.entries_in_section(section, entries)
+                pages = max(1, -(-len(items) // _LISTNIZOM_PAGE_SIZE))
+                page = min(page, pages - 1)
+                chunk = items[page * _LISTNIZOM_PAGE_SIZE:(page + 1) * _LISTNIZOM_PAGE_SIZE]
+                rows = [[InlineKeyboardButton(text=_item_label(entry), callback_data=f"nzl:i:{entry['rule_number']}:0")] for entry in chunk]
+                nav = []
+                if page > 0:
+                    nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"nzl:l:{section}:{page - 1}"))
+                if page < pages - 1:
+                    nav.append(InlineKeyboardButton(text="➡️", callback_data=f"nzl:l:{section}:{page + 1}"))
+                if nav:
+                    rows.append(nav)
+                rows.append([InlineKeyboardButton(text="📚 Manbalar", callback_data="nzl:s")])
+                text = f"📖 {items[0]['source_name'] if items else section} — {page + 1}/{pages}"
+                markup = InlineKeyboardMarkup(inline_keyboard=rows)
+            elif parts[1] == "i":
+                entry = next((item for item in entries if item["rule_number"] == int(parts[2])), None)
+                if entry is None:
+                    await callback.answer("Band topilmadi.", show_alert=True)
+                    return
+                body = [entry["title"]]
+                if entry.get("display_number"):
+                    body.append(f"Rasmiy raqam: {entry['display_number']}")
+                body += ["", entry["content"]]
+                if entry["options"]:
+                    body += ["", "Ball variantlari (manbadan):"] + [f"−{option['points']}: {option['condition_text']}" for option in entry["options"]]
+                elif entry["amount_status"] == "default":
+                    body += ["", discipline.entry_amount_text(entry)]
+                pages = discipline.split_text_pages("\n".join(body))
+                page = min(max(0, int(parts[3])), len(pages) - 1)
+                section = entry["section"]
+                nav = []
+                if page > 0:
+                    nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"nzl:i:{entry['rule_number']}:{page - 1}"))
+                if page < len(pages) - 1:
+                    nav.append(InlineKeyboardButton(text="➡️", callback_data=f"nzl:i:{entry['rule_number']}:{page + 1}"))
+                rows = [nav] if nav else []
+                rows.append([InlineKeyboardButton(text="⬅️ Ro'yxat", callback_data=f"nzl:l:{section}:0")])
+                text = (f"({page + 1}/{len(pages)})\n" if len(pages) > 1 else "") + pages[page]
+                markup = InlineKeyboardMarkup(inline_keyboard=rows)
+            else:
+                await callback.answer()
+                return
+        except (IndexError, ValueError):
+            await callback.answer()
+            return
+        await callback.message.edit_text(text, reply_markup=markup)
+        await callback.answer()
+
+    def _import_report(result: dict, *, applied: bool) -> str:
+        lines = [
+            "✅ Import bajarildi." if applied else "🔎 Import ko'rigi (hech narsa yozilmagan).",
+            f"Versiya: {result['version']}",
+            f"Bandlar: yangi {result['rules_inserted']}, mavjud-moslangan {result['rules_adopted']}, o'zgarishsiz {result['rules_unchanged']}",
+            f"Variantlar: yangi {result['options_inserted']}, o'zgarishsiz {result['options_unchanged']}",
+            f"Aniqlanmagan (ball avtomatik qo'llanmaydi): {result['unresolved']}",
+        ]
+        if result["conflicts"]:
+            lines.append(f"⛔ Konfliktlar ({len(result['conflicts'])}) — import bajarilmaydi, mavjud matn ustidan yozilmaydi:")
+            lines += [f"• {item}" for item in result["conflicts"][:15]]
+        return "\n".join(lines)
+
+    @dp.message(Command("nizomimport"))
+    async def catalog_import_preview(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        try:
+            result = discipline_import.run_import(apply=False, created_by=message.from_user.id)
+        except discipline_import.ImportBlocked as error:
+            await message.answer(f"⛔ Import bloklandi: {error}")
+            return
+        markup = None
+        if not result["conflicts"]:
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="✅ Importni qo'llash", callback_data=f"rimp:{result['version']}")]]
+            )
+        await message.answer(_import_report(result, applied=False), reply_markup=markup)
+
+    @dp.callback_query(F.data.startswith("rimp:"))
+    async def catalog_import_apply(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        actor_id = callback.from_user.id
+        if actor_id in _PENDING_CATALOG_IMPORTS:
+            await callback.answer()
+            return
+        _PENDING_CATALOG_IMPORTS.add(actor_id)
+        try:
+            try:
+                result = discipline_import.run_import(
+                    apply=True, created_by=actor_id, expected_version=callback.data.split(":", 1)[1]
+                )
+            except discipline_import.ImportBlocked as error:
+                await callback.answer(f"Bloklandi: {error}"[:190], show_alert=True)
+                return
+            await callback.answer()
+            if callback.message:
+                await callback.message.edit_text(_import_report(result, applied=result["applied"]), reply_markup=None)
+        finally:
+            _PENDING_CATALOG_IMPORTS.discard(actor_id)
 
     @dp.callback_query(F.data.startswith("rl:reading:"))
     async def rule_learning_still_reading(callback: CallbackQuery) -> None:

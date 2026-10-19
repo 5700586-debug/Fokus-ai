@@ -395,6 +395,23 @@ async def begin_appeal(callback: CallbackQuery, state: FSMContext, penalty_id: i
     eski savol o'chiriladi); aks holda ro'yxat xabari savolga aylanadi (tahrir)."""
     user_id = callback.from_user.id if callback.from_user else None
     penalty = discipline.get_penalty(penalty_id)
+    if (
+        penalty is not None and penalty["employee_id"] == user_id
+        and penalty["appeal_status"] == discipline.APPEAL_PENDING and not penalty.get("appeal_delivered_at")
+    ):
+        # E'tiroz saqlangan, lekin Founderga yetmagan: sababni qayta yozdirmasdan qayta yuborish taklif qilinadi.
+        await callback.answer()
+        if callback.message is not None:
+            try:
+                await callback.message.answer(
+                    "⚠️ E'tirozingiz saqlangan, lekin rahbarga yuborilmagan. \"Qayta yuborish\" tugmasini bosing.",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="🔁 Qayta yuborish", callback_data=f"bos:redeliver:{penalty_id}")]]
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Qayta yuborish taklifini yuborib bo'lmadi: {error!r}")
+        return
     if penalty is None or penalty["employee_id"] != user_id or penalty["appeal_status"] != discipline.APPEAL_NONE:
         await callback.answer("Bu minus uchun e'tiroz berib bo'lmaydi yoki allaqachon yuborilgan.", show_alert=True)
         if callback.message is not None:
@@ -1061,10 +1078,20 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         penalties = discipline.list_appealable_penalties(message.from_user.id)
-        if not penalties:
+        undelivered = discipline.list_undelivered_appeals(message.from_user.id)
+        if not penalties and not undelivered:
             await message.answer("ℹ️ E'tiroz bildirish mumkin bo'lgan ball ayirish topilmadi.")
             return
 
+        resend_rows = [
+            [
+                InlineKeyboardButton(
+                    text=f"🔁 Qayta yuborish: {penalty['penalty_date']} — -{penalty['amount']} ball",
+                    callback_data=f"bos:redeliver:{penalty['id']}",
+                )
+            ]
+            for penalty in undelivered
+        ]
         rows = [
             [
                 InlineKeyboardButton(
@@ -1073,9 +1100,11 @@ def register(dp: Dispatcher, openai_client) -> None:
                 )
             ]
             for penalty in penalties
-        ]
+        ] + resend_rows
         await message.answer(
-            "Qaysi ball ayirishga e'tiroz bildirasiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+            "Qaysi ball ayirishga e'tiroz bildirasiz?"
+            + ("\n\n⚠️ Saqlangan, lekin rahbarga yuborilmagan e'tirozlaringiz ham bor." if undelivered else ""),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
         )
 
     @dp.callback_query(F.data.startswith("bos:appeal:"))
@@ -1134,24 +1163,36 @@ def register(dp: Dispatcher, openai_client) -> None:
             inline_keyboard=[[InlineKeyboardButton(text="🔁 Qayta yuborish", callback_data=f"bos:redeliver:{penalty_id}")]]
         )
 
-    async def _show_delivery_result(bot, shown: Message, penalty_id: int, status: str, key: str) -> None:
-        """Natija xabari. "Yuborildi" va eski ishchi xabarlarni tozalash FAQAT Founderga yetgandan keyin."""
+    async def _show_delivery_result(bot, chat_id: int, shown: Message | None, penalty_id: int, status: str, key: str) -> None:
+        """Natija xabari. "Yuborildi" va eski ishchi xabarlarni tozalash FAQAT Founderga yetgandan keyin VA yangi
+        yakuniy ekran ko'rsatilgach. ``shown`` (vaqtinchalik xabar) bo'lmasa yoki tahrirlanmasa yangi xabar yuboriladi.
+        Hech bir xabar yuborilmasa ham e'tiroz/yetkazilganlik holati bazada saqlanadi, eski xabarlar o'chmaydi."""
         if status == "delivered":
-            try:
-                await shown.edit_text("✅ E'tirozingiz rahbarga yuborildi, natija haqida xabar beramiz.", reply_markup=None)
-            except Exception as error:
-                print(f"E'tiroz yuborildi xabarini tahrirlab bo'lmadi: {error!r}")
-                return
-            await dialog_cleanup.sweep(bot, key, keep=(shown.chat.id, shown.message_id))
+            text, markup = "✅ E'tirozingiz rahbarga yuborildi, natija haqida xabar beramiz.", None
         elif status == "failed":
+            text = (
+                "⚠️ E'tirozingiz saqlandi, lekin rahbarga yuborilmadi. Sababni qayta yozish shart emas — "
+                "\"Qayta yuborish\" tugmasini bosing."
+            )
+            markup = _redeliver_keyboard(penalty_id)
+        else:
+            return
+
+        final: Message | None = None
+        if shown is not None:
             try:
-                await shown.edit_text(
-                    "⚠️ E'tirozingiz saqlandi, lekin rahbarga yuborilmadi. Sababni qayta yozish shart emas — "
-                    "\"Qayta yuborish\" tugmasini bosing.",
-                    reply_markup=_redeliver_keyboard(penalty_id),
-                )
+                await shown.edit_text(text, reply_markup=markup)
+                final = shown
             except Exception as error:
-                print(f"Yuborilmadi xabarini tahrirlab bo'lmadi: {error!r}")
+                print(f"Natija xabarini tahrirlab bo'lmadi, yangi xabar yuboriladi: {error!r}")
+        if final is None:
+            try:
+                final = await bot.send_message(chat_id, text, reply_markup=markup)
+            except Exception as error:
+                print(f"Xodimga natija xabarini yuborib bo'lmadi (holat bazada saqlangan): {error!r}")
+                return
+        if status == "delivered":
+            await dialog_cleanup.sweep(bot, key, keep=(final.chat.id, final.message_id))
 
     @dp.callback_query(F.data.startswith("bos:redeliver:"))
     async def appeal_redeliver(callback: CallbackQuery) -> None:
@@ -1176,7 +1217,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         status = await _deliver_appeal(callback.bot, penalty_id)
         if status == "busy":
             return
-        await _show_delivery_result(callback.bot, callback.message, penalty_id, status, key)
+        await _show_delivery_result(callback.bot, callback.message.chat.id, callback.message, penalty_id, status, key)
 
     async def _finish_appeal(message: Message, state: FSMContext, reason_text: str, voice_file_id: str | None) -> None:
         data = await state.get_data()
@@ -1210,11 +1251,16 @@ def register(dp: Dispatcher, openai_client) -> None:
             except Exception as error:  # noqa: BLE001
                 print(f"Minus xabaridagi e'tiroz tugmasini olib bo'lmadi: {error!r}")
 
-        waiting = await message.answer("⏳ Yuborilmoqda...")
-        dialog_cleanup.track(key, waiting)
+        waiting = None
+        try:
+            waiting = await message.answer("⏳ Yuborilmoqda...")
+        except Exception as error:  # noqa: BLE001
+            print(f"'Yuborilmoqda' xabarini yuborib bo'lmadi (yetkazish davom etadi): {error!r}")
+        else:
+            dialog_cleanup.track(key, waiting)
 
         status = await _deliver_appeal(message.bot, penalty_id)
-        await _show_delivery_result(message.bot, waiting, penalty_id, status, key)
+        await _show_delivery_result(message.bot, message.chat.id, waiting, penalty_id, status, key)
 
     @dp.message(StateFilter(AppealStates.waiting_reason), F.voice)
     async def appeal_reason_voice(message: Message, state: FSMContext) -> None:

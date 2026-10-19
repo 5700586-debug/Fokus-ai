@@ -463,6 +463,14 @@ def release_appeal_delivery(penalty_id: int) -> None:
     discipline_repo.release_appeal_delivery(penalty_id)
 
 
+def list_undelivered_appeals(employee_id: int, limit: int = 10) -> list[dict]:
+    """Xodimning saqlangan (``pending``), lekin hali Founderga yetkazilmagan e'tirozlari — "Qayta yuborish" uchun."""
+    return [
+        penalty for penalty in discipline_repo.list_penalties_by_status(employee_id, APPEAL_PENDING, limit)
+        if not penalty.get("appeal_delivered_at")
+    ]
+
+
 def get_penalty(penalty_id: int) -> dict | None:
     return discipline_repo.get_penalty(penalty_id)
 

@@ -13,11 +13,13 @@
   qaror taklifi tayyorlaydi — yakuniy qarorni doim Founder qabul qiladi.
 """
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -855,7 +857,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
             return
         try:
-            result = discipline_import.run_import(apply=False, created_by=message.from_user.id)
+            result = await asyncio.to_thread(discipline_import.run_import, apply=False, created_by=message.from_user.id)
         except discipline_import.ImportBlocked as error:
             await message.answer(f"⛔ Import bloklandi: {error}")
             return
@@ -877,13 +879,20 @@ def register(dp: Dispatcher, openai_client) -> None:
         _PENDING_CATALOG_IMPORTS.add(actor_id)
         try:
             try:
-                result = discipline_import.run_import(
+                await callback.answer("Import tekshirilmoqda…")
+            except TelegramBadRequest as error:
+                if "query is too old" not in error.message.lower():
+                    raise
+                logger.warning("Nizom importi: callback javob muddati o'tgan; natija xabarda ko'rsatiladi")
+            try:
+                result = await asyncio.to_thread(
+                    discipline_import.run_import,
                     apply=True, created_by=actor_id, expected_version=callback.data.split(":", 1)[1]
                 )
             except discipline_import.ImportBlocked as error:
-                await callback.answer(f"Bloklandi: {error}"[:190], show_alert=True)
+                if callback.message:
+                    await callback.message.edit_text(f"⛔ Import bloklandi: {error}", reply_markup=None)
                 return
-            await callback.answer()
             if callback.message:
                 await callback.message.edit_text(_import_report(result, applied=result["applied"]), reply_markup=None)
         finally:

@@ -779,6 +779,79 @@ def decide_penalty_appeal(penalty_id: int, decision: str, decided_by: int) -> bo
         conn.close()
 
 
+def decide_penalty_appeal_with_refund(penalty_id: int, decision: str, decided_by: int, refund: bool) -> dict | None:
+    """Qaror + (qabul qilinsa) ball qaytarish + ``appeal_refund`` ledger yozuvi BITTA tranzaksiyada. Faqat ``pending``
+    e'tiroz hal bo'ladi (atomik ``UPDATE ... WHERE appeal_status = 'pending'``): parallel/takroriy qarorda faqat bittasi
+    g'olib, refund ko'pi bilan bir marta. Istalgan yozuv xato bersa hammasi bekor (e'tiroz ``pending`` qoladi).
+    Qaytadi: qaror OLDIDAGI minus yozuvi yoki ``None`` (topilmadi/allaqachon hal qilingan)."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM discipline_penalties WHERE id = ?", (penalty_id,)).fetchone()
+        if row is None:
+            return None
+        penalty = dict(row)
+        cursor = conn.execute(
+            "UPDATE discipline_penalties SET appeal_status = 'resolved', "
+            "appeal_decision = ?, appeal_decided_by = ?, appeal_decided_at = ? WHERE id = ? AND appeal_status = 'pending'",
+            (decision, decided_by, _now(), penalty_id),
+        )
+        if cursor.rowcount <= 0:
+            return None
+        if refund:
+            _apply_bonus_delta(
+                conn, penalty["employee_id"], penalty["amount"],
+                "Apellyatsiya qondirildi — jarima qaytarildi", "appeal_refund", penalty_id,
+            )
+        conn.commit()
+        return penalty
+    finally:
+        conn.close()
+
+
+def claim_appeal_delivery(penalty_id: int, stale_before_iso: str) -> bool:
+    """Founderga yetkazishga urinishni atomik band qiladi: faqat ``pending``, hali yetkazilmagan va boshqa urinish
+    ketmayotgan (yoki eskirgan) e'tiroz uchun. Parallel/takroriy bosishda faqat bittasi ``True`` oladi."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discipline_penalties SET appeal_delivery_claimed_at = ? "
+            "WHERE id = ? AND appeal_status = 'pending' AND appeal_delivered_at IS NULL "
+            "AND (appeal_delivery_claimed_at IS NULL OR appeal_delivery_claimed_at < ?)",
+            (_now(), penalty_id, stale_before_iso),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def mark_appeal_delivered(penalty_id: int, founder_message_id: int | None) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE discipline_penalties SET appeal_delivered_at = ?, appeal_founder_message_id = ?, "
+            "appeal_delivery_claimed_at = NULL WHERE id = ? AND appeal_delivered_at IS NULL",
+            (_now(), founder_message_id, penalty_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def release_appeal_delivery(penalty_id: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discipline_penalties SET appeal_delivery_claimed_at = NULL "
+            "WHERE id = ? AND appeal_delivered_at IS NULL",
+            (penalty_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------- day closures --
 
 

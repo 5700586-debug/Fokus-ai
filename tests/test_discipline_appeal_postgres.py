@@ -117,3 +117,111 @@ def test_dialog_message_log_survives_and_pops_on_postgres(pg):
 
     assert sorted(row["message_id"] for row in rows) == [11, 12]
     assert _scalar("SELECT COUNT(*) FROM bot_workflow_messages") == 1  # boshqa dialog tegilmagan
+
+
+# ------------------------------- qaror + ball qaytarish + ledger BITTA tranzaksiya (PgConnection) --
+
+
+def _appeal_state(penalty_id: int) -> tuple:
+    return (
+        _scalar(f"SELECT appeal_status FROM discipline_penalties WHERE id = {penalty_id}"),
+        _scalar(f"SELECT COALESCE(SUM(bonus_bank), 0) FROM salaries WHERE user_id = {EMPLOYEE}"),
+        _scalar("SELECT COUNT(*) FROM bonus_bank_ledger WHERE ref_type = 'appeal_refund'"),
+        _scalar("SELECT COUNT(*) FROM bonus_bank_ledger"),
+    )
+
+
+def _break(table: str, event: str) -> None:
+    conn = psycopg2.connect(_DSN)
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE OR REPLACE FUNCTION fokus_pgtest_fail() RETURNS trigger LANGUAGE plpgsql AS "
+            "$$ BEGIN RAISE EXCEPTION 'sinov: yozuv xatosi'; END $$"
+        )
+        cur.execute(f"CREATE TRIGGER fokus_break BEFORE {event} ON {table} FOR EACH ROW EXECUTE FUNCTION fokus_pgtest_fail()")
+    finally:
+        conn.close()
+
+
+def _repair(table: str) -> None:
+    conn = psycopg2.connect(_DSN)
+    conn.autocommit = True
+    try:
+        conn.cursor().execute(f"DROP TRIGGER IF EXISTS fokus_break ON {table}")
+    finally:
+        conn.close()
+
+
+def _pending() -> int:
+    penalty_id = _penalty()
+    assert discipline.submit_appeal(penalty_id, "sabab", None)
+    return penalty_id
+
+
+def test_approval_is_consistent_and_rejection_changes_no_balance_on_postgres(pg):
+    approved = _pending()
+    discipline.decide_appeal(approved, discipline.DECISION_APPROVED, FOUNDER)
+    assert _appeal_state(approved) == ("resolved", 0, 1, 2)
+
+    discipline.add_rule(2, "Band2", "Matn2", created_by=FOUNDER)
+    rejected = discipline.apply_penalty(EMPLOYEE, FOUNDER, "2026-10-19", 10, 2, None, None)["penalty_id"]
+    discipline.submit_appeal(rejected, "sabab", None)
+    before = _appeal_state(rejected)
+    discipline.decide_appeal(rejected, discipline.DECISION_REJECTED, FOUNDER)
+    after = _appeal_state(rejected)
+    assert after[0] == "resolved" and after[1:3] == (before[1], 1) and after[3] == before[3]  # yangi refund yo'q
+
+
+@pytest.mark.parametrize(
+    ("table", "event"),
+    [("discipline_penalties", "UPDATE"), ("salaries", "UPDATE"), ("bonus_bank_ledger", "INSERT")],
+)
+def test_decision_failure_at_each_stage_rolls_back_on_postgres(pg, table, event):
+    penalty_id = _pending()
+    before = _appeal_state(penalty_id)
+    _break(table, event)
+    try:
+        with pytest.raises(Exception):
+            discipline.decide_appeal(penalty_id, discipline.DECISION_APPROVED, FOUNDER)
+        assert _appeal_state(penalty_id) == before and before[0] == "pending"
+    finally:
+        _repair(table)
+
+    discipline.decide_appeal(penalty_id, discipline.DECISION_APPROVED, FOUNDER)  # xatodan keyin qayta urinish
+    assert _appeal_state(penalty_id)[0:3] == ("resolved", 0, 1)
+
+
+@pytest.mark.parametrize("second", ["approved", "rejected"])
+def test_parallel_decisions_one_final_decision_at_most_one_refund_on_postgres(pg, second):
+    penalty_id = _pending()
+
+    def decide(decision):
+        try:
+            discipline.decide_appeal(penalty_id, decision, FOUNDER)
+            return decision
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        outcomes = [f.result() for f in [pool.submit(decide, d) for d in ("approved", second, "approved", second)]]
+
+    winners = [o for o in outcomes if o]
+    state = _appeal_state(penalty_id)
+    assert len(winners) == 1
+    assert _scalar(f"SELECT appeal_decision FROM discipline_penalties WHERE id = {penalty_id}") == winners[0]
+    assert state[2] == (1 if winners[0] == "approved" else 0)
+    assert state[1] == (0 if winners[0] == "approved" else -10)
+
+
+def test_delivery_claim_is_exclusive_and_mark_is_once_on_postgres(pg):
+    penalty_id = _pending()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        claims = [f.result() for f in [pool.submit(discipline.claim_appeal_delivery, penalty_id) for _ in range(4)]]
+    assert claims.count(True) == 1
+    assert discipline.mark_appeal_delivered(penalty_id, 4242) is True
+    assert discipline.mark_appeal_delivered(penalty_id, 4343) is False
+    assert discipline.claim_appeal_delivery(penalty_id) is False  # yetkazilgan: yangi karta yo'q
+    row = discipline.get_penalty(penalty_id)
+    assert row["appeal_founder_message_id"] == 4242 and row["appeal_delivered_at"]

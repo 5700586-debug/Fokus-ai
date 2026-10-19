@@ -7,7 +7,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-from aiogram.methods import DeleteMessage, EditMessageReplyMarkup, EditMessageText, SendMessage
+from aiogram.methods import AnswerCallbackQuery, DeleteMessage, EditMessageReplyMarkup, EditMessageText, SendMessage, SendVoice
 from aiogram.types import CallbackQuery, Chat, Message, Update
 from aiogram.types import User as TgUser
 
@@ -36,7 +36,8 @@ class Tg:
         self.ids = itertools.count(5000)
         self.deleted: list[tuple[int, int]] = []
         self.sent_log: list[dict] = []
-        self.edits: list[tuple[int, int | None, str]] = []
+        self.edits: list[tuple] = []
+        self.events: list[tuple] = []
         self.markup_removed: list[tuple[int, int]] = []
         self.fail_send = None
         self.fail_delete = False
@@ -51,16 +52,24 @@ class Tg:
                     raise RuntimeError("o'chirib bo'lmadi")
                 self.deleted.append((method.chat_id, method.message_id))
                 return True
-            if isinstance(method, SendMessage):
+            if isinstance(method, (SendMessage, SendVoice)):
                 if self.fail_send and self.fail_send(method):
                     raise RuntimeError("yuborib bo'lmadi")
                 message_id = next(self.ids)
-                self.sent_log.append({"chat": method.chat_id, "id": message_id, "text": method.text, "markup": method.reply_markup})
+                text = method.text if isinstance(method, SendMessage) else (method.caption or "")
+                self.sent_log.append(
+                    {"chat": method.chat_id, "id": message_id, "text": text, "markup": method.reply_markup,
+                     "voice": method.voice if isinstance(method, SendVoice) else None}
+                )
+                self.events.append(("send", method.chat_id, text))
                 return Message(
-                    message_id=message_id, date=datetime.now(), chat=Chat(id=method.chat_id, type="private"), text=method.text
+                    message_id=message_id, date=datetime.now(), chat=Chat(id=method.chat_id, type="private"), text=text
                 ).as_(inner)
+            if isinstance(method, AnswerCallbackQuery):
+                self.events.append(("answer", method.text))
             if isinstance(method, EditMessageText):
-                self.edits.append((method.chat_id, method.message_id, method.text))
+                self.edits.append((method.chat_id, method.message_id, method.text, method.reply_markup))
+                self.events.append(("edit", method.chat_id, method.text))
             if isinstance(method, EditMessageReplyMarkup) and method.reply_markup is None:
                 self.markup_removed.append((method.chat_id, method.message_id))
             return await original(inner, method, request_timeout)

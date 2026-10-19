@@ -122,6 +122,10 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("recruiting_assessments", "clarify_questions_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("cash_shifts", "received_cash_balance", "INTEGER"),
     ("cash_shifts", "discrepancy_reason_text", "TEXT"),
+    # E'tirozni Founderga yetkazish holati (qayta yuborish uchun) — mavjud ``discipline_penalties`` qatoriga additiv.
+    ("discipline_penalties", "appeal_delivery_claimed_at", "TEXT"),
+    ("discipline_penalties", "appeal_delivered_at", "TEXT"),
+    ("discipline_penalties", "appeal_founder_message_id", "BIGINT"),
     ("company_rules", "default_penalty_amount", "INTEGER"),
     ("company_rules", "catalog_kind", "TEXT"),
     ("company_rules", "source_key", "TEXT"),

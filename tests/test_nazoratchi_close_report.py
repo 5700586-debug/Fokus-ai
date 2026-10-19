@@ -102,8 +102,10 @@ def test_minus_with_reason_is_separate_and_cancelled_minus_excluded(rule):
     _penalty(111, 3, "Telefon")
     _penalty(111, 2, "Kech keldi")
     cancelled = _penalty(111, 30, "Bekor qilingan sabab")
+    discipline_repo.set_penalty_appeal(cancelled, "sabab", None)
     discipline_repo.decide_penalty_appeal(cancelled, discipline.DECISION_APPROVED, FOUNDER_ID)
     rejected = _penalty(111, 1, "Rad etilgan e'tiroz")
+    discipline_repo.set_penalty_appeal(rejected, "sabab", None)
     discipline_repo.decide_penalty_appeal(rejected, discipline.DECISION_REJECTED, FOUNDER_ID)
 
     text = "\n".join(_build())

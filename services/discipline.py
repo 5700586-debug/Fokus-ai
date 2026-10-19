@@ -11,7 +11,7 @@ audit sifatida qoladi).
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import company_time
 import employees
@@ -447,12 +447,41 @@ def list_appealable_penalties(employee_id: int, limit: int = 10) -> list[dict]:
     return discipline_repo.list_penalties_by_status(employee_id, APPEAL_NONE, limit)
 
 
+APPEAL_DELIVERY_CLAIM_TTL_SECONDS = 120
+
+
+def claim_appeal_delivery(penalty_id: int) -> bool:
+    stale_before = (datetime.now(timezone.utc) - timedelta(seconds=APPEAL_DELIVERY_CLAIM_TTL_SECONDS)).isoformat()
+    return discipline_repo.claim_appeal_delivery(penalty_id, stale_before)
+
+
+def mark_appeal_delivered(penalty_id: int, founder_message_id: int | None) -> bool:
+    return discipline_repo.mark_appeal_delivered(penalty_id, founder_message_id)
+
+
+def release_appeal_delivery(penalty_id: int) -> None:
+    discipline_repo.release_appeal_delivery(penalty_id)
+
+
+def list_undelivered_appeals(employee_id: int, limit: int = 10) -> list[dict]:
+    """Xodimning saqlangan (``pending``), lekin hali Founderga yetkazilmagan e'tirozlari — "Qayta yuborish" uchun."""
+    return [
+        penalty for penalty in discipline_repo.list_penalties_by_status(employee_id, APPEAL_PENDING, limit)
+        if not penalty.get("appeal_delivered_at")
+    ]
+
+
+def get_penalty(penalty_id: int) -> dict | None:
+    return discipline_repo.get_penalty(penalty_id)
+
+
 def submit_appeal(penalty_id: int, reason_text: str, voice_file_id: str | None) -> dict | None:
     penalty = discipline_repo.get_penalty(penalty_id)
     if penalty is None or penalty["appeal_status"] != APPEAL_NONE:
         return None
 
-    discipline_repo.set_penalty_appeal(penalty_id, reason_text, voice_file_id)
+    if not discipline_repo.set_penalty_appeal(penalty_id, reason_text, voice_file_id):
+        return None
     return discipline_repo.get_penalty(penalty_id)
 
 
@@ -468,16 +497,11 @@ def decide_appeal(penalty_id: int, decision: str, decided_by: int) -> dict:
     if penalty is None or penalty["appeal_status"] != APPEAL_PENDING:
         raise ValueError("apellyatsiya topilmadi yoki allaqachon hal qilingan")
 
-    discipline_repo.decide_penalty_appeal(penalty_id, decision, decided_by)
-
-    if decision == DECISION_APPROVED:
-        discipline_repo.adjust_bonus_bank(
-            penalty["employee_id"],
-            penalty["amount"],
-            "Apellyatsiya qondirildi — jarima qaytarildi",
-            "appeal_refund",
-            penalty_id,
-        )
+    decided = discipline_repo.decide_penalty_appeal_with_refund(
+        penalty_id, decision, decided_by, refund=(decision == DECISION_APPROVED)
+    )
+    if decided is None:
+        raise ValueError("apellyatsiya topilmadi yoki allaqachon hal qilingan")
 
     return penalty
 

@@ -32,7 +32,7 @@ def _remaining_active_rules(employee_id: int) -> list[dict]:
     started = set(rule_learning_repo.list_started_rule_numbers(employee_id))
     return [
         rule
-        for rule in discipline_repo.list_active_rules()
+        for rule in discipline_repo.list_learning_rules()
         if rule["rule_number"] not in started
     ]
 
@@ -40,7 +40,7 @@ def _remaining_active_rules(employee_id: int) -> list[dict]:
 def _maybe_finish(employee_id: int) -> bool:
     """Aktiv nizom umuman bo'lmasa yakunlamaydi — bu "hammasini o'qib
     bo'ldi" degani emas, shunchaki nizom hali kiritilmagan."""
-    if not discipline_repo.list_active_rules():
+    if not discipline_repo.list_learning_rules():
         return False
     if rule_learning_repo.get_pending_progress(employee_id) is not None:
         return False

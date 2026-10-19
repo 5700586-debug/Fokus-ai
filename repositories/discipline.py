@@ -197,6 +197,214 @@ def set_rule_penalty_amount(rule_number: int, amount: int) -> bool:
         conn.close()
 
 
+CATALOG_KINDS = ("nizom", "bonus_model", "culture", "checklist")
+_CATALOG_META_FIELDS = ("catalog_kind", "source_key", "source_name")
+
+
+def list_catalog_rules() -> list[dict]:
+    """Import qilingan katalog bandlari (nizom, bonus modeli, madaniyat, chek-listlar) — rule_number tartibida."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM company_rules WHERE is_active = 1 AND catalog_kind IS NOT NULL ORDER BY rule_number"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def list_learning_rules() -> list[dict]:
+    """Nizom o'rganish oqimi uchun: eski (katalog metadatasiz) bandlar va rasmiy ``nizom``lar. Madaniyat, bonus modeli
+    va lavozim chek-listlari xodimga majburan o'qitilmaydi."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM company_rules WHERE is_active = 1 AND (catalog_kind IS NULL OR catalog_kind = 'nizom') "
+            "ORDER BY rule_number"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def list_penalty_options(rule_number: int | None = None) -> list[dict]:
+    conn = get_connection()
+    try:
+        if rule_number is None:
+            rows = conn.execute(
+                "SELECT * FROM company_rule_penalty_options WHERE is_active = 1 ORDER BY rule_number, id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM company_rule_penalty_options WHERE is_active = 1 AND rule_number = ? ORDER BY id",
+                (rule_number,),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_penalty_option(option_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM company_rule_penalty_options WHERE id = ? AND is_active = 1", (option_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return dict(row) if row else None
+
+
+class _CatalogConflict(Exception):
+    pass
+
+
+def _rule_differences(existing: dict, row: dict) -> tuple[list[str], list[str]]:
+    """(kontent farqlari, metadata farqlari). Metadata farqi faqat mavjud qiymat NULL bo'lsa 'to'ldirish' deb sanaladi."""
+    content_diff = [
+        field for field in ("title", "content", "default_penalty_amount")
+        if existing.get(field) != row[field]
+    ]
+    meta_diff = [field for field in _CATALOG_META_FIELDS if existing.get(field) != row[field]]
+    return content_diff, meta_diff
+
+
+def import_catalog(rule_rows: list[dict], option_rows: list[dict], *, created_by: int, apply: bool) -> dict:
+    """Katalogni BITTA tranzaksiyada import qiladi (``apply=False`` — faqat reja, hech narsa yozilmaydi). Reja ikkala
+    rejimda ham bir xil kod bilan tuziladi. Mavjud bir xil key/raqamda BOSHQA matn/ball bo'lsa ustidan yozmaydi —
+    konflikt qaytaradi va apply bekor qilinadi. Mavjud o'quv snapshotlari, tarix, baho va balansga tegilmaydi."""
+    conn = get_connection()
+    result = {
+        "rules_inserted": 0, "rules_adopted": 0, "rules_unchanged": 0,
+        "options_inserted": 0, "options_unchanged": 0, "conflicts": [],
+    }
+    try:
+        rule_actions: list[tuple[str, dict]] = []
+        for row in rule_rows:
+            existing = conn.execute("SELECT * FROM company_rules WHERE rule_number = ?", (row["rule_number"],)).fetchone()
+            by_key = conn.execute(
+                "SELECT rule_number FROM company_rules WHERE source_key = ?", (row["source_key"],)
+            ).fetchone()
+            label = f"{row['source_key']} (rule_number={row['rule_number']})"
+            if existing is None:
+                if by_key is not None:
+                    result["conflicts"].append(f"{label}: source_key boshqa rule_number'da ({by_key['rule_number']})")
+                else:
+                    rule_actions.append(("insert", row))
+                continue
+
+            existing = dict(existing)
+            if not existing["is_active"]:
+                result["conflicts"].append(f"{label}: mavjud band nofaol")
+                continue
+            content_diff, meta_diff = _rule_differences(existing, row)
+            if content_diff:
+                result["conflicts"].append(f"{label}: mavjud band boshqa ({', '.join(content_diff)})")
+            elif not meta_diff:
+                result["rules_unchanged"] += 1
+            elif all(existing.get(field) is None for field in meta_diff) and (
+                by_key is None or by_key["rule_number"] == row["rule_number"]
+            ):
+                rule_actions.append(("adopt", row))  # faqat bo'sh metadata to'ldiriladi, matn/ball o'zgarmaydi
+            else:
+                result["conflicts"].append(f"{label}: katalog metadatasi boshqa ({', '.join(meta_diff)})")
+
+        option_actions: list[dict] = []
+        known_rules = {row["rule_number"] for row in rule_rows}
+        for option in option_rows:
+            existing = conn.execute(
+                "SELECT * FROM company_rule_penalty_options WHERE variant_key = ?", (option["variant_key"],)
+            ).fetchone()
+            if existing is None:
+                if option["rule_number"] not in known_rules:
+                    result["conflicts"].append(f"{option['variant_key']}: band katalogda yo'q")
+                else:
+                    option_actions.append(option)
+                continue
+            diff = [
+                field for field in ("rule_number", "points", "condition_text", "gate_text", "target", "apply_allowed", "written_warning")
+                if dict(existing).get(field) != option[field]
+            ]
+            if diff:
+                result["conflicts"].append(f"{option['variant_key']}: mavjud variant boshqa ({', '.join(diff)})")
+            else:
+                result["options_unchanged"] += 1
+
+        if result["conflicts"]:
+            return result
+
+        result["rules_inserted"] = sum(1 for kind, _ in rule_actions if kind == "insert")
+        result["rules_adopted"] = sum(1 for kind, _ in rule_actions if kind == "adopt")
+        result["options_inserted"] = len(option_actions)
+        if not apply:
+            return result
+
+        now = _now()
+        for kind, row in rule_actions:
+            if kind == "insert":
+                cursor = conn.execute(
+                    "INSERT INTO company_rules (rule_number, title, content, is_active, created_by, created_at, "
+                    "default_penalty_amount, catalog_kind, source_key, source_name) "
+                    "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?) ON CONFLICT(rule_number) DO NOTHING",
+                    (
+                        row["rule_number"], row["title"], row["content"], created_by, now,
+                        row["default_penalty_amount"], row["catalog_kind"], row["source_key"], row["source_name"],
+                    ),
+                )
+                if cursor.rowcount <= 0:  # parallel import oldinroq yozdi: aynan shu qator bo'lsagina davom
+                    current = conn.execute("SELECT * FROM company_rules WHERE rule_number = ?", (row["rule_number"],)).fetchone()
+                    content_diff, meta_diff = _rule_differences(dict(current), row)
+                    if content_diff or meta_diff:
+                        raise _CatalogConflict(f"{row['source_key']}: parallel import boshqa qiymat yozdi")
+                    result["rules_inserted"] -= 1
+                    result["rules_unchanged"] += 1
+            else:
+                conn.execute(
+                    "UPDATE company_rules SET catalog_kind = ?, source_key = ?, source_name = ? "
+                    "WHERE rule_number = ? AND catalog_kind IS NULL AND source_key IS NULL",
+                    (row["catalog_kind"], row["source_key"], row["source_name"], row["rule_number"]),
+                )
+        for option in option_actions:
+            cursor = conn.execute(
+                "INSERT INTO company_rule_penalty_options (variant_key, rule_number, points, condition_text, gate_text, "
+                "target, apply_allowed, written_warning, is_active, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT(variant_key) DO NOTHING",
+                (
+                    option["variant_key"], option["rule_number"], option["points"], option["condition_text"],
+                    option["gate_text"], option["target"], option["apply_allowed"], option["written_warning"], now,
+                ),
+            )
+            if cursor.rowcount <= 0:
+                current = conn.execute(
+                    "SELECT * FROM company_rule_penalty_options WHERE variant_key = ?", (option["variant_key"],)
+                ).fetchone()
+                if any(dict(current).get(f) != option[f] for f in ("rule_number", "points", "condition_text", "gate_text", "target")):
+                    raise _CatalogConflict(f"{option['variant_key']}: parallel import boshqa qiymat yozdi")
+                result["options_inserted"] -= 1
+                result["options_unchanged"] += 1
+
+        conn.commit()
+        return result
+    except _CatalogConflict as error:
+        result["conflicts"].append(str(error))
+        result.update(rules_inserted=0, rules_adopted=0, options_inserted=0)
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            rollback()
+        return result
+    except BaseException:
+        rollback = getattr(conn, "rollback", None)
+        if rollback is not None:
+            rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def create_unmatched_report(
     employee_id: int, reported_by: int, report_text: str, ai_note: str | None = None
 ) -> int:
@@ -453,6 +661,37 @@ def create_penalty(
         )
         conn.commit()
         return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def create_penalty_with_balance(
+    employee_id: int,
+    supervisor_id: int,
+    penalty_date: str,
+    amount: int,
+    rule_number: int,
+    comment: str | None,
+    ai_note: str | None,
+) -> dict:
+    """Minus BITTA tranzaksiyada: ``discipline_penalties`` + ``salaries.bonus_bank`` + ``bonus_bank_ledger``.
+    Uchalasi muvaffaqiyatli bo'lsagina commit; istalgan yozuv xato bersa ulanish yopilganda hammasi bekor
+    bo'ladi (qisman saqlanmaydi). Qaytadi: ``{"penalty_id", "balance"}``."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO discipline_penalties "
+            "(employee_id, supervisor_id, penalty_date, amount, rule_number, comment, "
+            "ai_note, appeal_status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'none', ?)",
+            (employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note, _now()),
+        )
+        penalty_id = cursor.lastrowid
+        balance = _apply_bonus_delta(
+            conn, employee_id, -amount, f"Jarima: {rule_number}-nizom", "penalty", penalty_id
+        )
+        conn.commit()
+        return {"penalty_id": penalty_id, "balance": balance}
     finally:
         conn.close()
 

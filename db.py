@@ -123,6 +123,9 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("cash_shifts", "received_cash_balance", "INTEGER"),
     ("cash_shifts", "discrepancy_reason_text", "TEXT"),
     ("company_rules", "default_penalty_amount", "INTEGER"),
+    ("company_rules", "catalog_kind", "TEXT"),
+    ("company_rules", "source_key", "TEXT"),
+    ("company_rules", "source_name", "TEXT"),
     ("employee_scheduled_shifts", "schedule_mode", "TEXT"),
     # E2E test avtomatizatsiyasi uchun izolyatsiya belgisi (qarang
     # ``services/e2e_test_access.py``) — productionda allaqachon

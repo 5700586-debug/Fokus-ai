@@ -131,6 +131,11 @@ def list_rules() -> list[dict]:
     return discipline_repo.list_active_rules()
 
 
+def list_learning_rules() -> list[dict]:
+    """O'rganish oqimi uchun: madaniyat/bonus modeli/lavozim chek-listlari majburiy o'qitilmaydi."""
+    return discipline_repo.list_learning_rules()
+
+
 def list_rules_with_penalty_amount() -> list[dict]:
     return discipline_repo.list_rules_with_penalty_amount()
 
@@ -143,6 +148,11 @@ def set_rule_penalty_amount(rule_number: int, amount: int, updated_by: int) -> b
     alohida ustun yo'q) — kerak bo'lsa keyin qo'shiladi."""
     if amount <= 0:
         raise ValueError(f"ball miqdori musbat bo'lishi kerak: {amount}")
+
+    rule = discipline_repo.get_rule_by_number(rule_number)
+    if rule is not None and rule.get("catalog_kind") is not None:
+        # Katalog bandining balli asl manbadagi "–N ball" satridan olinadi; qo'lda o'zgartirilmaydi.
+        raise ValueError("katalog bandining balli manbadan olinadi, o'zgartirib bo'lmaydi")
 
     return discipline_repo.set_rule_penalty_amount(rule_number, amount)
 
@@ -350,26 +360,51 @@ def apply_penalty(
     rule_number: int,
     comment: str | None,
     ai_note: str | None,
+    option_id: int | None = None,
 ) -> dict:
     rule = discipline_repo.get_rule_by_number(rule_number)
     if rule is None:
         raise ValueError(f"{rule_number}-nizom topilmadi")
 
-    # ``bos.penalty_amounts`` — /baholash oqimidagi umumiy tugma
-    # to'plami (-10/-20/-30). Nazoratchi kartasidagi nizom-bandi
-    # tugmalari esa har bir bandning O'Z ``default_penalty_amount``
-    # qiymatidan foydalanadi (Founder /setnizombahosi bilan
-    # belgilagan) — bu ikkalasi mustaqil, shuning uchun ikkalasidan
-    # BIRIGA mos kelsa yetarli.
-    if amount not in get_penalty_amounts() and amount != rule.get("default_penalty_amount"):
-        raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
+    if rule.get("catalog_kind") is not None:
+        # Import qilingan katalog bandi: ball FAQAT manbadagi tasdiqlangan miqdor/variantdan.
+        # Umumiy -10/-20/-30 ro'yxati bu yerda hech narsani ruxsat etmaydi.
+        options = discipline_repo.list_penalty_options(rule_number)
+        if option_id is not None:
+            option = next((item for item in options if item["id"] == option_id), None)
+            if option is None:
+                raise ValueError("variant bu bandga tegishli emas yoki nofaol")
+            if not option["apply_allowed"]:
+                raise ValueError("bu variant xodimga qo'llanmaydi (boshqa shaxsga tegishli)")
+            if amount != option["points"]:
+                raise ValueError(f"jarima miqdori variantga mos emas: {amount}")
+            variant_key = option["variant_key"]
+        elif options:
+            only = options[0] if len(options) == 1 else None
+            if only is not None and rule.get("default_penalty_amount") == amount == only["points"] and only["apply_allowed"]:
+                variant_key = only["variant_key"]  # bir ma'noli, shartsiz band: yagona tasdiqlangan miqdor
+            else:
+                raise ValueError("bu bandda ball variantlari bor — variant tanlanishi shart")
+        elif rule.get("default_penalty_amount") is not None and amount == rule["default_penalty_amount"]:
+            variant_key = None
+        else:
+            raise ValueError("bu bandda tasdiqlangan ball miqdori yo'q")
+        if variant_key:
+            ai_note = f"variant={variant_key}" + (f"; {ai_note}" if ai_note else "")
+    else:
+        # ``bos.penalty_amounts`` — /baholash oqimidagi umumiy tugma
+        # to'plami (-10/-20/-30). Nazoratchi kartasidagi nizom-bandi
+        # tugmalari esa har bir bandning O'Z ``default_penalty_amount``
+        # qiymatidan foydalanadi (Founder /setnizombahosi bilan
+        # belgilagan) — bu ikkalasi mustaqil, shuning uchun ikkalasidan
+        # BIRIGA mos kelsa yetarli.
+        if amount not in get_penalty_amounts() and amount != rule.get("default_penalty_amount"):
+            raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
-    penalty_id = discipline_repo.create_penalty(
+    saved = discipline_repo.create_penalty_with_balance(
         employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note
     )
-    balance = discipline_repo.adjust_bonus_bank(
-        employee_id, -amount, f"Jarima: {rule_number}-nizom", "penalty", penalty_id
-    )
+    penalty_id, balance = saved["penalty_id"], saved["balance"]
 
     return {"penalty_id": penalty_id, "bonus_bank_balance": balance, "rule": rule}
 
@@ -468,3 +503,150 @@ def penalize_supervisor_for_late_close(supervisor_id: int, audit_date: str, pena
             supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
         )
     return recorded
+
+
+# ------------------------------------------------ nizom katalogi: o'qish, tanlash, iqtibos --
+
+SOURCE_ORDER = (
+    "nizomlar", "madaniyat", "omborchi", "kassir", "tozalik_xodimi", "non_bolimi", "kolbasa_saryog", "muzlatilgan",
+    "oshpaz", "mevachi",
+)
+LEGACY_SECTION = "legacy"
+# Tizim roli -> lavozim chek-listi bo'limi. Faqat aniq mos keladiganlar; boshqa rollar uchun TAXMIN QILINMAYDI.
+CHECKLIST_BY_ROLE = {"kassir": "kassir", "tozalik": "tozalik_xodimi"}
+QUOTE_MAX_CHARS = 220
+PAGE_MAX_CHARS = 3500
+
+_RULE_REFERENCE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[-\s]?\s*(?:chi\s+)?nizom|nizom\s*(?:raqami|№|#)?\s*(\d{1,2})", re.IGNORECASE)
+
+
+def checklist_section_for_role(role_key: str | None) -> str | None:
+    return CHECKLIST_BY_ROLE.get(role_key or "")
+
+
+def _section_of(rule: dict) -> str:
+    source_key = rule.get("source_key")
+    return source_key.split(":", 1)[0] if source_key else LEGACY_SECTION
+
+
+def _is_candidate(rule: dict) -> bool:
+    if rule.get("catalog_kind") == "bonus_model":
+        return False
+    return not (rule.get("content") or "").startswith("Eslatma:")  # faqat izoh qatori — buzish bandi emas
+
+
+def get_catalog_entries(*, candidates_only: bool = True) -> list[dict]:
+    """Butun katalog: har bir faol band + uning ball variantlari. ``amount_status``: ``options`` (variantlar bor) |
+    ``default`` (bitta tasdiqlangan miqdor) | ``none`` (miqdor belgilanmagan — taxminiy ball YO'Q)."""
+    rules = discipline_repo.list_active_rules()
+    options_by_rule: dict[int, list[dict]] = {}
+    for option in discipline_repo.list_penalty_options():
+        options_by_rule.setdefault(option["rule_number"], []).append(option)
+
+    entries = []
+    for rule in rules:
+        legacy = rule.get("catalog_kind") is None
+        if candidates_only and legacy and rule.get("default_penalty_amount") is None:
+            continue  # eski, miqdori tasdiqlanmagan band — minus katalogida emas (avvalgi xulq)
+        entry = dict(rule)
+        entry["section"] = _section_of(rule)
+        entry["options"] = options_by_rule.get(rule["rule_number"], [])
+        entry["display_number"] = rule["rule_number"] if rule.get("catalog_kind") == "nizom" else None
+        entry["source_name"] = rule.get("source_name") or "Nizomlar (eski)"
+        if entry["options"]:
+            entry["amount_status"] = "options"
+        elif rule.get("default_penalty_amount") is not None:
+            entry["amount_status"] = "default"
+        else:
+            entry["amount_status"] = "none"
+        if candidates_only and not _is_candidate(rule):
+            continue
+        entries.append(entry)
+    return entries
+
+
+def get_catalog_entry(rule_number: int) -> dict | None:
+    return next((entry for entry in get_catalog_entries() if entry["rule_number"] == rule_number), None)
+
+
+def list_catalog_sources(entries: list[dict] | None = None) -> list[dict]:
+    entries = get_catalog_entries() if entries is None else entries
+    order = {section: index for index, section in enumerate((*SOURCE_ORDER, LEGACY_SECTION))}
+    grouped: dict[str, dict] = {}
+    for entry in entries:
+        group = grouped.setdefault(entry["section"], {"section": entry["section"], "name": entry["source_name"], "count": 0})
+        group["count"] += 1
+    return sorted(grouped.values(), key=lambda group: order.get(group["section"], 99))
+
+
+def entries_in_section(section: str, entries: list[dict] | None = None) -> list[dict]:
+    entries = get_catalog_entries() if entries is None else entries
+    return [entry for entry in entries if entry["section"] == section]
+
+
+def entry_amount_text(entry: dict) -> str:
+    if entry["amount_status"] == "default":
+        return f"−{entry['default_penalty_amount']} ball"
+    if entry["amount_status"] == "options":
+        return "ball: " + ", ".join(f"−{option['points']}" for option in entry["options"])
+    return "Ball miqdori belgilanmagan"
+
+
+def default_quote(entry: dict) -> str:
+    """Tanlash oynasi uchun qisqa iqtibos: bandning O'ZIDAN aynan olingan bo'lak (variant sharti yoki matn boshi)."""
+    options = entry.get("options") or []
+    source = options[0]["condition_text"] if options else (entry.get("content") or "")
+    first = next((line for line in source.split("\n") if line.strip()), "")
+    return _cut_quote(first)
+
+
+def _cut_quote(text: str) -> str:
+    text = text.strip()
+    if len(text) <= QUOTE_MAX_CHARS:
+        return text
+    cut = text[:QUOTE_MAX_CHARS].rsplit(" ", 1)[0].rstrip()
+    return cut + "…"  # "…" — qisqartirish belgisi; iqtibosning o'zi asl matn boshi
+
+
+def verified_quote(entry: dict, proposed: str | None) -> str | None:
+    """AI taklif qilgan iqtibos bandning kanonik matnidan (sarlavha yoki mazmun) AYNAN topilsagina qabul qilinadi;
+    aks holda ``None`` (server o'zi aniq bo'lakni tanlaydi)."""
+    if not proposed or not proposed.strip():
+        return None
+    needle = proposed.strip()
+    if needle in (entry.get("content") or "") or needle in (entry.get("title") or ""):
+        return _cut_quote(needle)
+    return None
+
+
+def split_text_pages(text: str, limit: int = PAGE_MAX_CHARS) -> list[str]:
+    """Matnni Telegram limitiga sig'adigan sahifalarga bo'ladi — HECH NARSA qisqartirilmaydi: sahifalar '\\n' bilan
+    ulanganda asl matn tiklanadi (juda uzun yagona satr qat'iy bo'laklanadi)."""
+    pages: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.split("\n"):
+        pieces = [line[i:i + limit] for i in range(0, len(line), limit)] or [""]
+        for piece in pieces:
+            extra = len(piece) + (1 if current else 0)
+            if current and size + extra > limit:
+                pages.append("\n".join(current))
+                current, size = [], 0
+                extra = len(piece)
+            current.append(piece)
+            size += extra
+    pages.append("\n".join(current))
+    return pages
+
+
+def parse_rule_reference(text: str) -> int | None:
+    """"26-nizomga amal qilmadi" kabi aniq murojaat. Faqat "nizom" so'zi bilan kelgan raqam hisoblanadi
+    (oddiy vaqt/miqdor raqamlari bandni belgilamaydi). Raqam bandni belgilaydi, ballni emas."""
+    match = _RULE_REFERENCE_RE.search(text or "")
+    if match is None:
+        return None
+    number = int(match.group(1) or match.group(2))
+    rule = discipline_repo.get_rule_by_number(number)
+    if rule is None or rule.get("catalog_kind") not in (None, "nizom"):
+        return None
+    return number

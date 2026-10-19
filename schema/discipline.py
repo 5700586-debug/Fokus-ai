@@ -26,6 +26,22 @@ CREATE TABLE IF NOT EXISTS company_rules (
     created_at TEXT NOT NULL
 );
 
+-- Bitta nizom bandidagi turli oqibatlar (ball variantlari). ``points`` faqat manbadagi "–N ball" satridan;
+-- ``condition_text``/``gate_text`` — manbadan AYNAN kesilgan bo'laklar. Asl nizom matni ``company_rules``da.
+CREATE TABLE IF NOT EXISTS company_rule_penalty_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    variant_key TEXT NOT NULL UNIQUE,
+    rule_number INTEGER NOT NULL REFERENCES company_rules(rule_number),
+    points INTEGER NOT NULL,
+    condition_text TEXT NOT NULL,
+    gate_text TEXT,
+    target TEXT NOT NULL DEFAULT 'offender',
+    apply_allowed INTEGER NOT NULL DEFAULT 1,
+    written_warning INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS daily_evaluations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL,

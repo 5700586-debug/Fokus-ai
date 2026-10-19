@@ -5,6 +5,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+from aiogram.methods import EditMessageText
 
 import company_time
 import discipline_bot
@@ -148,7 +149,8 @@ async def test_close_succeeds_after_all_required_graded_and_session_closed(bot_d
     sent = await send_callback(
         main.dp, bot, SUPERVISOR, data=f"bos:grade:111:{discipline.GRADE_ALO}:{_ymd()}", target_chat_id=SUPERVISOR
     )
-    assert "3 ball" in sent[0].text and "✅ Pending T — baholandi" in sent[0].text  # ro'yxatda ✅
+    screen = next(m for m in sent if isinstance(m, EditMessageText))  # xodimga ketgan xabar emas, nazoratchi ekrani
+    assert "3 ball" in screen.text and "✅ Pending T — baholandi" in screen.text  # ro'yxatda ✅
 
     sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
     assert f"{BRANCH_A} nazorati yopildi" in sent[0].text and "baholangan: 1/2" in sent[0].text

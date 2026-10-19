@@ -19,6 +19,11 @@ def _screen(sent, index: int = 0):
     assert len(screens) > index, f"ekran xabari topilmadi: {sent!r}"
     return screens[index]
 
+def _card(sent):
+    """Nazoratchi ekrani (edit_text) — xodimga ketgan baho xabaridan (SendMessage) ajratib olinadi."""
+    return next(m for m in sent if isinstance(m, EditMessageText))
+
+
 _BRANCH = RECRUITING_BRANCH_NAMES[0]
 _NAZORATCHI_ID = 555001
 
@@ -291,7 +296,7 @@ async def test_picking_a_grade_updates_the_card(bot_dp):
 
     sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700014:alo", target_chat_id=_NAZORATCHI_ID)
 
-    assert "3 (A'lo)" in _screen(sent).text
+    assert "3 (A'lo)" in _card(sent).text
 
 
 async def test_regrading_same_day_does_not_double_count_bonus(bot_dp):
@@ -315,7 +320,7 @@ async def test_grading_zero_is_allowed_and_shown_as_bajarilmagan(bot_dp):
         main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700016:bajarilmagan", target_chat_id=_NAZORATCHI_ID
     )
 
-    assert "0 (Bajarilmagan)" in _screen(sent).text
+    assert "0 (Bajarilmagan)" in _card(sent).text
 
 
 async def test_existing_baholash_flow_still_only_offers_three_grades(bot_dp):

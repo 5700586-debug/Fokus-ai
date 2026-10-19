@@ -465,7 +465,15 @@ def register(dp: Dispatcher, openai_client) -> None:
         grade_key = parts[3]
         review_date = (_iso_from_ymd(parts[4]) if len(parts) > 4 else None) or _today().isoformat()
 
+        if employees.get_profile(employee_id) is None:
+            await callback.answer(discipline.grade_notice_reply(discipline.NOTICE_UNKNOWN_EMPLOYEE), show_alert=True)
+            return
+
         result = discipline.record_daily_grade(employee_id, callback.from_user.id, review_date, grade_key)
+        outcome = await discipline.notify_employee_of_grade(callback.bot, employee_id, result)
+        if outcome == discipline.NOTICE_UNCHANGED:
+            await callback.answer(discipline.grade_notice_reply(outcome))
+            return
 
         name = _employee_name(employee_id)
         label = discipline.GRADE_LABELS[grade_key]
@@ -480,7 +488,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(text, reply_markup=keyboard)
         else:
             await callback.message.edit_text(confirmation)
-        await callback.answer("Saqlandi")
+        await callback.answer(discipline.grade_notice_reply(outcome))
 
     @dp.callback_query(F.data.startswith("bos:penalty_menu:"))
     async def baholash_penalty_menu(callback: CallbackQuery) -> None:

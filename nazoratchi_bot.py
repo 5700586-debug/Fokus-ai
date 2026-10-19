@@ -993,8 +993,14 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         today = company_time.today().isoformat()
-        discipline.record_daily_grade(user_id, callback.from_user.id, today, grade_key)
-        await callback.answer(f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}")
+        result = discipline.record_daily_grade(user_id, callback.from_user.id, today, grade_key)
+        outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
+        if outcome == discipline.NOTICE_UNCHANGED:
+            await callback.answer(discipline.grade_notice_reply(outcome))
+            return
+
+        saved = f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}"
+        await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
 
         if callback.message:
             await callback.message.edit_text(

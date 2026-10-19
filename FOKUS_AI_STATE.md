@@ -1,6 +1,6 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-18, manba: main HEAD `dd0c492`
+Tekshirilgan: 2026-10-19, manba: main HEAD `dd0c492`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
@@ -15,6 +15,9 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 
 ## Ochiq PR'lar
 
+- #49 — 2-qadam, oylik baholarni eval_date oyiga hisoblash; ushbu branch, merge/deploy oldidan tekshirildi.
+- #50 — Saturn nizom katalogi va minus oqimi; ochiq, merge/import qilinmagan (oxirgi ko'rilgan head `0ebda4e`).
+
 - #46 — kassa dialog xabarlarini yoshga qarab tozalash + eskirgan `csui_` tugmalar. Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
 - #39 — production read-only smoke E2E (faqat qo'lda ishga tushadi). Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
 - #22 — daftar rasmidan kassa maydonlarini o'qish. Holat: ochiq, `CONFLICTING`/`DIRTY`, merge qilinmagan.
@@ -22,7 +25,7 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 ## Deploy / Render
 
 - `9ead58b` live, 2026-10-07 (ChatGPT Render tekshiruvi, 2026-10-18).
-- `dd0c492` (PR #48) — Muhammadiy xabari bo'yicha Render LIVE; robot tekshirmadi (robotda Render kirish yo'q).
+- `dd0c492` (PR #48) — Render plagini orqali LIVE ekani tekshirildi, 2026-10-19; deploy `dep-dbauebgae00c73a5rg00`.
 - Quyidagi 2-qadam hali deploy qilinmagan.
 
 ## Bajarilgan ish
@@ -33,6 +36,9 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Testlar: 6 ta fayl (bonus ledger, discipline service, bot flows, employee dashboard, nazoratchi daily flow/supervision) SQLite: 218 passed; PostgreSQL 16.15 (`tests/test_discipline_postgres.py`, `PgConnection`, vaqtincha lokal Docker instance, tozalangan): 23 passed, 3 marta takrorlandi.
 
 ## Qolgan cheklovlar
+
+- Yopilgan/to'langan oy uchun qulf yo'q: keyin kiritilgan eski oy bahosi yoki tuzatishi o'sha oy yig'indisini o'zgartiradi. Ushbu PR qulf qurmaydi; kelajakdagi 4-qadam (qog'ozdan kiritish) faqat joriy oy bilan cheklanishi kerak.
+- 1-qadamdagi shaxsiy xabar va 3→2 tuzatish real Telegram akkauntida sinalgani hali tasdiqlanmagan; avtomatik testlar bu operator tekshiruvini almashtirmaydi.
 
 - Tarixiy ledger-only `daily_evaluation` yozuvlari (`daily_evaluations` qatori bo'lmagan) oylik hisobga kirmaydi va taxmin bilan bahoga aylantirilmagan; production'da bunday yozuvlar bor-yo'qligi tekshirilmagan.
 - Boshqa bonus/minus yozuvlari o'z yozilgan oyiga tushadi (sanasi `eval_date`ga ko'chirilmagan): masalan o'tgan oy sanasiga qo'yilgan jarima yozilgan oyda minus bo'ladi.

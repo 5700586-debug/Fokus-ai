@@ -44,6 +44,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+import secrets
+
 import company_time
 import discipline_bot
 import employees
@@ -99,7 +101,7 @@ _CB_MATCH_REJECT_PREFIX = "nzr_match_no:"
 # Nizom katalogi bo'yicha minus oqimi (band tanlash -> variant -> shart -> yakuniy tasdiq).
 _CB_CAT_ITEM = "nzr_pc:"        # nzr_pc:<xodim>:<rule_number>
 _CB_CAT_VARIANT = "nzr_pv:"     # nzr_pv:<xodim>:<rule_number>:<variant_id|0>  (tanlov -> yakuniy ekran)
-_CB_CAT_APPLY = "nzr_pa:"       # nzr_pa:<xodim>:<rule_number>:<variant_id|0>  (YAKUNIY tasdiq)
+_CB_CAT_APPLY = "nzr_pa:"       # nzr_pa:<xodim>:<rule_number>:<variant_id|0>:<token>  (YAKUNIY tasdiq, bir martalik token)
 _CB_CAT_BROWSE = "nzr_pm:"      # nzr_pm:<xodim>[:<bo'lim>:<sahifa>]
 _CB_CAT_FOUNDER = "nzr_px:"     # "Hech biri" / "Asoschiga yuborish"
 _CB_CAT_REWRITE = "nzr_pw:"     # "Qayta yozish"
@@ -979,12 +981,12 @@ def _confirm_text(name: str, entry: dict, option: dict | None, points: int, quot
     return "\n".join(lines)
 
 
-def _confirm_keyboard(user_id: int, rule_number: int, option_id: int, with_conditions: bool) -> InlineKeyboardMarkup:
+def _confirm_keyboard(user_id: int, rule_number: int, option_id: int, with_conditions: bool, token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(
                 text=_CONFIRM_CONDITIONS if with_conditions else _CONFIRM_PLAIN,
-                callback_data=f"{_CB_CAT_APPLY}{user_id}:{rule_number}:{option_id}",
+                callback_data=f"{_CB_CAT_APPLY}{user_id}:{rule_number}:{option_id}:{token}",
             )],
             [InlineKeyboardButton(text="📚 Boshqa band", callback_data=f"{_CB_CAT_BROWSE}{user_id}")],
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")],
@@ -1254,7 +1256,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_incident=secrets.token_hex(4))
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1325,7 +1327,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             choices += [(entry, option, _choice_quote(entry, option, ai_quote)) for entry, option in expanded]
 
         await state.update_data(
-            penalty_other_text=text, cat_confirm=None,
+            penalty_other_text=text, cat_confirm=None, cat_incident=secrets.token_hex(4),
             cat_considered=", ".join(f"{_rule_label(entry)} — {entry['title']}" for entry in (by_number[n] for n, _, _ in picks)),
         )
         if not choices:
@@ -1351,7 +1353,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if employees.get_profile(user_id) is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
-        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_incident=secrets.token_hex(4))
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
         if callback.message:
@@ -1370,15 +1372,30 @@ def register(dp: Dispatcher, openai_client) -> None:
         points = option["points"] if option else entry["default_penalty_amount"]
         option_id = option["id"] if option else 0
         section = _employee_section(user_id)
-        await state.update_data(cat_confirm=f"{user_id}:{entry['rule_number']}:{option_id}")
+        await state.update_data(cat_confirm=None)  # eski tasdiq darhol bekor; yangisi faqat ekran yuborilgach ochiladi
+        token = secrets.token_hex(4)
         name = _full_name(employees.get_profile(user_id), user_id)
         text = _confirm_text(name, entry, option, points, quote, section)
-        markup = _confirm_keyboard(user_id, entry["rule_number"], option_id, _needs_conditions(entry, option, section))
+        markup = _confirm_keyboard(user_id, entry["rule_number"], option_id, _needs_conditions(entry, option, section), token)
+        try:
+            if isinstance(target, CallbackQuery):
+                await _edit(target, text, markup)
+            else:
+                await target.answer(text[:4000], reply_markup=markup)
+        except Exception as error:  # noqa: BLE001
+            print(f"Yakuniy tasdiq ekranini ko'rsatib bo'lmadi: {error!r}")
+            if isinstance(target, CallbackQuery):
+                await target.answer("Ekranni ko'rsatib bo'lmadi — qayta urinib ko'ring.", show_alert=True)
+            return
+        data = await state.get_data()
+        await state.update_data(
+            cat_confirm={
+                "token": token, "incident": data.get("cat_incident"),
+                "user": user_id, "rule": entry["rule_number"], "option": option_id,
+            }
+        )
         if isinstance(target, CallbackQuery):
-            await _edit(target, text, markup)
             await target.answer()
-        else:
-            await target.answer(text[:4000], reply_markup=markup)
 
     async def _show_item(callback: CallbackQuery, state: FSMContext, user_id: int, rule_number: int) -> None:
         """"Boshqa band" yo'li: band tanlandi. Miqdorsiz — izoh; bir nechta variant — variant tanlash; aks holda yakuniy ekran."""
@@ -1453,11 +1470,22 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         discipline_bot._PENDING_PENALTY_APPLICATIONS.add(nazoratchi_id)
         try:
-            ids = _parse_ids(callback, _CB_CAT_APPLY, 3)
+            parts = callback.data[len(_CB_CAT_APPLY):].split(":")
             data = await state.get_data()
-            # Faqat yakuniy tasdiq ekrani ochilgan holatda va BIR MARTA: token ishlatilgach bekor qilinadi.
-            if ids is None or data.get("cat_confirm") != ":".join(str(part) for part in ids):
-                await callback.answer("Tasdiq eskirgan yoki allaqachon qo'llangan.", show_alert=True)
+            saved = data.get("cat_confirm")
+            try:
+                ids = [int(part) for part in parts[:3]] if len(parts) == 4 else None
+            except ValueError:
+                ids = None
+            # Faqat joriy hodisa uchun ochilgan, ishlatilmagan token va xodim+band+variant aynan mos kelganda;
+            # token ishlatilgach (yoki rad etilsa ham) bekor qilinadi.
+            valid = (
+                ids is not None and isinstance(saved, dict) and saved.get("token") == parts[3]
+                and saved.get("incident") == data.get("cat_incident")
+                and [saved.get("user"), saved.get("rule"), saved.get("option")] == ids
+            )
+            if not valid:
+                await callback.answer("Bu tasdiq eskirgan.", show_alert=True)
                 return
             await state.update_data(cat_confirm=None)
             user_id, rule_number, option_id = ids
@@ -1518,7 +1546,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         if employees.get_profile(user_id) is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
-        await state.update_data(penalty_other_employee_id=user_id)
+        await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None)
         entries = discipline.get_catalog_entries()
         if len(parts) == 1:
             own = _employee_section(user_id)

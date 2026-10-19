@@ -108,7 +108,7 @@ async def test_clear_band_and_variant_goes_straight_to_one_final_screen(bot_dp, 
     screen = sent[0]
     assert "Aniqlashtiring" not in screen.text and "Shu bandmi" not in screen.text
     assert "−6 ball" in screen.text and "«" in screen.text and "Valiyev" in screen.text
-    assert _apply_data(screen) == f"nzr_pa:{EMPLOYEE}:26:{six['id']}"
+    assert _apply_data(screen).startswith(f"nzr_pa:{EMPLOYEE}:26:{six['id']}:")
     assert {"📚 Boshqa band", "❌ Bekor qilish"} <= set(_kb(screen).values())
     assert _bank(EMPLOYEE) == 0  # tasdiqdan oldin minus yo'q
 
@@ -179,7 +179,7 @@ async def test_rule_26_original_condition_is_on_the_final_screen_without_extra_g
     assert _kb(screen)[_apply_data(screen)] == CONDITIONS_BUTTON
     assert not any(c.startswith("nzr_pg:") for c in _kb(screen))
     # yakuniy ekransiz/soxta tugma bilan minus yozilmaydi
-    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{_option(26, 16 - points)['id']}")
+    await _cb(main, bot, f"nzr_pa:{EMPLOYEE}:26:{_option(26, 16 - points)['id']}:deadbeef")
     assert _bank(EMPLOYEE) == 0
     await _cb(main, bot, _apply_data(screen))
     assert _bank(EMPLOYEE) == -points
@@ -425,4 +425,145 @@ async def test_legacy_apply_refuses_catalog_rule(bot_dp):
 
     await _cb(main, bot, f"nzr_penalty_apply:{EMPLOYEE}:{entry['rule_number']}")
 
+    assert _bank(EMPLOYEE) == 0
+
+
+# ------------------------------------------------ bir martalik tasdiq tokeni --
+
+
+async def _incident(main, bot, user_id: int, text: str):
+    """Ayni xodim+band+variant (26-band, −6) uchun yangi hodisa; yakuniy ekranni qaytaradi."""
+    return (await _start(main, bot, user_id, text))[0]
+
+
+def _six_ai(monkeypatch, main):
+    _ai(monkeypatch, main, [{"id": 26, "variant": _option(26, 6)["id"]}])
+
+
+async def test_old_button_of_incident_a_cannot_apply_to_incident_b_with_same_triplet(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _six_ai(monkeypatch, main)
+    old = _apply_data(await _incident(main, bot, EMPLOYEE, "A hodisa"))
+    new = _apply_data(await _incident(main, bot, EMPLOYEE, "B hodisa"))
+    assert old.rsplit(":", 1)[0] == new.rsplit(":", 1)[0] and old != new  # uchlik bir xil, token boshqa
+
+    await _cb(main, bot, old)
+    assert _bank(EMPLOYEE) == 0
+    await _cb(main, bot, new)
+    assert _bank(EMPLOYEE) == -6
+    await _cb(main, bot, new)  # qayta bosish
+    await _cb(main, bot, old)
+    assert _bank(EMPLOYEE) == -6
+
+
+@pytest.mark.parametrize("how", ["browse", "cancel", "rewrite", "other_employee", "other_variant", "other_band"])
+async def test_leaving_the_final_screen_invalidates_its_token(bot_dp, monkeypatch, how):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _employee(OTHER_ROLE_EMPLOYEE)
+    _six_ai(monkeypatch, main)
+    token_button = _apply_data(await _incident(main, bot, EMPLOYEE, "hodisa"))
+
+    if how == "browse":
+        await _cb(main, bot, f"nzr_pm:{EMPLOYEE}")
+    elif how == "cancel":
+        await _cb(main, bot, f"nzr_penalty:{EMPLOYEE}")
+    elif how == "rewrite":
+        await _cb(main, bot, f"nzr_pw:{EMPLOYEE}")
+    elif how == "other_employee":
+        await _cb(main, bot, f"nzr_penalty_other:{OTHER_ROLE_EMPLOYEE}")
+    elif how == "other_variant":
+        await _cb(main, bot, f"nzr_pv:{EMPLOYEE}:26:{_option(26, 10)['id']}")
+    else:
+        await _cb(main, bot, f"nzr_pc:{EMPLOYEE}:{_rule('KASSA APPARATI', 'kassir')['rule_number']}")
+
+    await _cb(main, bot, token_button)
+    assert _bank(EMPLOYEE) == 0
+
+
+async def test_missing_wrong_and_legacy_format_tokens_are_rejected(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _six_ai(monkeypatch, main)
+    good = _apply_data(await _incident(main, bot, EMPLOYEE, "hodisa"))
+    base, token = good.rsplit(":", 1)
+    option = base.split(":")[3]
+
+    for data in (
+        base,                                   # tokensiz (eski format)
+        f"nzr_pa:{EMPLOYEE}:26:{option}",       # eski 3 qismli format
+        f"{base}:{'0' * 8}",                    # noto'g'ri token
+        f"{base}:{token}:x",                    # ortiqcha qism
+        f"nzr_pa:{EMPLOYEE}:27:{option}:{token}",  # boshqa band, to'g'ri token
+        f"nzr_pa:{OTHER_ROLE_EMPLOYEE}:26:{option}:{token}",
+    ):
+        answers = await _cb(main, bot, data)
+        assert _bank(EMPLOYEE) == 0, data
+    assert any("eskirgan" in (getattr(m, "text", "") or "") for m in await _cb(main, bot, base))
+    await _cb(main, bot, good)  # haqiqiy token hamon ishlaydi (rad etishlar uni buzmagan)
+    assert _bank(EMPLOYEE) == -6
+
+
+async def test_failed_final_screen_leaves_no_usable_confirmation(bot_dp, monkeypatch):
+    from tests.bot_harness import RecordingBot
+
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _six_ai(monkeypatch, main)
+    old = _apply_data(await _incident(main, bot, EMPLOYEE, "A hodisa"))
+    original = RecordingBot.__call__
+
+    async def failing(self, method, request_timeout=None):
+        if isinstance(method, SendMessage) and method.chat_id == NAZORATCHI and "−6 ball" in (method.text or ""):
+            raise RuntimeError("yuborish xatosi")
+        return await original(self, method, request_timeout)
+
+    monkeypatch.setattr(RecordingBot, "__call__", failing)
+    await _start(main, bot, EMPLOYEE, "B hodisa")  # yakuniy ekran yuborilmadi
+    monkeypatch.setattr(RecordingBot, "__call__", original)
+
+    await _cb(main, bot, old)
+    assert _bank(EMPLOYEE) == 0
+
+
+async def test_plain_and_conditional_flows_work_and_callback_data_fits_64_bytes(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    big = 7_952_886_089  # 10 xonali Telegram ID
+    _employee(big)
+    kassa = _rule("KASSA APPARATI", "kassir")
+    _ai(monkeypatch, main, [{"id": kassa["rule_number"]}])
+    plain = (await _start(main, bot, big, "oddiy"))[0]
+    _six_ai(monkeypatch, main)
+    conditional = (await _start(main, bot, big, "shartli"))[0]
+
+    for screen in (plain, conditional):
+        for data in _kb(screen):
+            assert len(data.encode()) <= 64, data
+    assert _kb(plain)[_apply_data(plain)] == "✅ Tasdiqlash"
+    assert _kb(conditional)[_apply_data(conditional)] == CONDITIONS_BUTTON
+    await _cb(main, bot, _apply_data(conditional))
+    assert _bank(big) == -6
+
+
+async def test_failed_edit_of_final_screen_in_same_incident_keeps_no_usable_token(bot_dp, monkeypatch):
+    from aiogram.methods import EditMessageText
+    from tests.bot_harness import RecordingBot
+
+    main, bot = bot_dp
+    _employee(EMPLOYEE)
+    _six_ai(monkeypatch, main)
+    old = _apply_data(await _incident(main, bot, EMPLOYEE, "hodisa"))
+    original = RecordingBot.__call__
+
+    async def failing(self, method, request_timeout=None):
+        if isinstance(method, EditMessageText):
+            raise RuntimeError("tahrirlash xatosi")
+        return await original(self, method, request_timeout)
+
+    monkeypatch.setattr(RecordingBot, "__call__", failing)
+    await _cb(main, bot, f"nzr_pv:{EMPLOYEE}:26:{_option(26, 10)['id']}")
+    monkeypatch.setattr(RecordingBot, "__call__", original)
+
+    await _cb(main, bot, old)
     assert _bank(EMPLOYEE) == 0

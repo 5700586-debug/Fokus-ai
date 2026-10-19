@@ -80,36 +80,40 @@ def get_bonus_ledger(user_id: int, limit: int = 20) -> list[dict]:
     return discipline_repo.get_bonus_ledger(user_id, limit)
 
 
-def _current_period_start_utc_iso() -> str:
-    """Joriy (kompaniya vaqt zonasidagi) oyning 00:00 boshlanishi,
-    UTC ISO ko'rinishida — ``bonus_bank_ledger.created_at`` HAM har
-    doim UTC ISO (``repositories/discipline.py::_now()``) sifatida
-    saqlanadi, shuning uchun ikkalasi to'g'ridan-to'g'ri solishtirish
-    mumkin bo'lishi uchun bu yerda ham UTC'ga aylantiriladi (aks holda
-    oy chegarasida — mahalliy va UTC orasidagi 5 soatlik farq tufayli
-    — noto'g'ri natija chiqishi mumkin edi)."""
-    local_today = company_time.today()
-    local_month_start = datetime(
-        local_today.year, local_today.month, 1, tzinfo=company_time.resolve_timezone()
-    )
-    return local_month_start.astimezone(timezone.utc).isoformat()
+_YEAR_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
 
-def get_period_point_totals(user_id: int) -> dict:
-    """Joriy oy uchun Bonus/Minus/Jami ball — ``bonus_bank_ledger``dan
-    hisoblanadi (kunlik baho va jarima allaqachon shu ledgerga yozadi,
-    qarang ``record_daily_grade``/``apply_penalty``). Eski oylar hech
-    qachon o'chirilmaydi/tozalanmaydi — bu funksiya faqat KO'RSATISH
-    uchun davrni filtrlaydi, yangi oy boshlanishi bilan tabiiy ravishda
-    0/0/0dan boshlanadi (chunki hali shu oyga tegishli yozuv yo'q)."""
-    since_iso = _current_period_start_utc_iso()
-    totals = discipline_repo.get_bonus_ledger_totals_since(user_id, since_iso)
-    return {
-        "period_key": company_time.today().strftime("%Y-%m"),
-        "bonus": totals["bonus"],
-        "minus": totals["minus"],
-        "net": totals["net"],
-    }
+def _month_bounds(year_month: str) -> tuple[str, str, str, str]:
+    """``"YYYY-MM"`` -> (oy boshi sanasi, keyingi oy boshi sanasi, ikkalasining UTC ISO vaqti). Oy
+    chegarasi: boshlanish <= sana < keyingi oy boshlanishi (har oy 31 kun emas; dekabr -> keyingi yil
+    yanvar; kabisa fevral). Kompaniya vaqt zonasi ishlatiladi. Yaroqsiz oy/yil uchun ``ValueError``."""
+    match = _YEAR_MONTH_RE.match(year_month or "")
+    if match is None:
+        raise ValueError(f"oy 'YYYY-MM' ko'rinishida bo'lishi kerak: {year_month!r}")
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12 or year < 1:
+        raise ValueError(f"noto'g'ri oy: {year_month!r}")
+
+    start = date(year, month, 1)
+    following = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    tz = company_time.resolve_timezone()
+
+    def utc_iso(day: date) -> str:
+        return datetime(day.year, day.month, day.day, tzinfo=tz).astimezone(timezone.utc).isoformat()
+
+    return start.isoformat(), following.isoformat(), utc_iso(start), utc_iso(following)
+
+
+def get_period_point_totals(user_id: int, year_month: str | None = None) -> dict:
+    """Berilgan oy (``"YYYY-MM"``; berilmasa kompaniyaning joriy oyi) uchun Bonus/Minus/Jami ball.
+    Kunlik baho bonusi baho OYIGA (``eval_date``) tegishli — baho qachon kiritilgani yoki tuzatilgani
+    oyni o'zgartirmaydi; boshqa bonus va haqiqiy minuslar ledgerdan o'z yozilgan oyi bo'yicha olinadi
+    (qarang ``discipline_repo.get_month_point_totals``). Eski oylar hech qachon o'chirilmaydi — bu
+    funksiya faqat KO'RSATISH uchun hisoblaydi va hech narsa yozmaydi."""
+    key = company_time.today().strftime("%Y-%m") if year_month is None else year_month
+    start_date, end_date, since_iso, until_iso = _month_bounds(key)
+    totals = discipline_repo.get_month_point_totals(user_id, start_date, end_date, since_iso, until_iso)
+    return {"period_key": key, "bonus": totals["bonus"], "minus": totals["minus"], "net": totals["net"]}
 
 
 # --------------------------------------------------------- company rules --
@@ -238,17 +242,23 @@ def is_quiet_time(local_now: datetime) -> bool:
 
 
 def format_grade_notice(result: EvaluationResult, totals: dict) -> str:
+    """``totals`` — baho OYI (``result.eval_date``) uchun ``get_period_point_totals`` natijasi. Joriy oy
+    bahosida "Shu oy …", oldingi oy bahosida oy aniq ko'rsatiladi ("2026-10 uchun …") — eski sana
+    xabariga joriy oy yig'indisi qo'shilmaydi."""
     day = date.fromisoformat(result.eval_date).strftime("%d.%m.%Y")
     if result.changed and result.old_grade_points is not None:
         head = f"✏️ Tuzatildi: {result.old_grade_points} → {result.grade_points}"
     else:
         head = f"⭐ Baho: {result.grade_points} — {GRADE_LABELS[result.grade_key]}"
+    period_key = totals.get("period_key")
+    is_current_month = period_key is None or period_key == company_time.today().strftime("%Y-%m")
+    label = "Shu oy" if is_current_month else f"{period_key} uchun"
     return (
         f"📅 Sana: {day}\n"
         f"{head}\n"
-        f"Shu oy bonus: {totals['bonus']}\n"
-        f"Shu oy minus: {totals['minus']}\n"
-        f"Shu oy jami: {totals['net']}"
+        f"{label} bonus: {totals['bonus']}\n"
+        f"{label} minus: {totals['minus']}\n"
+        f"{label} jami: {totals['net']}"
     )
 
 
@@ -276,7 +286,7 @@ async def notify_employee_of_grade(bot, employee_id: int, result: EvaluationResu
         return NOTICE_NOT_LINKED
 
     try:
-        text = format_grade_notice(result, get_period_point_totals(employee_id))
+        text = format_grade_notice(result, get_period_point_totals(employee_id, result.eval_date[:7]))
         await bot.send_message(chat_id, text, disable_notification=is_quiet_time(company_time.now()))
     except TelegramForbiddenError:
         logger.error("grade_notice: yuborib bo'lmadi (bot bloklangan/ulanmagan)")

@@ -737,15 +737,17 @@ def list_penalties_by_status(employee_id: int, appeal_status: str, limit: int = 
     return [dict(row) for row in rows]
 
 
-def set_penalty_appeal(penalty_id: int, reason: str, voice_file_id: str | None) -> None:
+def set_penalty_appeal(penalty_id: int, reason: str, voice_file_id: str | None) -> bool:
+    """Atomik: faqat hali e'tiroz berilmagan (``none``) minusga; parallel/takroriy yuborish ikkinchi e'tiroz yaratmaydi."""
     conn = get_connection()
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE discipline_penalties SET appeal_status = 'pending', "
-            "appeal_reason = ?, appeal_voice_file_id = ? WHERE id = ?",
+            "appeal_reason = ?, appeal_voice_file_id = ? WHERE id = ? AND appeal_status = 'none'",
             (reason, voice_file_id, penalty_id),
         )
         conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 
@@ -762,15 +764,17 @@ def set_penalty_appeal_brief(penalty_id: int, brief: str) -> None:
         conn.close()
 
 
-def decide_penalty_appeal(penalty_id: int, decision: str, decided_by: int) -> None:
+def decide_penalty_appeal(penalty_id: int, decision: str, decided_by: int) -> bool:
+    """Atomik: faqat kutilayotgan (``pending``) e'tiroz hal bo'ladi; ikkinchi bosish qaror/qaytarish yaratmaydi."""
     conn = get_connection()
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE discipline_penalties SET appeal_status = 'resolved', "
-            "appeal_decision = ?, appeal_decided_by = ?, appeal_decided_at = ? WHERE id = ?",
+            "appeal_decision = ?, appeal_decided_by = ?, appeal_decided_at = ? WHERE id = ? AND appeal_status = 'pending'",
             (decision, decided_by, _now(), penalty_id),
         )
         conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

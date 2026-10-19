@@ -55,7 +55,7 @@ from services import attendance as attendance_service
 from services import audit
 from services import one_on_one as one_on_one_service
 from services import schedule_range
-from services import discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
+from services import dialog_cleanup, discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
@@ -1183,6 +1183,9 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         if callback.message:
             await callback.message.edit_text(text, reply_markup=keyboard)
+            data = await state.get_data()
+            await _dlg_finish(callback.bot, data, callback.message)
+            await _dlg_begin(state, callback.message, force_new=True)
         await callback.answer()
 
     @dp.callback_query(F.data.startswith(_CB_PENALTY_APPLY_PREFIX))
@@ -1259,8 +1262,70 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_incident=secrets.token_hex(4))
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
-        if callback.message:
-            await callback.message.answer("✍️ Holatni qisqacha yozing (masalan: \"Nazoratchini haqorat qildi\"):")
+        await _show_prompt(callback, state, "✍️ Holatni qisqacha yozing (masalan: \"Nazoratchini haqorat qildi\"):", user_id)
+
+    # ---------------------------------------------- dialog xabarlarini tozalash --
+    # Yangi ekran muvaffaqiyatli ko'rsatilgachgina shu dialogning ID'si qayd etilgan eski xabarlari o'chiriladi
+    # (``services/dialog_cleanup``). Dialog FSM'dagi ``dlg`` (id) va ``dlg_msg`` (joriy ishchi xabar) bilan yuritiladi.
+
+    async def _dlg_begin(state: FSMContext, current: Message | None, *, force_new: bool = False) -> None:
+        if current is None:
+            return
+        data = await state.get_data()
+        if not force_new and data.get("dlg") and data.get("dlg_msg") == current.message_id:
+            return
+        dlg = secrets.token_hex(4)
+        await state.update_data(dlg=dlg, dlg_msg=current.message_id)
+        dialog_cleanup.track(dialog_cleanup.minus_key(current.chat.id, dlg), current)
+
+    async def _dlg_track_user_message(state: FSMContext, message: Message) -> None:
+        dlg = (await state.get_data()).get("dlg")
+        if dlg:
+            dialog_cleanup.track(dialog_cleanup.minus_key(message.chat.id, dlg), message)
+
+    async def _dlg_shown(state: FSMContext, bot, shown: Message | None) -> None:
+        """Yangi ekran (yangi xabar) muvaffaqiyatli yuborildi: eski ishchi xabarlar o'chadi, yangisi kuzatuvga olinadi."""
+        if shown is None:
+            return
+        data = await state.get_data()
+        dlg = data.get("dlg")
+        if not dlg:
+            return
+        key = dialog_cleanup.minus_key(shown.chat.id, dlg)
+        await dialog_cleanup.sweep(bot, key, keep=(shown.chat.id, shown.message_id))
+        dialog_cleanup.track(key, shown)
+        await state.update_data(dlg_msg=shown.message_id)
+
+    async def _dlg_finish(bot, data: dict, current: Message | None) -> None:
+        """Dialog yakuni (natija ekrani tahrirlandi): natija xabari qoladi, qolgan ishchi xabarlar o'chadi.
+        Faqat joriy ishchi xabardan kelgan callback uchun (eskirgan xabar boshqa xabarlarni o'chirmasin)."""
+        if current is None or not data.get("dlg") or data.get("dlg_msg") != current.message_id:
+            return
+        await dialog_cleanup.sweep(
+            bot, dialog_cleanup.minus_key(current.chat.id, data["dlg"]), keep=(current.chat.id, current.message_id)
+        )
+
+    async def _send_screen(message: Message, state: FSMContext, text: str, markup: InlineKeyboardMarkup) -> Message | None:
+        try:
+            shown = await message.answer(text[:4000], reply_markup=markup)
+        except Exception as error:  # noqa: BLE001
+            print(f"Yangi ekranni yuborib bo'lmadi (eski ekran saqlandi): {error!r}")
+            return None
+        await _dlg_shown(state, message.bot, shown)
+        return shown
+
+    async def _show_prompt(callback: CallbackQuery, state: FSMContext, text: str, user_id: int) -> None:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"{_CB_PENALTY_PREFIX}{user_id}")]]
+        )
+        if callback.message is None:
+            return
+        await _dlg_begin(state, callback.message)
+        try:
+            await callback.message.edit_text(text, reply_markup=markup)
+        except Exception as error:  # noqa: BLE001
+            print(f"Savolni tahrirlab bo'lmadi, yangi xabar yuboriladi: {error!r}")
+            await _send_screen(callback.message, state, text, markup)
 
     def _employee_section(user_id: int) -> str | None:
         profile = employees.get_profile(user_id)
@@ -1294,6 +1359,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         # Nazoratchi holatni xodim bilan aniqlab bo'lgan: AI faqat band/variant id'sini katalogdan taklif qiladi,
         # ball va shart bazadan olinadi. Savol faqat band yoki variantni ajratib bo'lmaganda beriladi.
+        await _dlg_track_user_message(state, message)
         profile = employees.get_profile(user_id)
         name = _full_name(profile, user_id)
         section = _employee_section(user_id)
@@ -1331,9 +1397,10 @@ def register(dp: Dispatcher, openai_client) -> None:
             cat_considered=", ".join(f"{_rule_label(entry)} — {entry['title']}" for entry in (by_number[n] for n, _, _ in picks)),
         )
         if not choices:
-            await message.answer(
+            await _send_screen(
+                message, state,
                 _no_candidates_text(name, status, f"{_rule_label(amountless[0])} — {amountless[0]['title']}" if amountless else None),
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=_catalog_footer(user_id)),
+                InlineKeyboardMarkup(inline_keyboard=_catalog_footer(user_id)),
             )
             return
 
@@ -1343,7 +1410,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await _present_confirm(message, state, user_id, entry, option, quote)
             return
         choices = choices[:discipline_ai.MAX_CANDIDATES]
-        await message.answer(_choices_text(name, text, choices), reply_markup=_choices_keyboard(user_id, choices))
+        await _send_screen(message, state, _choices_text(name, text, choices), _choices_keyboard(user_id, choices))
 
     @dp.callback_query(F.data.startswith(_CB_CAT_REWRITE))
     async def cat_rewrite(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1356,8 +1423,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(penalty_other_employee_id=user_id, cat_confirm=None, cat_incident=secrets.token_hex(4))
         await state.set_state(PenaltyOtherStates.waiting_reason)
         await callback.answer()
-        if callback.message:
-            await callback.message.answer("✍️ Holatni qaytadan yozing: nima bo'ldi va kim nima qildi?")
+        await _show_prompt(callback, state, "✍️ Holatni qaytadan yozing: nima bo'ldi va kim nima qildi?", user_id)
 
     def _parse_ids(callback: CallbackQuery, prefix: str, count: int) -> list[int] | None:
         try:
@@ -1381,7 +1447,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             if isinstance(target, CallbackQuery):
                 await _edit(target, text, markup)
             else:
-                await target.answer(text[:4000], reply_markup=markup)
+                shown = await target.answer(text[:4000], reply_markup=markup)
         except Exception as error:  # noqa: BLE001
             print(f"Yakuniy tasdiq ekranini ko'rsatib bo'lmadi: {error!r}")
             if isinstance(target, CallbackQuery):
@@ -1396,6 +1462,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         )
         if isinstance(target, CallbackQuery):
             await target.answer()
+        else:
+            await _dlg_shown(state, target.bot, shown)
 
     async def _show_item(callback: CallbackQuery, state: FSMContext, user_id: int, rule_number: int) -> None:
         """"Boshqa band" yo'li: band tanlandi. Miqdorsiz — izoh; bir nechta variant — variant tanlash; aks holda yakuniy ekran."""
@@ -1511,15 +1579,20 @@ def register(dp: Dispatcher, openai_client) -> None:
                 return
             await state.clear()
             await callback.answer(f"✅ -{amount} ball qayd etildi.")
-            await _edit(
-                callback,
-                f"✅ {_rule_label(entry)} — {entry['title']}\n➖ -{amount} ball qayd etildi."
-                + (" Yozma ogohlantirish alohida beriladi." if option and option["written_warning"] else "")
-                + f"\n💰 Bonus banki: {result['bonus_bank_balance']} ball\nℹ️ Fiks oylikka ta'sir qilmaydi.",
-                _employee_card_keyboard(
-                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                ),
-            )
+            try:
+                await _edit(
+                    callback,
+                    f"✅ {_rule_label(entry)} — {entry['title']}\n➖ -{amount} ball qayd etildi."
+                    + (" Yozma ogohlantirish alohida beriladi." if option and option["written_warning"] else "")
+                    + f"\n💰 Bonus banki: {result['bonus_bank_balance']} ball\nℹ️ Fiks oylikka ta'sir qilmaydi.",
+                    _employee_card_keyboard(
+                        profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
+                    ),
+                )
+            except Exception as error:  # noqa: BLE001
+                print(f"Natija ekranini tahrirlab bo'lmadi (minus saqlangan): {error!r}")
+            else:
+                await _dlg_finish(callback.bot, data, callback.message)
             try:
                 await callback.bot.send_message(
                     user_id,
@@ -1596,7 +1669,12 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         await _notify_founder_unmatched(callback.bot, user_id, callback.from_user.id, text, considered)
         await callback.answer("✅ Asoschiga yuborildi.")
-        await _edit(callback, "✅ Qabul qilindi — ball ayirilmadi, Asoschi ko'rib chiqishi uchun yuborildi.", None)
+        try:
+            await _edit(callback, "✅ Qabul qilindi — ball ayirilmadi, Asoschi ko'rib chiqishi uchun yuborildi.", None)
+        except Exception as error:  # noqa: BLE001
+            print(f"Asoschiga yuborish ekranini tahrirlab bo'lmadi: {error!r}")
+        else:
+            await _dlg_finish(callback.bot, data, callback.message)
 
     @dp.callback_query(F.data.startswith(_CB_MATCH_CONFIRM_PREFIX))
     async def match_confirm(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1684,13 +1762,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     @dp.callback_query(F.data.startswith(_CB_APPEAL_PREFIX))
     async def employee_appeal_start(callback: CallbackQuery, state: FSMContext) -> None:
-        penalty_id = int(callback.data.split(":", 1)[1])
-        await state.update_data(appeal_penalty_id=penalty_id)
-        await state.set_state(discipline_bot.AppealStates.waiting_reason)
-        await callback.answer()
-        if callback.message:
-            await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.message.answer("✍️ Sababingizni matn yoki ovozli xabar sifatida yuboring.")
+        await discipline_bot.begin_appeal(callback, state, int(callback.data.split(":", 1)[1]), notice=True)
 
     # -------------------------------------------------------------- davomat --
 

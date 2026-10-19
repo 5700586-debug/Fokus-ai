@@ -447,12 +447,17 @@ def list_appealable_penalties(employee_id: int, limit: int = 10) -> list[dict]:
     return discipline_repo.list_penalties_by_status(employee_id, APPEAL_NONE, limit)
 
 
+def get_penalty(penalty_id: int) -> dict | None:
+    return discipline_repo.get_penalty(penalty_id)
+
+
 def submit_appeal(penalty_id: int, reason_text: str, voice_file_id: str | None) -> dict | None:
     penalty = discipline_repo.get_penalty(penalty_id)
     if penalty is None or penalty["appeal_status"] != APPEAL_NONE:
         return None
 
-    discipline_repo.set_penalty_appeal(penalty_id, reason_text, voice_file_id)
+    if not discipline_repo.set_penalty_appeal(penalty_id, reason_text, voice_file_id):
+        return None
     return discipline_repo.get_penalty(penalty_id)
 
 
@@ -468,7 +473,8 @@ def decide_appeal(penalty_id: int, decision: str, decided_by: int) -> dict:
     if penalty is None or penalty["appeal_status"] != APPEAL_PENDING:
         raise ValueError("apellyatsiya topilmadi yoki allaqachon hal qilingan")
 
-    discipline_repo.decide_penalty_appeal(penalty_id, decision, decided_by)
+    if not discipline_repo.decide_penalty_appeal(penalty_id, decision, decided_by):
+        raise ValueError("apellyatsiya topilmadi yoki allaqachon hal qilingan")
 
     if decision == DECISION_APPROVED:
         discipline_repo.adjust_bonus_bank(

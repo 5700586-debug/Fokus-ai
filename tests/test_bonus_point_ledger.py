@@ -5,6 +5,7 @@ bo'yicha filtrlaydigan o'qish qatlami (qarang
 ``repositories/discipline.py::get_bonus_ledger_totals_since`` va
 ``services/discipline.py::get_period_point_totals``)."""
 
+import company_time
 from repositories import discipline as discipline_repo
 from services import discipline
 
@@ -50,8 +51,9 @@ def test_get_period_point_totals_reflects_grade_and_penalty():
     discipline_repo.create_rule(9100, "Test nizomi", "Test uchun", supervisor_id)
     discipline_repo.set_rule_penalty_amount(9100, 20)
 
-    discipline.record_daily_grade(employee_id, supervisor_id, "2026-08-25", discipline.GRADE_ALO)
-    discipline.apply_penalty(employee_id, supervisor_id, "2026-08-25", 20, 9100, comment=None, ai_note=None)
+    today = company_time.today().isoformat()  # joriy oy bahosi — joriy oy hisobida
+    discipline.record_daily_grade(employee_id, supervisor_id, today, discipline.GRADE_ALO)
+    discipline.apply_penalty(employee_id, supervisor_id, today, 20, 9100, comment=None, ai_note=None)
 
     totals = discipline.get_period_point_totals(employee_id)
 

@@ -1,6 +1,6 @@
 """Xodimning o'z holatini ko'rish uchun sodda dashboard: profil,
-joriy davr Bonus/Minus/Jami ball (``services/discipline`` — mavjud
-``bonus_bank_ledger``dan, qarang ``get_period_point_totals``), kechagi
+joriy oy Bonus/Minus/Jami ball (``services/discipline.get_period_point_totals``:
+kunlik baho baho sanasi — ``eval_date`` — oyi bo'yicha), kechagi
 davomat va oxirgi 2 kunlik tafsilot (``services/attendance``). Bitta
 view-model funksiyasi orqali yig'iladi — handler (``performance_bot.py``
 ``/mystars``) faqat shu natijani matnga aylantiradi, DB/servis

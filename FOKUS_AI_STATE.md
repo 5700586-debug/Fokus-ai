@@ -1,18 +1,22 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-18, manba: main HEAD `ea55eb6`
+Tekshirilgan: 2026-10-19, manba: main HEAD `dd0c492`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
 ## Joriy holat (git log + faqat MERGE qilingan PR'lar)
 
-- `main` HEAD = `ea55eb6` — PR #47 merge'i (faqat hujjat: FOKUS_AI_XOTIRA.md, STATE, CLAUDE.md). Bot kodiga oxirgi o'zgarish: PR #45 (`9ead58b`, 2026-10-06).
+- `main` HEAD = `dd0c492` — PR #48 merge'i (baho xabari + yaxlit tranzaksiya). Undan oldin: #47 (hujjat, `ea55eb6`), #45 (`9ead58b`).
+- Baholash: #48 — baho qo'yilganda xodimga shaxsiy xabar, baho/tarix/balans/ledger bitta tranzaksiyada (SQLite va lokal PostgreSQL 16.15'da sinalgan).
 - Kassa: #43 qo'lda yopish (3 rasm, moliyachi tekshiruvi), #44 Asosiy menyu / tozalash / "Qayta yuborish", #45 ochish-yopish soddalashtirildi; #42 kassir menyusi soddalashtirildi.
 - Nazoratchi: #37 filial-birinchi kunlik oqim, #38 sodda matnlar, #40 filial yopilganda xodimlar natijalari, #41 oy oxirigacha grafik.
 - 2026-10-01..03 oralig'ida kassa va ro'yxat tuzatishlari merge qilingan: #24–#36 (naqd summa o'qish, oldingi qoldiq tasdig'i, yarim tundan keyingi smena, buyurtma ro'yxati oqimlari, ledger xarajatlari, nazoratchidan pul yashirish, rasm tahlili vaqti, qayta boshlash tugmasi).
 - Merge qilinmay yopilgan PR: #2 "Release FOKUS AI ! menu simplification" (2026-09-01) — bajarilgan deb hisoblanmaydi.
 
 ## Ochiq PR'lar
+
+- #49 — 2-qadam, oylik baholarni eval_date oyiga hisoblash; ushbu branch, merge/deploy oldidan tekshirildi.
+- #50 — Saturn nizom katalogi va minus oqimi; ochiq, merge/import qilinmagan (oxirgi ko'rilgan head `0ebda4e`).
 
 - #46 — kassa dialog xabarlarini yoshga qarab tozalash + eskirgan `csui_` tugmalar. Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
 - #39 — production read-only smoke E2E (faqat qo'lda ishga tushadi). Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
@@ -21,20 +25,28 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 ## Deploy / Render
 
 - `9ead58b` live, 2026-10-07 (ChatGPT Render tekshiruvi, 2026-10-18).
-- Undan keyingi deploy — tekshirilmadi (robotda Render kirish yo'q).
+- `dd0c492` (PR #48) — Render plagini orqali LIVE ekani tekshirildi, 2026-10-19; deploy `dep-dbauebgae00c73a5rg00`.
+- Quyidagi 2-qadam hali deploy qilinmagan.
 
 ## Bajarilgan ish
 
 - `FOKUS_AI_XOTIRA.md` qo'shildi (PR #47, merge qilingan).
-- Baho qo'yilgan zahoti xodimga shaxsiy xabar (branch `feature/grade-instant-notice`, PR ochiq, merge qilinmagan): `bos:grade` va `nzr_grade` ikkalasi `record_daily_grade` → `notify_employee_of_grade` orqali ishlaydi. Baho, tarix, bonus balansi va ledger BITTA DB tranzaksiyasida (`repositories/discipline.py::save_daily_grade`): istalgan yozuv xato bersa hammasi bekor, qayta bosish noldan to'liq ishlaydi; xabar faqat commit'dan keyin. Balans atomik delta bilan (parallel yangilanish yo'qolmaydi). Xabar: sana, baho nomi/ball, shu oy bonus/minus/jami; tuzatishda "✏️ Tuzatildi: 3 → 2"; 22:00–07:00 (kompaniya vaqti) ovozsiz. Bir xil baho takrori ledger/tarix/xabar qo'shmaydi. Baho tuzatishi (`daily_evaluation`) intizomiy minus sifatida sanalmaydi. Telegram yuborish xatosi commit qilingan bahoni bekor qilmaydi. Targeted test (5 ta fayl): 178 passed (rollback testlari haqiqiy DB trigger xatolari bilan, SQLite); qo'shimcha dashboard/yopish hisoboti/timezone/davomat testlari 48 passed. PostgreSQL 16.15 (vaqtincha lokal Docker instance, production adapteri `PgConnection` orqali) `tests/test_discipline_postgres.py`: 14 passed, 5 marta takrorlandi (rollback haqiqiy PG xatolari bilan, alohida ulanishlardan parallel, pool qayta ishlatilishi); instance tozalangan. Ko'p worker (bir nechta jarayon), Supabase/production PG, real E2E va deploy — tekshirilmagan.
+- PR #48 (merge qilingan, `dd0c492`): baho qo'yilgan zahoti xodimga shaxsiy xabar; `bos:grade` va `nzr_grade` ikkalasi `record_daily_grade` → `notify_employee_of_grade`; baho, tarix, bonus balansi va ledger bitta DB tranzaksiyasida (`save_daily_grade`); bir xil baho takrori yangi yozuv/xabar qo'shmaydi; 22:00–07:00 ovozsiz; PostgreSQL 16.15 (`PgConnection`, vaqtincha lokal Docker) bilan rollback/parallel/pool sinalgan.
+- 2-qadam (branch `feature/grade-month-by-evaluation-date`, PR ochiq, merge/deploy qilinmagan): oylik baho hisobi baho sanasi (`eval_date`) oyiga bog'landi. `get_period_point_totals(user_id, year_month=None)` (berilmasa kompaniyaning joriy oyi; `"YYYY-MM"` validatsiyasi, chegara: boshlanish <= sana < keyingi oy boshlanishi, kompaniya vaqt zonasi) → `discipline_repo.get_month_point_totals`: kunlik baho bonusi kanonik `daily_evaluations` jadvalidan (`eval_date` oyi bo'yicha); ledgerdagi `daily_evaluation` yozuvlari qayta qo'shilmaydi; boshqa bonus/haqiqiy minus/qaytarishlar ledgerdan o'z `created_at` oyi bo'yicha (kompaniya zonasida). Baho xabari: eval_date va o'sha oy yig'indisi; joriy oyda "Shu oy …", oldingi oyda "2026-10 uchun …". "Yulduzlarim" dashboardi joriy oy bahosini ko'rsatadi. Eski oy bahosini keyin tuzatish faqat o'sha oyni o'zgartiradi (soxta minus yo'q, ledger/audit saqlanadi, `get_bonus_ledger_totals_since` o'zgarmagan).
+- Testlar: 6 ta fayl (bonus ledger, discipline service, bot flows, employee dashboard, nazoratchi daily flow/supervision) SQLite: 218 passed; PostgreSQL 16.15 (`tests/test_discipline_postgres.py`, `PgConnection`, vaqtincha lokal Docker instance, tozalangan): 23 passed, 3 marta takrorlandi.
 
-## Qolgan cheklovlar (baho xabari)
+## Qolgan cheklovlar
 
-- Oy yig'indisi `bonus_bank_ledger.created_at` bo'yicha (yozilgan oy), `eval_date` bo'yicha emas: o'tgan oy sanasiga baho qo'yilsa xabardagi "shu oy" joriy oyni ko'rsatadi.
-- Telegram ID'siz xodim: `employees.user_id` PRIMARY KEY va o'zi Telegram ID; alohida ichki ID yoki bog'lanish maydoni yo'q. Telegram ID'siz xodimni saqlash/baholash mavjud modelda qo'llanmaydi — alohida vazifa. Bloklangan yoki chat topilmagan Telegram foydalanuvchisida baho saqlanadi (nazoratchiga "Xodim botga ulanmagan — baho saqlandi, xabar yuborilmadi."); navbat/qayta yuborish yo'q. "Bog'lanish None" testi faqat yuborishni tashlab o'tish unit testi.
-- Parallel bosish: SQLite va lokal PostgreSQL 16.15'da bir nechta thread/ALOHIDA ulanishlar bilan sinalgan (bitta o'zgarish, bitta tarix/ledger; parallel balans delta yo'qolmaydi). Bir nechta bot jarayoni (ko'p worker) va Supabase bilan real sinov o'tkazilmagan. `PgConnection` pool `maxconn=5` — undan ko'p bir vaqtdagi ulanish `PoolError` beradi (mavjud xatti-harakat, bu vazifada o'zgartirilmagan).
-- PostgreSQL testi opt-in: `FOKUS_PG_TEST_DSN` o'rnatilmasa 14 ta test SKIP bo'ladi (bu PG tekshiruvi o'tdi degani emas); ishga tushirish buyrug'i fayl boshidagi docstring'da.
+- Yopilgan/to'langan oy uchun qulf yo'q: keyin kiritilgan eski oy bahosi yoki tuzatishi o'sha oy yig'indisini o'zgartiradi. Ushbu PR qulf qurmaydi; kelajakdagi 4-qadam (qog'ozdan kiritish) faqat joriy oy bilan cheklanishi kerak.
+- 1-qadamdagi shaxsiy xabar va 3→2 tuzatish real Telegram akkauntida sinalgani hali tasdiqlanmagan; avtomatik testlar bu operator tekshiruvini almashtirmaydi.
+
+- Tarixiy ledger-only `daily_evaluation` yozuvlari (`daily_evaluations` qatori bo'lmagan) oylik hisobga kirmaydi va taxmin bilan bahoga aylantirilmagan; production'da bunday yozuvlar bor-yo'qligi tekshirilmagan.
+- Boshqa bonus/minus yozuvlari o'z yozilgan oyiga tushadi (sanasi `eval_date`ga ko'chirilmagan): masalan o'tgan oy sanasiga qo'yilgan jarima yozilgan oyda minus bo'ladi.
+- Telegram ID'siz xodim: `employees.user_id` PRIMARY KEY va o'zi Telegram ID; Telegram ID'siz xodimni saqlash/baholash mavjud modelda qo'llanmaydi — alohida vazifa. Bloklangan yoki chat topilmagan foydalanuvchida baho saqlanadi (nazoratchiga "Xodim botga ulanmagan — baho saqlandi, xabar yuborilmadi.").
+- Ko'p worker (bir nechta bot jarayoni) va Supabase/production PostgreSQL bilan sinov o'tkazilmagan. `PgConnection` pool `maxconn=5`.
+- PostgreSQL testi opt-in: `FOKUS_PG_TEST_DSN` o'rnatilmasa 23 ta test SKIP bo'ladi (bu PG PASS emas).
+- Real Telegram E2E va deploy — bajarilmagan.
 
 ## Keyingi qadam
 
-- 2-qadam: hisobni baholash sanasi/oyiga bog'lash (ledger `eval_date` bo'yicha oyga ajratish). Muhammadiy belgilaydi.
+- 3-qadam: xodimning kunma-kun "Oylik baholarim" oynasi. Muhammadiy belgilaydi.

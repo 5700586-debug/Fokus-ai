@@ -12,12 +12,14 @@ Xavfsizlik: DSN hosti lokal, baza nomi ``fokus_pgtest_`` bilan boshlanishi va mu
 
 import os
 import threading
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 import psycopg2
 import pytest
 
+import company_time
 import db
 import db_postgres
 from schema import SCHEMA_STATEMENTS
@@ -222,7 +224,7 @@ def test_correction_three_to_two_and_monthly_totals_are_not_a_fake_minus(pg):
 
     assert fixed.changed and (fixed.old_grade_points, fixed.grade_points) == (3, 2)
     assert _state() == {"grade": ("norma", 2), "balance": 2, "history": [3, 2], "ledger": [3, -1]}
-    totals = discipline.get_period_point_totals(_USER)
+    totals = discipline.get_period_point_totals(_USER, _DAY[:7])
     assert (totals["bonus"], totals["minus"], totals["net"]) == (2, 0, 2)
 
 
@@ -270,7 +272,7 @@ def test_failed_correction_keeps_old_state_and_retry_gives_two(pg, failing_table
 
     assert result.changed and result.bonus_bank_balance == 2
     assert _state() == {"grade": ("norma", 2), "balance": 2, "history": [3, 2], "ledger": [3, -1]}
-    totals = discipline.get_period_point_totals(_USER)
+    totals = discipline.get_period_point_totals(_USER, _DAY[:7])
     assert (totals["bonus"], totals["minus"]) == (2, 0)
 
 
@@ -364,3 +366,105 @@ def test_connection_reused_after_error_has_no_leaked_transaction(pg):
     _repair("bonus_bank_ledger")
     assert _grade("alo").changed is True  # keyingi operatsiya normal
     assert _state() == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
+
+
+# ------------------------------------ oylik hisob = baho sanasi (eval_date) oyi --
+
+
+def _freeze_now(monkeypatch, year: int, month: int, day: int, hour: int = 12) -> None:
+    fixed = datetime(year, month, day, hour, 0, tzinfo=company_time.resolve_timezone())
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+
+
+def _month_totals(year_month: str, user_id: int = _USER) -> dict:
+    totals = discipline.get_period_point_totals(user_id, year_month)
+    return {"bonus": totals["bonus"], "minus": totals["minus"], "net": totals["net"]}
+
+
+def test_old_month_grade_entered_later_belongs_to_its_own_month(pg, monkeypatch):
+    _freeze_now(monkeypatch, 2026, 11, 5)
+
+    discipline.record_daily_grade(_USER, 1, "2026-10-28", "alo")
+    discipline.record_daily_grade(_USER, 1, "2026-10-28", "alo")  # takror — hisob ko'paymaydi
+
+    assert _month_totals("2026-10") == {"bonus": 3, "minus": 0, "net": 3}
+    assert _month_totals("2026-11") == {"bonus": 0, "minus": 0, "net": 0}
+    assert discipline.get_period_point_totals(_USER)["period_key"] == "2026-11"  # joriy oy = noyabr
+
+
+def test_correcting_an_october_grade_in_november_changes_only_october(pg, monkeypatch):
+    _freeze_now(monkeypatch, 2026, 11, 5)
+    discipline.record_daily_grade(_USER, 1, "2026-10-28", "alo")
+    discipline.record_daily_grade(_USER, 1, "2026-11-03", "alo")
+
+    result = discipline.record_daily_grade(_USER, 1, "2026-10-28", "norma")  # 3 -> 2
+
+    assert result.changed and (result.old_grade_points, result.grade_points) == (3, 2)
+    assert _month_totals("2026-10") == {"bonus": 2, "minus": 0, "net": 2}
+    assert _month_totals("2026-11") == {"bonus": 3, "minus": 0, "net": 3}
+    assert sorted(_state()["ledger"]) == [-1, 3, 3]  # audit saqlangan
+
+
+def test_zero_and_three_to_zero_in_month_totals_on_postgres(pg, monkeypatch):
+    _freeze_now(monkeypatch, 2026, 10, 18)
+    discipline.record_daily_grade(_USER, 1, "2026-10-10", "bajarilmagan")
+    discipline.record_daily_grade(_USER, 1, "2026-10-11", "alo")
+    assert _month_totals("2026-10")["bonus"] == 3
+
+    discipline.record_daily_grade(_USER, 1, "2026-10-11", "bajarilmagan")  # 3 -> 0
+
+    assert _month_totals("2026-10") == {"bonus": 0, "minus": 0, "net": 0}
+
+
+def test_two_employees_and_two_months_do_not_mix_on_postgres(pg):
+    other = _USER + 1
+    discipline.record_daily_grade(_USER, 1, "2026-09-30", "alo")
+    discipline.record_daily_grade(_USER, 1, "2026-10-01", "norma")
+    discipline.record_daily_grade(other, 1, "2026-10-01", "chala")
+
+    assert _month_totals("2026-09")["bonus"] == 3 and _month_totals("2026-10")["bonus"] == 2
+    assert _month_totals("2026-10", other)["bonus"] == 1 and _month_totals("2026-09", other)["bonus"] == 0
+
+
+@pytest.mark.parametrize(
+    "last_day, first_day_next, month, next_month",
+    [("2026-12-31", "2027-01-01", "2026-12", "2027-01"),
+     ("2027-02-28", "2027-03-01", "2027-02", "2027-03"),
+     ("2028-02-29", "2028-03-01", "2028-02", "2028-03")],
+)
+def test_year_and_february_boundaries_on_postgres(pg, last_day, first_day_next, month, next_month):
+    discipline.record_daily_grade(_USER, 1, last_day, "alo")
+    discipline.record_daily_grade(_USER, 1, first_day_next, "chala")
+
+    assert _month_totals(month)["bonus"] == 3
+    assert _month_totals(next_month)["bonus"] == 1
+
+
+def test_other_bonus_and_real_minus_kept_and_grade_ledger_not_counted_twice_on_postgres(pg):
+    today = company_time.today().isoformat()
+    month = today[:7]
+    discipline.record_daily_grade(_USER, 1, today, "alo")
+    discipline.record_daily_grade(_USER, 1, today, "norma")  # 3 -> 2
+    discipline.adjust_bonus_bank(_USER, 4, "boshqa bonus", "other_bonus", None)
+    discipline.adjust_bonus_bank(_USER, -1, "nizom", "penalty", 1)
+    discipline.adjust_bonus_bank(_USER, 100, "tarixiy ledger-only", "daily_evaluation", None)  # baho emas — sanalmaydi
+
+    assert _month_totals(month) == {"bonus": 6, "minus": 1, "net": 5}
+
+
+def test_other_ledger_entries_follow_company_timezone_month_boundaries_on_postgres(pg):
+    admin = _admin()
+    try:
+        cur = admin.cursor()
+        for created_at in ("2026-09-30T18:59:59+00:00", "2026-09-30T19:00:00+00:00", "2026-10-31T18:59:59+00:00"):
+            cur.execute(
+                "INSERT INTO bonus_bank_ledger (user_id, change_amount, balance_after, reason, ref_type, created_at) "
+                "VALUES (%s, 2, 0, 'sinov', 'other_bonus', %s)",
+                (_USER, created_at),
+            )
+    finally:
+        admin.close()
+
+    assert _month_totals("2026-09")["bonus"] == 2
+    assert _month_totals("2026-10")["bonus"] == 4
+    assert _month_totals("2026-11")["bonus"] == 0

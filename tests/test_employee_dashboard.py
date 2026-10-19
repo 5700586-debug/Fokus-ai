@@ -268,3 +268,46 @@ def test_dashboard_existing_blocks_are_unaffected_by_hours_wiring():
     assert "⭐ Jami:" in text
     assert "⏰ Kecha:" in text
     assert "📅 Oxirgi 2 kun:" in text
+
+
+def _previous_month_day() -> str:
+    first_of_month = company_time.today().replace(day=1)
+    return (first_of_month - timedelta(days=1)).isoformat()
+
+
+def test_dashboard_points_are_the_current_month_grades_only():
+    from services import discipline
+
+    user_id, other_id = 820101, 820102
+    _make_employee(user_id)
+    _make_employee(other_id)
+    today = company_time.today().isoformat()
+    discipline.record_daily_grade(user_id, FOUNDER_ID, today, discipline.GRADE_ALO)  # joriy oy: 3
+    discipline.record_daily_grade(user_id, FOUNDER_ID, _previous_month_day(), discipline.GRADE_ALO)  # o'tgan oy: kirmaydi
+    discipline.record_daily_grade(other_id, FOUNDER_ID, today, discipline.GRADE_NORMA)  # boshqa xodim aralashmaydi
+
+    points = employee_dashboard.build_dashboard(user_id)["points"]
+
+    assert points["period_key"] == company_time.today().strftime("%Y-%m")
+    assert (points["bonus"], points["minus"], points["net"]) == (3, 0, 3)
+    assert employee_dashboard.build_dashboard(other_id)["points"]["bonus"] == 2
+
+
+def test_dashboard_keeps_real_minus_and_other_bonus_with_grades_and_net_is_bonus_minus_minus():
+    from repositories import discipline as discipline_repo
+    from services import discipline
+
+    user_id = 820103
+    _make_employee(user_id)
+    today = company_time.today().isoformat()
+    discipline.record_daily_grade(user_id, FOUNDER_ID, today, discipline.GRADE_ALO)
+    discipline.record_daily_grade(user_id, FOUNDER_ID, today, discipline.GRADE_NORMA)  # 3 -> 2: minus emas
+    discipline_repo.adjust_bonus_bank(user_id, 4, "boshqa bonus", "other_bonus", None)
+    discipline_repo.adjust_bonus_bank(user_id, -1, "nizom", "penalty", 1)
+
+    dashboard = employee_dashboard.build_dashboard(user_id)
+    points = dashboard["points"]
+
+    assert (points["bonus"], points["minus"], points["net"]) == (6, 1, 5)
+    text = employee_dashboard.format_dashboard_text(dashboard)
+    assert "🟢 Bonus: 6" in text and "🔴 Minus: 1" in text and "⭐ Jami: 5" in text

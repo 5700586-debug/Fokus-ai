@@ -816,3 +816,66 @@ async def test_notice_is_silent_only_during_local_night(bot_dp, monkeypatch, hou
     notice = _notices(sent)[0]
     assert bool(notice.disable_notification) is silent
     assert ("✏️ Tuzatildi" in notice.text) is correction
+
+
+# ------------------------------- eski oy bahosi: xabar va hisob o'sha oyga tegishli --
+
+
+def _freeze_now(monkeypatch, year: int, month: int, day: int, hour: int = 12) -> None:
+    fixed = datetime(year, month, day, hour, 0, tzinfo=company_time.resolve_timezone())
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+
+
+async def _bos_on(main, bot, grade_key: str, ymd: str):
+    return await send_callback(
+        main.dp, bot, NAZORATCHI, data=f"bos:grade:{EMPLOYEE}:{grade_key}:{ymd}", target_chat_id=NAZORATCHI
+    )
+
+
+async def test_old_month_grade_notice_shows_eval_date_and_that_months_totals(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup()
+    _freeze_now(monkeypatch, 2026, 11, 5)
+
+    sent = await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")  # noyabrda kiritilgan oktabr bahosi
+
+    assert _notices(sent)[0].text == (
+        "📅 Sana: 28.10.2026\n⭐ Baho: 3 — A'lo\n"
+        "2026-10 uchun bonus: 3\n2026-10 uchun minus: 0\n2026-10 uchun jami: 3"
+    )
+    assert "Shu oy" not in _notices(sent)[0].text  # joriy (noyabr) yig'indisi qo'shilmagan
+    assert discipline.get_period_point_totals(EMPLOYEE)["bonus"] == 0  # noyabr hisobiga tushmagan
+
+
+async def test_correcting_an_old_month_grade_updates_only_that_month_in_the_message(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup()
+    _freeze_now(monkeypatch, 2026, 11, 5)
+    await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
+    await _nzr(main, bot, discipline.GRADE_ALO)  # noyabr (bugungi) bahosi — 3
+
+    sent = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")  # oktabr 3 -> 2
+
+    assert len(_notices(sent)) == 1
+    assert _notices(sent)[0].text == (
+        "📅 Sana: 28.10.2026\n✏️ Tuzatildi: 3 → 2\n"
+        "2026-10 uchun bonus: 2\n2026-10 uchun minus: 0\n2026-10 uchun jami: 2"
+    )
+    assert discipline.get_period_point_totals(EMPLOYEE, "2026-10")["bonus"] == 2
+    november = discipline.get_period_point_totals(EMPLOYEE, "2026-11")
+    assert (november["bonus"], november["minus"], november["net"]) == (3, 0, 3)  # noyabr o'zgarmagan
+
+
+async def test_current_month_notice_keeps_shu_oy_wording_and_night_silence_for_old_month_correction(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup()
+    _freeze_now(monkeypatch, 2026, 11, 5, hour=23)
+
+    current = await _nzr(main, bot, discipline.GRADE_ALO)
+    assert _notices(current)[0].text.endswith("Shu oy bonus: 3\nShu oy minus: 0\nShu oy jami: 3")
+    assert bool(_notices(current)[0].disable_notification) is True  # 23:00 — ovozsiz
+
+    await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
+    old = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")
+    assert "2026-10 uchun jami: 2" in _notices(old)[0].text
+    assert bool(_notices(old)[0].disable_notification) is True

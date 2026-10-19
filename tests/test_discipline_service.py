@@ -375,7 +375,9 @@ def test_penalize_supervisor_for_late_close_same_day_is_idempotent():
 
 # ---------------------------------------------- kunlik baho: takror/tuzatish --
 
-from datetime import datetime  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+import company_time  # noqa: E402
 
 _DAY = "2026-10-18"
 
@@ -445,28 +447,32 @@ def test_grade_correction_is_not_a_disciplinary_minus():
 
 
 def test_real_minus_and_other_bonus_are_kept_next_to_a_correction():
-    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
-    discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
+    today = company_time.today().isoformat()  # boshqa ledger yozuvlari yozilgan oyida (hozir) hisoblanadi
+    month = today[:7]
+    discipline.record_daily_grade(111, 1, today, discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, today, discipline.GRADE_NORMA)
     discipline.adjust_bonus_bank(111, -1, "nizom", "penalty", 1)  # haqiqiy intizomiy minus
     discipline.adjust_bonus_bank(111, 4, "boshqa bonus", "other_bonus", None)
 
-    assert _totals(111) == {"bonus": 6, "minus": 1, "net": 5}
+    assert _totals(111, month) == {"bonus": 6, "minus": 1, "net": 5}
+    assert _totals(111, "2000-01") == {"bonus": 0, "minus": 0, "net": 0}  # boshqa oyga aralashmaydi
 
 
-def _totals(user_id: int) -> dict:
-    totals = discipline.get_period_point_totals(user_id)
+def _totals(user_id: int, year_month: str = _DAY[:7]) -> dict:
+    totals = discipline.get_period_point_totals(user_id, year_month)
     return {"bonus": totals["bonus"], "minus": totals["minus"], "net": totals["net"]}
 
 
-def test_notice_text_for_new_grade_and_correction():
+def test_notice_text_for_new_grade_and_correction(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 10, 19, 12)  # joriy oy = baho oyi -> "Shu oy"
     new = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
-    text = discipline.format_grade_notice(new, {"bonus": 3, "minus": 0, "net": 3})
+    text = discipline.format_grade_notice(new, {"period_key": "2026-10", "bonus": 3, "minus": 0, "net": 3})
     assert text == (
         "📅 Sana: 18.10.2026\n⭐ Baho: 3 — A'lo\nShu oy bonus: 3\nShu oy minus: 0\nShu oy jami: 3"
     )
 
     fixed = discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)
-    text = discipline.format_grade_notice(fixed, {"bonus": 2, "minus": 0, "net": 2})
+    text = discipline.format_grade_notice(fixed, {"period_key": "2026-10", "bonus": 2, "minus": 0, "net": 2})
     assert text == (
         "📅 Sana: 18.10.2026\n✏️ Tuzatildi: 3 → 2\nShu oy bonus: 2\nShu oy minus: 0\nShu oy jami: 2"
     )
@@ -619,3 +625,149 @@ def test_employee_model_has_no_telegram_less_employee_unit_proof():
 
     assert columns["user_id"]["pk"] == 1
     assert not {"telegram_id", "chat_id", "internal_id", "employee_id"} & set(columns)
+
+
+# ----------------------------------------- oylik hisob = baho sanasi (eval_date) oyi --
+
+
+def _freeze_now(monkeypatch, year: int, month: int, day: int, hour: int = 12) -> None:
+    fixed = datetime(year, month, day, hour, 0, tzinfo=company_time.resolve_timezone())
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+
+
+def _month(user_id: int, year_month: str) -> dict:
+    return _totals(user_id, year_month)
+
+
+def test_october_grade_entered_in_october_is_counted_once_in_october(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 10, 18)
+
+    discipline.record_daily_grade(111, 1, "2026-10-18", discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, "2026-10-18", discipline.GRADE_ALO)  # takror
+
+    assert _month(111, "2026-10") == {"bonus": 3, "minus": 0, "net": 3}
+    assert discipline.get_period_point_totals(111)["period_key"] == "2026-10"
+    assert discipline.get_period_point_totals(111)["bonus"] == 3
+
+
+def test_october_grade_entered_in_november_belongs_to_october_not_november(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 11, 5)
+
+    discipline.record_daily_grade(111, 1, "2026-10-28", discipline.GRADE_ALO)  # noyabrda kiritilgan oktabr bahosi
+
+    assert _month(111, "2026-10") == {"bonus": 3, "minus": 0, "net": 3}
+    assert _month(111, "2026-11") == {"bonus": 0, "minus": 0, "net": 0}
+    current = discipline.get_period_point_totals(111)  # joriy oy = noyabr
+    assert (current["period_key"], current["bonus"]) == ("2026-11", 0)
+
+
+def test_correcting_an_october_grade_in_november_changes_only_october(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 10, 28)
+    discipline.record_daily_grade(111, 1, "2026-10-28", discipline.GRADE_ALO)
+    _freeze_now(monkeypatch, 2026, 11, 5)
+    discipline.record_daily_grade(111, 1, "2026-11-03", discipline.GRADE_ALO)  # noyabr bahosi
+
+    result = discipline.record_daily_grade(111, 1, "2026-10-28", discipline.GRADE_NORMA)  # 3 -> 2
+
+    assert result.changed and (result.old_grade_points, result.grade_points) == (3, 2)
+    assert _month(111, "2026-10") == {"bonus": 2, "minus": 0, "net": 2}  # oktabr kamaydi, soxta minus yo'q
+    assert _month(111, "2026-11") == {"bonus": 3, "minus": 0, "net": 3}  # noyabr o'zgarmadi
+    # Audit saqlangan: ledger'da tuzatish yozuvi bor (-1), tarix [3, 2].
+    assert [row["grade_points"] for row in discipline.get_grade_history(111, "2026-10-28")] == [3, 2]
+    assert sorted(row["change_amount"] for row in discipline.get_bonus_ledger(111, 100)) == [-1, 3, 3]
+
+
+def test_repeating_the_same_old_month_grade_does_not_change_any_month(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 11, 5)
+    discipline.record_daily_grade(111, 1, "2026-10-28", discipline.GRADE_ALO)
+
+    again = discipline.record_daily_grade(111, 1, "2026-10-28", discipline.GRADE_ALO)
+
+    assert again.changed is False
+    assert _month(111, "2026-10") == {"bonus": 3, "minus": 0, "net": 3}
+    assert _ledger_count(111) == 1
+
+
+def test_zero_grade_and_three_to_zero_in_month_totals(monkeypatch):
+    _freeze_now(monkeypatch, 2026, 10, 18)
+    discipline.record_daily_grade(111, 1, "2026-10-10", discipline.GRADE_BAJARILMAGAN)
+    assert _month(111, "2026-10") == {"bonus": 0, "minus": 0, "net": 0}
+    assert discipline.record_daily_grade(111, 1, "2026-10-10", discipline.GRADE_BAJARILMAGAN).changed is False
+
+    discipline.record_daily_grade(111, 1, "2026-10-11", discipline.GRADE_ALO)
+    assert _month(111, "2026-10")["bonus"] == 3
+    discipline.record_daily_grade(111, 1, "2026-10-11", discipline.GRADE_BAJARILMAGAN)  # 3 -> 0
+
+    assert _month(111, "2026-10") == {"bonus": 0, "minus": 0, "net": 0}
+
+
+def test_two_months_of_one_employee_are_separate():
+    discipline.record_daily_grade(111, 1, "2026-09-30", discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, "2026-10-01", discipline.GRADE_NORMA)
+    discipline.record_daily_grade(111, 1, "2026-10-02", discipline.GRADE_CHALA)
+
+    assert _month(111, "2026-09")["bonus"] == 3
+    assert _month(111, "2026-10")["bonus"] == 3  # 2 + 1
+
+
+def test_two_employees_do_not_mix():
+    discipline.record_daily_grade(111, 1, "2026-10-05", discipline.GRADE_ALO)
+    discipline.record_daily_grade(222, 1, "2026-10-05", discipline.GRADE_CHALA)
+
+    assert _month(111, "2026-10")["bonus"] == 3
+    assert _month(222, "2026-10")["bonus"] == 1
+    assert _month(333, "2026-10") == {"bonus": 0, "minus": 0, "net": 0}
+
+
+def test_december_to_january_boundary():
+    discipline.record_daily_grade(111, 1, "2026-12-31", discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, "2027-01-01", discipline.GRADE_CHALA)
+
+    assert _month(111, "2026-12")["bonus"] == 3
+    assert _month(111, "2027-01")["bonus"] == 1
+    assert discipline._month_bounds("2026-12")[:2] == ("2026-12-01", "2027-01-01")  # keyingi yil yanvari
+
+
+def test_february_regular_and_leap_year_boundaries():
+    discipline.record_daily_grade(111, 1, "2027-02-28", discipline.GRADE_ALO)
+    discipline.record_daily_grade(111, 1, "2027-03-01", discipline.GRADE_CHALA)
+    discipline.record_daily_grade(222, 1, "2028-02-29", discipline.GRADE_ALO)  # kabisa yili
+    discipline.record_daily_grade(222, 1, "2028-03-01", discipline.GRADE_CHALA)
+
+    assert _month(111, "2027-02")["bonus"] == 3 and _month(111, "2027-03")["bonus"] == 1
+    assert _month(222, "2028-02")["bonus"] == 3 and _month(222, "2028-03")["bonus"] == 1
+    assert discipline._month_bounds("2027-02")[1] == "2027-03-01"
+    assert discipline._month_bounds("2028-02")[1] == "2028-03-01"
+
+
+@pytest.mark.parametrize("bad", ["2026-13", "2026-00", "26-10", "2026-1", "", "2026/10", "2026-10-01", "abcd-ef"])
+def test_year_month_is_validated(bad):
+    with pytest.raises(ValueError):
+        discipline.get_period_point_totals(111, bad)
+
+
+def test_month_boundaries_use_the_company_timezone_for_other_ledger_entries():
+    """Boshqa (baho bo'lmagan) yozuvlar ledgerdan o'z created_at oyi bo'yicha, kompaniya (UTC+5) chegarasida."""
+    conn = get_connection()
+    try:
+        for created_at in ("2026-09-30T18:59:59+00:00", "2026-09-30T19:00:00+00:00", "2026-10-31T18:59:59+00:00"):
+            conn.execute(
+                "INSERT INTO bonus_bank_ledger (user_id, change_amount, balance_after, reason, ref_type, ref_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (111, 2, 0, "sinov", "other_bonus", None, created_at),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert _month(111, "2026-09")["bonus"] == 2  # 23:59:59 Toshkent — sentyabr
+    assert _month(111, "2026-10")["bonus"] == 4  # 00:00:00 va 23:59:59 Toshkent — oktabr
+    assert _month(111, "2026-11")["bonus"] == 0
+
+
+def test_grade_ledger_entries_are_never_counted_a_second_time():
+    """Kanonik manba daily_evaluations: ledgerdagi daily_evaluation yozuvi (hatto balans bilan) qayta qo'shilmaydi."""
+    discipline.record_daily_grade(111, 1, "2026-10-05", discipline.GRADE_ALO)
+    discipline.adjust_bonus_bank(111, 100, "tarixiy ledger-only yozuv", "daily_evaluation", None)  # bahosiz yozuv
+
+    assert _month(111, "2026-10") == {"bonus": 3, "minus": 0, "net": 3}  # faqat daily_evaluations'dagi baho

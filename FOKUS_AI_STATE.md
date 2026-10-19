@@ -1,12 +1,12 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-18, manba: main HEAD `ea55eb6`
+Tekshirilgan: 2026-10-19, manba: origin/main HEAD `dd0c492`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
 ## Joriy holat (git log + faqat MERGE qilingan PR'lar)
 
-- `main` HEAD = `ea55eb6` — PR #47 merge'i (faqat hujjat: FOKUS_AI_XOTIRA.md, STATE, CLAUDE.md). Bot kodiga oxirgi o'zgarish: PR #45 (`9ead58b`, 2026-10-06).
+- `main` HEAD = `dd0c492` — PR #48 merge'i (baho zahoti xodimga xabar; Muhammadiy: LIVE). Undan oldin #47 (hujjat).
 - Kassa: #43 qo'lda yopish (3 rasm, moliyachi tekshiruvi), #44 Asosiy menyu / tozalash / "Qayta yuborish", #45 ochish-yopish soddalashtirildi; #42 kassir menyusi soddalashtirildi.
 - Nazoratchi: #37 filial-birinchi kunlik oqim, #38 sodda matnlar, #40 filial yopilganda xodimlar natijalari, #41 oy oxirigacha grafik.
 - 2026-10-01..03 oralig'ida kassa va ro'yxat tuzatishlari merge qilingan: #24–#36 (naqd summa o'qish, oldingi qoldiq tasdig'i, yarim tundan keyingi smena, buyurtma ro'yxati oqimlari, ledger xarajatlari, nazoratchidan pul yashirish, rasm tahlili vaqti, qayta boshlash tugmasi).
@@ -17,6 +17,8 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - #46 — kassa dialog xabarlarini yoshga qarab tozalash + eskirgan `csui_` tugmalar. Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
 - #39 — production read-only smoke E2E (faqat qo'lda ishga tushadi). Holat: ochiq, `MERGEABLE`/`CLEAN`, merge qilinmagan.
 - #22 — daftar rasmidan kassa maydonlarini o'qish. Holat: ochiq, `CONFLICTING`/`DIRTY`, merge qilinmagan.
+- #49 — oy yig'indisini `eval_date` bo'yicha hisoblash. Holat: ochiq; bu vazifada TEGILMAGAN.
+- Saturn nizom katalogi (`feature/saturn-rules-catalog`) — pastga qarang; merge/deploy/production import QILINMAGAN.
 
 ## Deploy / Render
 
@@ -27,6 +29,17 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 
 - `FOKUS_AI_XOTIRA.md` qo'shildi (PR #47, merge qilingan).
 - Baho qo'yilgan zahoti xodimga shaxsiy xabar (branch `feature/grade-instant-notice`, PR ochiq, merge qilinmagan): `bos:grade` va `nzr_grade` ikkalasi `record_daily_grade` → `notify_employee_of_grade` orqali ishlaydi. Baho, tarix, bonus balansi va ledger BITTA DB tranzaksiyasida (`repositories/discipline.py::save_daily_grade`): istalgan yozuv xato bersa hammasi bekor, qayta bosish noldan to'liq ishlaydi; xabar faqat commit'dan keyin. Balans atomik delta bilan (parallel yangilanish yo'qolmaydi). Xabar: sana, baho nomi/ball, shu oy bonus/minus/jami; tuzatishda "✏️ Tuzatildi: 3 → 2"; 22:00–07:00 (kompaniya vaqti) ovozsiz. Bir xil baho takrori ledger/tarix/xabar qo'shmaydi. Baho tuzatishi (`daily_evaluation`) intizomiy minus sifatida sanalmaydi. Telegram yuborish xatosi commit qilingan bahoni bekor qilmaydi. Targeted test (5 ta fayl): 178 passed (rollback testlari haqiqiy DB trigger xatolari bilan, SQLite); qo'shimcha dashboard/yopish hisoboti/timezone/davomat testlari 48 passed. PostgreSQL 16.15 (vaqtincha lokal Docker instance, production adapteri `PgConnection` orqali) `tests/test_discipline_postgres.py`: 14 passed, 5 marta takrorlandi (rollback haqiqiy PG xatolari bilan, alohida ulanishlardan parallel, pool qayta ishlatilishi); instance tozalangan. Ko'p worker (bir nechta jarayon), Supabase/production PG, real E2E va deploy — tekshirilmagan.
+
+## Saturn nizom katalogi (branch `feature/saturn-rules-catalog`, PR ochiq, merge/deploy YO'Q)
+
+- Yagona manba: `content/saturn_rules/source.txt` (asl `SATURN_NIZOM_CHEKLIST_MANBA.txt`, 1026 qator, 63767 bayt, sha256 `e836d6af…c10`) — matnga TEGILMAGAN (imlo/raqam/ball tuzatilmagan, xulosa yo'q). 1–2-qatorlar metadata, `##########` faqat bo'lim chegarasi — qoida/jarima emas.
+- Tuzilma (`content/saturn_rules/manifest.json`, manba qatorlari bo'yicha avtomatik hosil bo'ladi, qo'lda matn yo'q): 10 bo'lim, 97 band (madaniyat 14, nizom 26, bonus modeli 1, chek-listlar 56: omborchi 5, kassir 11, tozalik 2, non 4, kolbasa 8, muzlatilgan 7, oshpaz 7, mevachi 12), 88 ball varianti, 17 ta aniqlanmagan band (ro'yxat: `docs/SATURN_RULES_IMPORT_REVIEW.md`; ball avtomatik qo'llanmaydi).
+- Rasmiy 1–26 xarita (Muhammadiy tasdiqlagan tartib) faqat `rule_number`/manifestda; bonus modeli 1-band emas; nizom sarlavhalari soni va tartibi tekshiriladi (mos kelmasa import to'xtaydi).
+- Sxema: yangi jadval `company_rule_penalty_options` (ko'p natijali bandlar: 26, 17, Mevachi, Omborchi uchun variantlar) va `company_rules`ga additiv `catalog_kind/source_key/source_name`. Katalog bandlari o'rganish (rule learning) oqimiga kirmaydi, xodimlar majburan yozilmaydi.
+- Importer: `python -m services.company_rules_import` manifestni yangilaydi; Founder `/nizomimport` (mavjud `ACTION_MANAGE_DISCIPLINE_RULES`) — ko'rik (hech narsa yozmaydi) va "Importni qo'llash" (versiya mosligi shart). Bitta tranzaksiya, idempotent, parallel-xavfsiz; mavjud boshqacha matn/ball ustidan YOZMAYDI (konflikt bo'lsa import bajarilmaydi); start paytida avtomatik ishlamaydi.
+- Minus oqimi: nazoratchi erkin matni -> AI butun katalogdan eng ko'pi 3 ta nomzod (xodim lavozimi chek-listi oldin) -> nomzod/"Boshqa band"/"Hech biri (Asoschiga)"/"Qayta yozish" -> variant -> shart/javobgarlik tasdig'i -> yakuniy "Tasdiqlaysizmi?" -> `apply_penalty` BIR marta. Ball server tomonida bazadagi variantdan; AI xato qilsa qo'lda yo'l ishlaydi.
+- Testlar (targeted, mock OpenAI): SQLite — `tests/test_saturn_rules_catalog.py` (39), `tests/test_nazoratchi_catalog_flow.py` (16), `tests/test_saturn_rules_bot_ui.py` (8) + moslashtirilgan mavjud testlar; PostgreSQL 16 (vaqtincha lokal Docker, `PgConnection`) — `tests/test_saturn_rules_postgres.py`: 7 passed (ko'rik, import, idempotent, parallel, konflikt, rollback, variant jarima). Mock testlar AI o'zbek tilini tushunishini isbotlamaydi — real AI testi tekshirilmadi.
+- Production import QILINMAGAN. Deploy'dan keyin: Founder `/nizomimport` ko'rigini ko'radi (konfliktlar bo'lsa Muhammadiy hal qiladi) -> versiya mosligini tasdiqlab "Importni qo'llash" -> `/listnizom`da bo'limlarni tekshiradi -> nazoratchi kartasidan sinov. To'liq import bo'lmaguncha "minus tizimi to'liq ishlaydi" deb hisoblanmaydi.
 
 ## Qolgan cheklovlar (baho xabari)
 

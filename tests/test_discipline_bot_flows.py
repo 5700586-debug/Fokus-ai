@@ -585,7 +585,7 @@ async def _bos(main, bot, grade_key: str, actor: int = NAZORATCHI):
 
 
 async def _nzr(main, bot, grade_key: str, actor: int = NAZORATCHI):
-    return await send_callback(main.dp, bot, actor, data=f"nzr_grade:{EMPLOYEE}:{grade_key}", target_chat_id=actor)
+    return await send_callback(main.dp, bot, actor, data=f"nzr_grade:{EMPLOYEE}:{grade_key}:{_ymd()}", target_chat_id=actor)
 
 
 def _notices(sent, chat_id: int = EMPLOYEE) -> list:

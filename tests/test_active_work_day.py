@@ -201,7 +201,7 @@ async def test_grades_go_to_the_active_work_date_even_on_the_next_calendar_day(b
     assert discipline.get_daily_grade(111, D) is not None and discipline.get_daily_grade(111, _shift(D, 1)) is None
 
     # nzr_* (filial -> xodim kartasi) oqimi ham faol kunga yozadi
-    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}", target_chat_id=SUP)
+    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}", target_chat_id=SUP)
     assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_ALO
     assert discipline.get_daily_grade(111, _shift(D, 1)) is None
     sent = await send_callback(main.dp, bot, SUP, data="nzr_emp:111", target_chat_id=SUP)
@@ -300,3 +300,192 @@ async def test_resumed_open_day_window_does_not_cause_extra_penalty_with_the_aut
     finally:
         conn.close()
     assert audits == [_shift(D, 1)] and discipline.get_salary(SUP)["bonus_bank"] == -40
+
+
+# ------------------------------------- yopilgan tarixiy kun qayta ochilmaydi --
+
+
+def _close_everything(day: str) -> None:
+    for user, branch in ((111, A), (222, B)):
+        _work(user, day)
+        discipline.record_daily_grade(user, SUP, day, discipline.GRADE_NORMA)
+        assert nazoratchi_day.close_session(SUP, branch, day).closed
+    assert discipline.get_closure(SUP, day) is not None
+
+
+def _add_new_branch_with_employee(monkeypatch) -> str:
+    new_branch = "SATURN YANGI FILIAL"
+    monkeypatch.setattr(nazoratchi_day, "RECRUITING_BRANCH_NAMES", [*RECRUITING_BRANCH_NAMES, new_branch])
+    _employee(333, new_branch, "Yangi")
+    return new_branch
+
+
+def _snapshot() -> tuple:
+    conn = db.get_connection()
+    try:
+        return (
+            conn.execute("SELECT supervisor_id, closure_date, closed_at FROM daily_closures ORDER BY id").fetchall().__len__(),
+            [tuple(r) for r in conn.execute("SELECT employee_id, eval_date, grade_key FROM daily_evaluations ORDER BY id").fetchall()],
+            _session_dates(),
+        )
+    finally:
+        conn.close()
+
+
+async def test_new_branch_or_employee_never_reopens_a_closed_historical_or_current_day(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    _close_everything(D)
+    before = _snapshot()
+
+    _add_new_branch_with_employee(monkeypatch)  # D yopilgandan keyin yangi filial + xodim qo'shildi
+    _employee(444, A, "Yangi2")
+
+    same_day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
+    assert (same_day.work_date, same_day.closed) == (D, True)  # joriy yopilgan kun qayta ochilmaydi
+    _pin(monkeypatch, _shift(D, 3))
+    later = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
+    assert (later.work_date, later.resumed, later.closed) == (_shift(D, 3), False, False)  # tarixiy D faol emas
+    assert _snapshot() == before  # closure, baho va sessiyalar o'zgarmagan, soxta closure yo'q
+
+
+async def test_oldest_really_open_day_is_chosen_after_closed_history(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    d1, d2, d3 = D, _shift(D, 1), _shift(D, 2)
+    _pin(monkeypatch, d1)
+    _close_everything(d1)
+    nazoratchi_day.open_session(SUP, A, d3)
+    nazoratchi_day.open_session(SUP, A, d2)
+    _add_new_branch_with_employee(monkeypatch)
+    _pin(monkeypatch, _shift(D, 4))
+
+    day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
+
+    assert (day.work_date, day.resumed) == (d2, True)  # d1 yopilgan (qayta ochilmaydi), eng eski haqiqiy ochiq kun d2
+
+
+async def test_unclosed_day_still_requires_every_coverage_branch(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    _work(111, D)
+    discipline.record_daily_grade(111, SUP, D, discipline.GRADE_NORMA)
+    assert nazoratchi_day.close_session(SUP, A, D).closed
+    _add_new_branch_with_employee(monkeypatch)
+
+    assert nazoratchi_day.day_fully_closed(SUP, D) is False and discipline.get_closure(SUP, D) is None
+    assert nazoratchi_day.active_day(SUP, discipline_bot._now_company()).closed is False
+
+
+# -------------------------------------------- baho tugmasi karta sanasiga bog'lanadi --
+
+
+def _grade_buttons(sent) -> dict[str, str]:
+    markup = next(m for m in sent if getattr(m, "reply_markup", None) is not None).reply_markup
+    return {b.callback_data: b.text for row in markup.inline_keyboard for b in row if b.callback_data.startswith("nzr_grade:")}
+
+
+def _notices(sent, chat_id: int) -> list:
+    return [m for m in sent if getattr(m, "chat_id", None) == chat_id and getattr(m, "text", None) and "Baho" in m.text]
+
+
+async def test_card_shows_work_date_and_every_grade_button_carries_it_within_64_bytes(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _supervisor()
+    big = 7_952_886_089
+    _employee(big, A, "Katta")
+    _pin(monkeypatch, D)
+
+    sent = await send_callback(main.dp, bot, SUP, data=f"nzr_emp:{big}", target_chat_id=SUP)
+
+    assert "📅 Ish kuni: 10.03.2026" in sent[0].text
+    buttons = _grade_buttons(sent)
+    assert len(buttons) == 4
+    assert all(data.endswith(f":{_ymd(D)}") and len(data.encode()) <= 64 for data in buttons)
+
+
+async def test_stale_card_button_after_day_closed_writes_nothing_and_new_card_works(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    sent = await send_callback(main.dp, bot, SUP, data="nzr_emp:111", target_chat_id=SUP)
+    old_button = next(data for data in _grade_buttons(sent) if f":{discipline.GRADE_ALO}:" in data)
+    _close_everything(D)  # D yopildi
+    _pin(monkeypatch, _shift(D, 1))  # D+1 faol
+    before = _snapshot()
+    bank = discipline.get_salary(111)["bonus_bank"]
+
+    sent = await send_callback(main.dp, bot, SUP, data=old_button, target_chat_id=SUP)
+
+    assert "Bu tugma eskirgan — xodim kartasini qayta oching." in _text(sent) or "yopilgan" in _text(sent)
+    assert _snapshot() == before and discipline.get_salary(111)["bonus_bank"] == bank
+    assert _notices(sent, 111) == []  # xodimga xabar yo'q
+    assert discipline.get_daily_grade(111, _shift(D, 1)) is None
+
+    fresh = await send_callback(main.dp, bot, SUP, data="nzr_emp:111", target_chat_id=SUP)
+    assert "📅 Ish kuni: 11.03.2026" in fresh[0].text
+    new_button = next(data for data in _grade_buttons(fresh) if f":{discipline.GRADE_ALO}:" in data)
+    assert new_button.endswith(_ymd(_shift(D, 1)))
+    await send_callback(main.dp, bot, SUP, data=new_button, target_chat_id=SUP)
+    assert discipline.get_daily_grade(111, _shift(D, 1))["grade_key"] == discipline.GRADE_ALO
+    assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_NORMA  # D o'zgarmagan
+
+
+@pytest.mark.parametrize(
+    "suffix", ["", ":2026-03-10", ":20260399", ":abcdefgh", ":20260311", ":20260315", ":1234"],
+)
+async def test_undated_malformed_wrong_and_future_grade_buttons_are_rejected(bot_dp, monkeypatch, suffix):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)  # faol kun: D
+    before = _snapshot()
+
+    sent = await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}{suffix}", target_chat_id=SUP)
+
+    assert "Bu tugma eskirgan — xodim kartasini qayta oching." in _text(sent)
+    assert _snapshot() == before and discipline.get_salary(111)["bonus_bank"] == 0 and _notices(sent, 111) == []
+
+
+async def test_closed_branch_card_button_is_rejected(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    _work(111, D)
+    discipline.record_daily_grade(111, SUP, D, discipline.GRADE_NORMA)
+    nazoratchi_day.close_session(SUP, A, D)  # A yopildi, B ochiq: kun faol
+
+    sent = await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}", target_chat_id=SUP)
+
+    assert "Bu filial shu ish kunida yopilgan" in _text(sent)
+    assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_NORMA
+
+
+async def test_card_opened_before_midnight_still_grades_the_still_active_day_after_midnight(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D, 23, 50)
+    nazoratchi_day.open_session(SUP, A, D)
+    sent = await send_callback(main.dp, bot, SUP, data="nzr_emp:111", target_chat_id=SUP)
+    button = next(data for data in _grade_buttons(sent) if f":{discipline.GRADE_NORMA}:" in data)
+
+    _pin(monkeypatch, _shift(D, 1), 0, 20)  # yarim tundan keyin ham D faol
+    await send_callback(main.dp, bot, SUP, data=button, target_chat_id=SUP)
+
+    assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_NORMA
+    assert discipline.get_daily_grade(111, _shift(D, 1)) is None
+
+
+async def test_repeating_the_same_grade_press_adds_no_record_or_message(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    button = f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}"
+
+    first = await send_callback(main.dp, bot, SUP, data=button, target_chat_id=SUP)
+    snapshot, bank = _snapshot(), discipline.get_salary(111)["bonus_bank"]
+    second = await send_callback(main.dp, bot, SUP, data=button, target_chat_id=SUP)
+
+    assert len(_notices(first, 111)) == 1 and _notices(second, 111) == []
+    assert _snapshot() == snapshot and discipline.get_salary(111)["bonus_bank"] == bank

@@ -137,11 +137,17 @@ def active_day(supervisor_id: int, now: datetime) -> ActiveDay:
     current = current_work_date(now)
     sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, current)
     for work_date in sorted({item["session_date"] for item in sessions}):
-        if not day_fully_closed(supervisor_id, work_date, sessions):
+        if not _is_closed_day(supervisor_id, work_date, sessions):
             return ActiveDay(work_date, resumed=work_date < current)
-    if day_fully_closed(supervisor_id, current, sessions) or discipline.get_closure(supervisor_id, current) is not None:
+    if _is_closed_day(supervisor_id, current, sessions):
         return ActiveDay(current, closed=True)
     return ActiveDay(current)
+
+
+def _is_closed_day(supervisor_id: int, work_date: str, sessions: list[dict]) -> bool:
+    """Yopilgan kun: ``daily_closures`` yozuvi bor (har qanday TARIXIY kun uchun ham — keyin qo'shilgan filial/xodim uni
+    qayta ochmaydi) yoki shu kunning barcha qamrov filiallari yopilgan."""
+    return discipline.get_closure(supervisor_id, work_date) is not None or day_fully_closed(supervisor_id, work_date, sessions)
 
 
 def check_active(supervisor_id: int, review_date: str, now: datetime) -> str | None:

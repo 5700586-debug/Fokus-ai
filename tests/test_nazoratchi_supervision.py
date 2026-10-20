@@ -24,6 +24,12 @@ def _card(sent):
     return next(m for m in sent if isinstance(m, EditMessageText))
 
 
+def _today_ymd() -> str:
+    import company_time
+
+    return company_time.today().strftime("%Y%m%d")
+
+
 _BRANCH = RECRUITING_BRANCH_NAMES[0]
 _NAZORATCHI_ID = 555001
 
@@ -286,7 +292,7 @@ async def test_card_shows_grade_buttons_and_no_grade_placeholder(bot_dp):
     assert "hali qo'yilmagan" in sent[0].text
     buttons = {btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row}
     for grade_key in ("bajarilmagan", "chala", "norma", "alo"):
-        assert f"nzr_grade:700013:{grade_key}" in buttons
+        assert f"nzr_grade:700013:{grade_key}:{_today_ymd()}" in buttons
 
 
 async def test_picking_a_grade_updates_the_card(bot_dp):
@@ -294,7 +300,7 @@ async def test_picking_a_grade_updates_the_card(bot_dp):
     _make_nazoratchi()
     _make_kassir(700014)
 
-    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700014:alo", target_chat_id=_NAZORATCHI_ID)
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_grade:700014:alo:{_today_ymd()}", target_chat_id=_NAZORATCHI_ID)
 
     assert "3 (A'lo)" in _card(sent).text
 
@@ -305,8 +311,8 @@ async def test_regrading_same_day_does_not_double_count_bonus(bot_dp):
     _make_kassir(700015)
     from services import discipline as discipline_service
 
-    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700015:chala", target_chat_id=_NAZORATCHI_ID)
-    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700015:alo", target_chat_id=_NAZORATCHI_ID)
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_grade:700015:chala:{_today_ymd()}", target_chat_id=_NAZORATCHI_ID)
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"nzr_grade:700015:alo:{_today_ymd()}", target_chat_id=_NAZORATCHI_ID)
 
     assert discipline_service.get_salary(700015)["bonus_bank"] == 3
 
@@ -317,7 +323,7 @@ async def test_grading_zero_is_allowed_and_shown_as_bajarilmagan(bot_dp):
     _make_kassir(700016)
 
     sent = await send_callback(
-        main.dp, bot, _NAZORATCHI_ID, data="nzr_grade:700016:bajarilmagan", target_chat_id=_NAZORATCHI_ID
+        main.dp, bot, _NAZORATCHI_ID, data=f"nzr_grade:700016:bajarilmagan:{_today_ymd()}", target_chat_id=_NAZORATCHI_ID
     )
 
     assert "0 (Bajarilmagan)" in _card(sent).text

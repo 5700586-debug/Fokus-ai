@@ -883,6 +883,9 @@ _MENU_SCREEN_TEXTS = (
 menu_screens.configure(
     _MENU_SCREEN_TEXTS,
     (messages.GENERIC_DENIAL, messages.CASH_FINANCE_DENIAL, messages.MANAGEMENT_DENIAL, messages.REPEAT_OFFENDER_DENIAL),
+    keep_texts={"/listnizom"},  # nizom o'qish/tasdiqlash kartasi: eski ekranlarni tozalaydi, o'zi kuzatilmaydi
+    flow_texts={"👤 Xodim qo'shish"},  # oqim savollari alohida kalitda kuzatiladi
+    flow_state_prefixes=("InviteFlowStates:",),
 )
 dp.message.outer_middleware(menu_screens.MenuScreenMiddleware())
 dp.callback_query.outer_middleware(menu_screens.StaleMenuCallbackMiddleware())

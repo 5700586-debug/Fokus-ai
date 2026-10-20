@@ -1,8 +1,14 @@
 """Shaxsiy chatda asosiy menyu bo'limlari almashganda eski menyu ekranlari va foydalanuvchi bosgan menyu tugma
 matnini xavfsiz tozalash — mavjud ``chat_cleanup`` kuzatuvi (``bot_workflow_messages``) ustida yupqa qatlam.
 
+Ikki alohida qaror: (1) yangi ekran muvaffaqiyatli chiqqanda ESKI menyu ekranlari/tugma matnlari tozalanadimi
+(``screen``, ``keep`` va ``flow`` tugmalari tozalaydi) va (2) YANGI xabar keyin o'chiriladigan vaqtinchalik ekran
+sifatida kuzatiladimi: ``screen`` — ha (``menu:<chat>``); ``flow`` — ha, lekin alohida kalitda (``flow:<chat>``,
+oqimning vaqtinchalik savollari); ``keep`` — yo'q (masalan nizom o'qish/tasdiqlash kartasi hech qachon kuzatilmaydi
+va keyingi menyu uni o'chirmaydi).
+
 Ishlash: ``MenuScreenMiddleware`` faqat PRIVATE chatdagi, ANIQ ro'yxatdagi menyu tugmalari uchun ishlaydi
-(``configure(screen_texts=...)``). Handler bajarilayotganda ``session_middleware`` shu chatga yuborilgan
+(``configure(...)``). Handler bajarilayotganda ``session_middleware`` shu chatga yuborilgan
 xabarlarni yig'adi; handler muvaffaqiyatli tugab, kamida bitta yangi ekran chiqqandan KEYIN oldingi menyu
 ekranlari va menyu tugma matnlari o'chiriladi. Faqat shu mexanizm qayd etgan xabarlar (workflow
 ``private_menu_screen``, kalit ``menu:<chat_id>``) o'chadi; boshqa workflow/kalitlarga, baho/minus, tasdiq
@@ -35,6 +41,9 @@ _MAX_STALE_PER_CHAT = 500
 _MAX_CHATS = 5000
 
 _screen_texts: frozenset[str] = frozenset()
+_keep_texts: frozenset[str] = frozenset()
+_flow_texts: frozenset[str] = frozenset()
+_flow_state_prefixes: tuple[str, ...] = ()
 _denial_texts: tuple[str, ...] = ()
 _latest_tap: "OrderedDict[int, int]" = OrderedDict()
 _locks: dict[int, asyncio.Lock] = {}
@@ -46,14 +55,28 @@ class _Capture:
     chat_id: int
     tap_message_id: int
     screens: list[Message] = field(default_factory=list)
+    kind: str = "screen"  # screen | keep | flow | flow_continue
 
 
 _capture: ContextVar[_Capture | None] = ContextVar("menu_screen_capture", default=None)
 
 
-def configure(screen_texts: Iterable[str], denial_texts: Iterable[str] = ()) -> None:
-    global _screen_texts, _denial_texts
+def configure(
+    screen_texts: Iterable[str],
+    denial_texts: Iterable[str] = (),
+    *,
+    keep_texts: Iterable[str] = (),
+    flow_texts: Iterable[str] = (),
+    flow_state_prefixes: Iterable[str] = (),
+) -> None:
+    """``screen_texts`` — oddiy menyu ekranlari (tozalaydi + kuzatiladi); ``keep_texts`` — tozalaydi, lekin yangi
+    xabarni KUZATMAYDI (muhim kartalar); ``flow_texts`` — tozalaydi va oqimning vaqtinchalik savollarini alohida
+    kalitda kuzatadi; ``flow_state_prefixes`` — shu FSM holatlarida oqim savollari ham kuzatiladi (tozalamaydi)."""
+    global _screen_texts, _keep_texts, _flow_texts, _flow_state_prefixes, _denial_texts
     _screen_texts = frozenset(screen_texts)
+    _keep_texts = frozenset(keep_texts)
+    _flow_texts = frozenset(flow_texts)
+    _flow_state_prefixes = tuple(flow_state_prefixes)
     _denial_texts = tuple(denial_texts)
 
 
@@ -61,13 +84,25 @@ def screen_key(chat_id: int) -> str:
     return f"menu:{chat_id}"
 
 
-def _is_menu_tap(message: Message) -> bool:
-    return (
-        message.chat.type == "private"
-        and message.from_user is not None
-        and not message.from_user.is_bot
-        and (message.text or "") in _screen_texts
-    )
+def flow_key(chat_id: int) -> str:
+    return f"flow:{chat_id}"
+
+
+def _private_user_message(message: Message) -> bool:
+    return message.chat.type == "private" and message.from_user is not None and not message.from_user.is_bot
+
+
+def _tap_kind(message: Message) -> str | None:
+    if not _private_user_message(message):
+        return None
+    text = message.text or ""
+    if text in _screen_texts:
+        return "screen"
+    if text in _keep_texts:
+        return "keep"
+    if text in _flow_texts:
+        return "flow"
+    return None
 
 
 def _is_denial(text: str | None) -> bool:
@@ -123,18 +158,21 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
             return
 
         key = screen_key(chat_id)
-        try:
-            old_rows = repo.pop_messages(WORKFLOW, key)
-        except Exception as error:  # noqa: BLE001
-            logger.error("Menyu ekranlari ro'yxatini olib bo'lmadi (chat=%s): %r", chat_id, error)
-            old_rows = []
+        old_rows = []
+        for old_key in (key, flow_key(chat_id)):  # eski ekranlar + tashlab ketilgan oqimning vaqtinchalik savollari
+            try:
+                old_rows += repo.pop_messages(WORKFLOW, old_key)
+            except Exception as error:  # noqa: BLE001
+                logger.error("Menyu ekranlari ro'yxatini olib bo'lmadi (chat=%s): %r", chat_id, error)
 
         for row in old_rows:
             if row["message_id"] not in new_ids and row["message_id"] != capture.tap_message_id:
                 await _remove(bot, row["chat_id"], row["message_id"])  # o'chmasa eskirgan deb belgilanadi
 
-        for screen in capture.screens:
-            chat_cleanup.track(WORKFLOW, key, screen)
+        if capture.kind in ("screen", "flow"):  # "keep" (muhim karta) kuzatilmaydi
+            target_key = key if capture.kind == "screen" else flow_key(chat_id)
+            for screen in capture.screens:
+                chat_cleanup.track(WORKFLOW, target_key, screen)
         # Joriy menyu tanlash matni ham o'chadi; o'chmasa keyingi almashishda qayta uriniladi.
         if not await _remove_tap(bot, chat_id, capture.tap_message_id):
             _track_id(key, chat_id, capture.tap_message_id)
@@ -163,13 +201,22 @@ def _track_id(key: str, chat_id: int, message_id: int) -> None:
 
 class MenuScreenMiddleware(BaseMiddleware):
     """``dp.message.outer_middleware``: menyu tugmasi bosilganda (private chat, ro'yxatdagi matn) yangi ekranni
-    kuzatadi va muvaffaqiyatdan keyin eski ekranlarni tozalaydi. Handler xato bersa tozalanmaydi."""
+    kuzatadi va muvaffaqiyatdan keyin eski ekranlarni tozalaydi. Handler xato bersa tozalanmaydi. Ro'yxatdagi
+    oqim holatlarida (``flow_state_prefixes``) oqim savollari kuzatiladi, hech narsa tozalanmaydi."""
 
     async def __call__(self, handler, event: Message, data: dict):
-        if not isinstance(event, Message) or not _is_menu_tap(event):
+        if not isinstance(event, Message):
             return await handler(event, data)
 
-        capture = _Capture(chat_id=event.chat.id, tap_message_id=event.message_id)
+        kind = _tap_kind(event)
+        if kind is None and _flow_state_prefixes and _private_user_message(event):
+            raw_state = data.get("raw_state") or ""
+            if raw_state.startswith(_flow_state_prefixes):
+                kind = "flow_continue"
+        if kind is None:
+            return await handler(event, data)
+
+        capture = _Capture(chat_id=event.chat.id, tap_message_id=event.message_id, kind=kind)
         token = _capture.set(capture)
         try:
             result = await handler(event, data)
@@ -178,10 +225,21 @@ class MenuScreenMiddleware(BaseMiddleware):
 
         if capture.screens:
             try:
-                await _commit(data["bot"], capture)
+                if kind == "flow_continue":
+                    await _track_flow_prompts(capture, data.get("state"))
+                else:
+                    await _commit(data["bot"], capture)
             except Exception as error:  # noqa: BLE001
                 logger.error("Menyu tozalash xatosi (oqim davom etadi): %r", error)
         return result
+
+
+async def _track_flow_prompts(capture: _Capture, state) -> None:
+    """Oqim hali davom etayotgan bo'lsagina savollar kuzatiladi; yakuniy natija (masalan taklif havolasi) kuzatilmaydi."""
+    current = await state.get_state() if state is not None else None
+    if current and current.startswith(_flow_state_prefixes):
+        for screen in capture.screens:
+            chat_cleanup.track(WORKFLOW, flow_key(capture.chat_id), screen)
 
 
 class StaleMenuCallbackMiddleware(BaseMiddleware):

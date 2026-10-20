@@ -332,7 +332,7 @@ async def test_existing_baholash_flow_still_only_offers_three_grades(bot_dp):
     _make_kassir(700017)
 
     await send(main.dp, bot, _NAZORATCHI_ID, text="/baholash")
-    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="bos:emp:700017", target_chat_id=_NAZORATCHI_ID)
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=f"bos:emp:700017:{__import__('company_time').today().isoformat().replace('-', '')}", target_chat_id=_NAZORATCHI_ID)
 
     buttons = [btn.text for row in sent[0].reply_markup.inline_keyboard for btn in row]
     assert buttons.count("Chala - 1") + buttons.count("Norma - 2") + buttons.count("A'lo - 3") == 3

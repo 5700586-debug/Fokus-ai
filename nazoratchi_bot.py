@@ -52,10 +52,11 @@ import employees
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import get_role, role_name
 from services import attendance as attendance_service
+from repositories import discipline as discipline_repo
 from services import audit
 from services import one_on_one as one_on_one_service
 from services import schedule_range
-from services import dialog_cleanup, discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
+from services import dialog_cleanup, discipline, nazoratchi_day, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
@@ -277,9 +278,16 @@ def _employees_keyboard(branch: str, *, exclude_user_id: int | None = None) -> I
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _simple_employee_card_text(profile: dict) -> str:
+def _simple_employee_card_text(profile: dict, work_date: str | None = None) -> str:
+    """``work_date`` — nazoratchining FAOL ish kuni (yarim tundan keyin ham davom etayotgan kun); berilmasa bugun."""
+    today = company_time.today().isoformat()
+    work_date = work_date or today
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
-    lines = [
+    lines = []
+    if work_date != today:
+        year, month, day = work_date.split("-")
+        lines += [f"📅 Ish kuni: {day}.{month}.{year}", "Avval shu ish kunini yakunlaymiz.", ""]
+    lines += [
         f"👤 {full_name}",
         f"🏷 Lavozim: {role_name(profile.get('role_key'))}",
         f"🏬 Filial: {profile.get('branch') or '-'}",
@@ -302,13 +310,13 @@ def _simple_employee_card_text(profile: dict) -> str:
         lines.append(f"🕒 Bugungi vaqt bonusi: ✅ berildi ({source_label})")
 
     lines.append("")
-    today = company_time.today().isoformat()
-    grade = discipline.get_daily_grade(profile["user_id"], today)
+    grade = discipline.get_daily_grade(profile["user_id"], work_date)
+    grade_title = "Bugungi ish bahosi" if work_date == today else "Ish kuni bahosi"
     if grade is None:
-        lines.append("⭐ Bugungi ish bahosi: hali qo'yilmagan")
+        lines.append(f"⭐ {grade_title}: hali qo'yilmagan")
     else:
         label = discipline.GRADE_LABELS.get(grade["grade_key"], grade["grade_key"])
-        lines.append(f"⭐ Bugungi ish bahosi: {grade['grade_points']} ({label})")
+        lines.append(f"⭐ {grade_title}: {grade['grade_points']} ({label})")
 
     lines.append("")
     yesterday = attendance_service.get_yesterday_summary(profile["user_id"])
@@ -1081,11 +1089,14 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(f"🏬 {branch}\n\n👥 Xodimni tanlang:", reply_markup=keyboard)
         await callback.answer()
 
+    def _card_text(profile: dict, actor_id: int) -> str:
+        return _simple_employee_card_text(profile, nazoratchi_day.active_day(actor_id, company_time.now()).work_date)
+
     async def _render_employee_card(callback: CallbackQuery, profile: dict) -> None:
         user_id = profile["user_id"]
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
+                _card_text(profile, callback.from_user.id),
                 reply_markup=_employee_card_keyboard(
                     profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
                 ),
@@ -1121,7 +1132,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
+                _card_text(profile, callback.from_user.id),
                 reply_markup=_employee_card_keyboard(profile.get("branch"), user_id, show_time_bonus_button=False),
             )
 
@@ -1142,8 +1153,19 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        today = company_time.today().isoformat()
-        result = discipline.record_daily_grade(user_id, callback.from_user.id, today, grade_key)
+        # Baho FAOL ish kuniga yoziladi (nazoratchi sana hisoblamaydi; yarim tun/restart kunni almashtirmaydi).
+        day = nazoratchi_day.active_day(callback.from_user.id, company_time.now())
+        if day.closed:
+            await callback.answer("Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.", show_alert=True)
+            return
+        if any(
+            item["branch"] == profile.get("branch") and item["status"] == "closed"
+            for item in discipline_repo.list_branch_sessions_up_to(callback.from_user.id, day.work_date)
+            if item["session_date"] == day.work_date
+        ):
+            await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
+            return
+        result = discipline.record_daily_grade(user_id, callback.from_user.id, day.work_date, grade_key)
         outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
         if outcome == discipline.NOTICE_UNCHANGED:
             await callback.answer(discipline.grade_notice_reply(outcome))
@@ -1154,7 +1176,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
+                _card_text(profile, callback.from_user.id),
                 reply_markup=_employee_card_keyboard(
                     profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
                 ),

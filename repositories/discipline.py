@@ -977,6 +977,21 @@ def close_branch_session(session_id: int, evaluated_count: int, total_count: int
         conn.close()
 
 
+def list_branch_sessions_up_to(supervisor_id: int, up_to_date: str) -> list[dict]:
+    """Nazoratchining ``up_to_date`` (shu kun ham) gacha BARCHA filial sessiyalari (ochiq va yopiq), sana bo'yicha."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND session_date <= ? "
+            "ORDER BY session_date, branch",
+            (supervisor_id, up_to_date),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None, on_date: str | None = None) -> list[dict]:
     clauses = ["supervisor_id = ?", "status = 'open'"]
     params: list = [supervisor_id]

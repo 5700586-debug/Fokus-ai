@@ -30,6 +30,11 @@ def _today() -> str:
     return company_time.today().isoformat()
 
 
+def _display(iso: str) -> str:
+    year, month, day = iso.split("-")
+    return f"{day}.{month}.{year}"
+
+
 def _ymd(iso: str = None) -> str:
     return (iso or _today()).replace("-", "")
 
@@ -72,7 +77,7 @@ async def test_baholash_asks_branch_first_and_hides_all_employees(bot_dp):
     _employee(222, BRANCH_B, "Botir")
 
     sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
-    assert "Avval filialni tanlang" in sent[0].text
+    assert "Filialni tanlang" in sent[0].text and f"📅 Ish kuni: {_display(_today())}" in sent[0].text
     assert "Alisher" not in sent[0].text and "Botir" not in sent[0].text  # hamma xodim aralash chiqmaydi
     labels = [b.text for row in sent[0].reply_markup.inline_keyboard for b in row]
     assert labels == [f"📍 {name}" for name in RECRUITING_BRANCH_NAMES]
@@ -188,7 +193,7 @@ async def test_each_branch_session_is_separate(bot_dp):
 # ------------------------------------------------------ 5/6. eski yopilmagan sessiya --
 
 
-async def test_previous_unclosed_session_is_offered_not_lost_or_forced(bot_dp):
+async def test_previous_unclosed_day_is_continued_automatically_before_a_new_day(bot_dp):
     main, bot = bot_dp
     _supervisor()
     _employee(111, BRANCH_A, "Pending")
@@ -197,39 +202,52 @@ async def test_previous_unclosed_session_is_offered_not_lost_or_forced(bot_dp):
     nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, yesterday)
 
     sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
-    assert "Kecha Charhiy nazorati tugallanmagan. Avval shuni yopamizmi yoki bugungi nazoratga o'tasizmi?" in sent[0].text
+    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text and "Avval shu ish kunini yakunlaymiz." in sent[0].text
     callbacks = [b.callback_data for row in sent[0].reply_markup.inline_keyboard for b in row]
-    assert f"bos:br:0:{_ymd(yesterday)}" in callbacks and "bos:today" in callbacks
+    assert f"bos:br:0:{_ymd(yesterday)}" in callbacks and not any(_ymd(_today()) in c for c in callbacks)  # sana tanlash yo'q
 
-    # Majburlanmaydi: bugungi nazoratga o'tsa bo'ladi, eski sessiya yo'qolmaydi.
+    # "Filialni tanlash" ham faol (eski) kunga qaytaradi — yangi kun ochilmaydi.
     sent = await send_callback(main.dp, bot, SUPERVISOR, data="bos:today", target_chat_id=SUPERVISOR)
-    assert "Avval filialni tanlang" in sent[0].text
+    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text
     from repositories import discipline as discipline_repo
 
     assert discipline_repo.get_branch_session(SUPERVISOR, BRANCH_A, yesterday)["status"] == "open"
 
-    # Eski sessiya o'z sanasi bilan ochiladi va yopiladi (bugungi baholarga aralashmaydi).
+    # Bugungi sana tugmalari (eskirgan/boshqa kun) hech narsa yozmaydi.
+    sent = await send_callback(
+        main.dp, bot, SUPERVISOR, data=f"bos:grade:111:{discipline.GRADE_NORMA}:{_ymd(_today())}", target_chat_id=SUPERVISOR
+    )
+    assert "Bu tugma eskirgan" in sent[0].text
+    assert discipline.get_daily_grade(111, _today()) is None and discipline.get_daily_grade(111, yesterday) is None
+
     sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:br:0:{_ymd(yesterday)}", target_chat_id=SUPERVISOR)
-    assert yesterday in sent[0].text and "🔵 Pending T — baholanmagan" in sent[0].text
+    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text and "Baholanmagan: 1" in sent[0].text
+    assert "🔵 Pending T — baholanmagan" in sent[0].text
     await send_callback(
         main.dp, bot, SUPERVISOR, data=f"bos:grade:111:{discipline.GRADE_NORMA}:{_ymd(yesterday)}", target_chat_id=SUPERVISOR
     )
     sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd(yesterday)}", target_chat_id=SUPERVISOR)
-    assert "nazorati yopildi" in sent[0].text
+    assert "nazorati yopildi" in sent[0].text and "ish kuni yopildi" in sent[0].text
     assert discipline.get_daily_grade(111, yesterday) is not None and discipline.get_daily_grade(111, _today()) is None
 
+    # Faqat yopilgach keyingi (joriy) ish kuni chiqadi.
+    sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
+    assert f"📅 Ish kuni: {_display(_today())}" in sent[0].text and "Avval shu ish kunini" not in sent[0].text
 
-async def test_unclosed_sessions_of_several_branches_listed_separately(bot_dp):
+
+async def test_unclosed_days_of_several_branches_use_the_oldest_day_and_one_work_date(bot_dp):
     main, bot = bot_dp
     _supervisor()
-    yesterday = (company_time.today() - timedelta(days=1)).isoformat()
-    nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, yesterday)
-    nazoratchi_day.open_session(SUPERVISOR, BRANCH_B, yesterday)
+    old, newer = ((company_time.today() - timedelta(days=n)).isoformat() for n in (2, 1))
+    nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, newer)
+    nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, old)
+    nazoratchi_day.open_session(SUPERVISOR, BRANCH_B, old)
 
     sent = await send(main.dp, bot, SUPERVISOR, text="/kunniyop")
-    text = sent[0].text
-    assert "Kecha Charhiy nazorati tugallanmagan." in text
-    assert f"Kecha {discipline_bot._branch_short(BRANCH_B)} nazorati tugallanmagan." in text
+
+    assert f"📅 Ish kuni: {_display(old)}" in sent[0].text
+    callbacks = [b.callback_data for row in sent[0].reply_markup.inline_keyboard for b in row]
+    assert callbacks == [f"bos:close:{i}:{_ymd(old)}" for i in range(len(RECRUITING_BRANCH_NAMES))]
 
 
 # ---------------------------------------------------- 7. oylik ball (/score) --

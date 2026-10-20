@@ -884,9 +884,13 @@ menu_screens.configure(
     _MENU_SCREEN_TEXTS,
     (messages.GENERIC_DENIAL, messages.CASH_FINANCE_DENIAL, messages.MANAGEMENT_DENIAL, messages.REPEAT_OFFENDER_DENIAL),
     keep_texts={"/listnizom"},  # nizom o'qish/tasdiqlash kartasi: eski ekranlarni tozalaydi, o'zi kuzatilmaydi
-    flow_texts={"👤 Xodim qo'shish", "/grafik"},
-    flow_state_prefixes=("InviteFlowStates:", "ScheduleChangeStates:"),
+    flow_texts={"👤 Xodim qo'shish"},
+    flow_state_prefixes=("InviteFlowStates:",),
     keyboard_factory=build_menu,
+    menu_button_texts=(
+        set(_STALE_LABEL_TO_COMMAND) | set(_STALE_LABEL_TO_COMMAND.values()) | _TOP_LEVEL_NAV_TEXTS
+        | {BACK_TEXT, CANCEL_TEXT, cash_shift_bot.HOME_TEXT, _SHARED_CATEGORY_TEXT, _ROLE_TEST_ENTRY_TEXT}
+    ),
 )
 dp.message.outer_middleware(menu_screens.MenuScreenMiddleware())
 dp.callback_query.outer_middleware(menu_screens.StaleMenuCallbackMiddleware())

@@ -121,6 +121,7 @@ def env(bot_dp):
     set_role(NAZ, "nazoratchi", set_by=FOUNDER_ID)
     set_role(EMP, "kassir", set_by=FOUNDER_ID)
     menu_screens._latest_tap.clear()
+    menu_screens._last_keyboard.clear()
     menu_screens._stale.clear()
     return Env(main)
 
@@ -177,18 +178,112 @@ async def test_start_home_and_read_screens_replace_one_another(env):
         assert env.session.keyboard_owners[EMP] == latest["id"]
 
 
-async def test_abandoned_schedule_prompts_are_cleaned_on_home_but_answers_stay(env):
-    _enroll_with_rules(EMP)
-    await env.tap(EMP, "📅 Grafik so'rovi")
-    first = env.screens(EMP)[-1]
-    answer = await env.tap(EMP, "22.10.2026")
-    second = env.screens(EMP)[-1]
-    assert "Shu kunga" in second["text"]
-    await env.tap(EMP, "🏠 Asosiy menyu")
-    assert (EMP, first["id"]) in env.session.deleted
-    assert (EMP, second["id"]) in env.session.deleted
-    assert (EMP, answer) not in env.session.deleted
-    assert env.session.keyboard_owners[EMP] == env.screens(EMP)[-1]["id"]
+def _texts(markup) -> list[str]:
+    return [button.text for row in markup.keyboard for button in row]
+
+
+@pytest.mark.parametrize(
+    ("user", "section", "views"),
+    [
+        (EMP, "⭐ Mening natijalarim", ["⭐ Yulduzlarim", "💰 Oyligim", "🏆 Bugungi o'rnim"]),
+        (NAZ, "🧑‍💼 Nazoratchi", ["🏆 Bugungi natija", "🏆 Bugungi natija", "🏆 Bugungi natija"]),
+    ],
+)
+async def test_three_screens_inside_a_section_keep_that_sections_keyboard(env, user, section, views):
+    await env.tap(user, section)
+    section_keyboard = _texts(env.screens(user)[-1]["markup"])
+    main_menu = _texts(env.main.build_menu(user))
+    assert section_keyboard != main_menu
+
+    for text in views:
+        await env.tap(user, text)
+        last = env.screens(user)[-1]
+        assert _texts(last["markup"]) == section_keyboard  # bo'lim klaviaturasi aynan qayta yuborildi
+        assert env.session.keyboard_owners[user] == last["id"] and env.alive(user) == {last["id"]}
+
+
+async def test_founder_screens_keep_the_founder_menu(env):
+    for text in ("🚨 Bugungi muammolar", "🔙 Orqaga", "🚨 Bugungi muammolar"):
+        await env.tap(FOUNDER_ID, text)
+        last = env.screens(FOUNDER_ID)[-1]
+        assert _texts(last["markup"]) == _texts(env.main.build_menu(FOUNDER_ID))
+        assert env.session.keyboard_owners[FOUNDER_ID] == last["id"]
+
+
+async def test_restart_with_empty_memory_falls_back_to_the_main_menu(env):
+    await env.tap(EMP, "⭐ Mening natijalarim")
+    menu_screens._last_keyboard.clear()  # restart: jarayon xotirasi bo'sh
+
+    await env.tap(EMP, "💰 Oyligim")
+
+    assert _texts(env.screens(EMP)[-1]["markup"]) == _texts(env.main.build_menu(EMP))
+
+
+async def test_inline_screen_keeps_keyboard_owner_untouched_and_it_is_cleaned_after_the_next_keyboard_screen(env, monkeypatch):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    await env.tap(EMP, "⭐ Mening natijalarim")
+    owner = env.screens(EMP)[-1]["id"]
+    original = Message.answer
+
+    async def inline_answer(self, text, **kwargs):
+        kwargs.setdefault("reply_markup", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="x", callback_data="x")]]))
+        return await original(self, text, **kwargs)
+
+    monkeypatch.setattr(Message, "answer", inline_answer)
+    await env.tap(EMP, "💰 Oyligim")  # inline ekran
+    monkeypatch.setattr(Message, "answer", original)
+
+    inline = env.screens(EMP)[-1]
+    assert (EMP, owner) not in env.session.deleted and (EMP, owner) not in env.session.markup_removed
+    assert owner not in menu_screens._stale.get(EMP, ()) and env.session.keyboard_owners[EMP] == owner
+    assert inline["id"] in env.alive(EMP) and owner in env.alive(EMP)  # inline tugmalari ham, egasi ham saqlangan
+
+    await env.tap(EMP, "🏆 Bugungi o'rnim")  # keyingi reply-klaviaturali ekran
+
+    last = env.screens(EMP)[-1]
+    assert env.session.keyboard_owners[EMP] == last["id"]
+    assert (EMP, owner) in env.session.deleted and (EMP, inline["id"]) in env.session.deleted  # eski ega endi tozalandi
+
+
+async def test_send_failure_keeps_old_screen_and_keyboard_memory(env):
+    await env.tap(EMP, "⭐ Mening natijalarim")
+    owner = env.screens(EMP)[-1]["id"]
+    env.session.fail_send = lambda m: m.chat_id == EMP
+
+    await env.tap(EMP, "💰 Oyligim")
+
+    assert env.session.keyboard_owners[EMP] == owner and menu_screens._last_keyboard[EMP].message_id == owner
+    assert (EMP, owner) not in env.session.deleted
+
+
+async def test_late_request_never_deletes_the_current_keyboard_owner(env):
+    chat = EMP
+
+    def screen(message_id):
+        return Message(message_id=message_id, date=datetime.now(), chat=Chat(id=chat, type="private"), text="e")
+
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 20, [screen(201)], keyboard_ids={201}))
+    menu_screens._last_keyboard[chat] = menu_screens._KeyboardRef(ReplyKeyboardMarkup(keyboard=[]), 101, True)  # kech javob egasi
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 10, [screen(101)], keyboard_ids={101}))
+
+    assert (chat, 101) not in env.session.deleted and (chat, 201) not in env.session.deleted
+    assert {r["message_id"] for r in bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(chat))} >= {101, 201}
+
+
+async def test_flow_group_denial_and_background_messages_are_not_touched(env):
+    # oqim klaviaturasi almashtirilmaydi; keyingi oddiy ekran esa asosiy menyuga qaytadi (oqim klaviaturasi menyu emas)
+    await env.tap(FOUNDER_ID, "👤 Xodim qo'shish")
+    flow_kb = env.screens(FOUNDER_ID)[-1]["markup"]
+    assert _texts(flow_kb) != _texts(env.main.build_menu(FOUNDER_ID))
+    await env.tap(FOUNDER_ID, "🚨 Bugungi muammolar")
+    assert _texts(env.screens(FOUNDER_ID)[-1]["markup"]) == _texts(env.main.build_menu(FOUNDER_ID))
+
+    # fon bildirishnomasi (capture yo'q) va guruh: reply_markup qo'shilmaydi
+    await env.bot.send_message(EMP, "fon xabari")
+    await env.tap(EMP, "⭐ Mening natijalarim", chat_id=GROUP, chat_type="supergroup")
+    assert env.session.sent[[m["text"] for m in env.session.sent].index("fon xabari")]["markup"] is None
+    assert GROUP not in menu_screens._last_keyboard  # guruh klaviatura hisobiga kirmaydi
 
 
 async def test_send_failure_keeps_previous_screen_and_tap_text(env):
@@ -357,10 +452,13 @@ async def test_opening_rules_cleans_previous_menu_but_keeps_the_new_rule_card_un
 
     card = env.screens(EMP)[-1]
     assert "1-nizom" in card["text"]
-    assert (EMP, salary_screen["id"]) in env.session.deleted  # oldingi oddiy ekran tozalandi
+    # Nizom kartasi reply-klaviaturasiz: oxirgi klaviatura egasi (oylik ekrani) o'chirilmaydi — menyu klaviaturasi yo'qolmasin.
+    assert (EMP, salary_screen["id"]) not in env.session.deleted and env.session.keyboard_owners[EMP] == salary_screen["id"]
     assert (EMP, first) in env.session.deleted and (EMP, rules_tap) in env.session.deleted  # menyu matnlari ham
     assert (EMP, card["id"]) not in env.session.deleted
-    assert bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(EMP)) == []  # karta kuzatilmagan
+    tracked = [r["message_id"] for r in bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(EMP))]
+    assert tracked == [salary_screen["id"]]  # faqat klaviatura egasi kuzatuvda; nizom kartasi kuzatilmagan
+    bot_messages.log_message(menu_screens.WORKFLOW, menu_screens.screen_key(EMP), EMP, salary_screen["id"])
 
     await env.tap(EMP, "🏆 Bugungi o'rnim")  # keyingi menyu
     await env.tap(EMP, "⭐ Mening natijalarim")

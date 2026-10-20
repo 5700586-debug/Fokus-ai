@@ -23,11 +23,11 @@ import logging
 from collections import OrderedDict, deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Callable, Iterable
 
 from aiogram import BaseMiddleware, Bot
 from aiogram.methods import SendAnimation, SendAudio, SendDocument, SendMessage, SendPhoto, SendVideo, SendVoice
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from repositories import bot_messages as repo
 from services import chat_cleanup
@@ -45,9 +45,23 @@ _keep_texts: frozenset[str] = frozenset()
 _flow_texts: frozenset[str] = frozenset()
 _flow_state_prefixes: tuple[str, ...] = ()
 _denial_texts: tuple[str, ...] = ()
+_keyboard_factory: Callable[[int], ReplyKeyboardMarkup] | None = None
+_menu_button_texts: frozenset[str] = frozenset()
 _latest_tap: "OrderedDict[int, int]" = OrderedDict()
 _locks: dict[int, asyncio.Lock] = {}
 _stale: dict[int, deque] = {}
+
+
+@dataclass
+class _KeyboardRef:
+    """Chatdagi joriy pastki (reply) klaviatura va uning egasi bo'lgan xabar."""
+
+    markup: ReplyKeyboardMarkup
+    message_id: int
+    menu: bool  # faqat menyu klaviaturalari qayta yuboriladi (oqim klaviaturalari emas)
+
+
+_last_keyboard: "OrderedDict[int, _KeyboardRef]" = OrderedDict()
 
 
 @dataclass
@@ -56,6 +70,7 @@ class _Capture:
     tap_message_id: int
     screens: list[Message] = field(default_factory=list)
     kind: str = "screen"  # screen | keep | flow | flow_continue
+    keyboard_ids: set = field(default_factory=set)  # shu so'rovda reply-klaviatura bilan yuborilgan xabarlar
 
 
 _capture: ContextVar[_Capture | None] = ContextVar("menu_screen_capture", default=None)
@@ -68,16 +83,20 @@ def configure(
     keep_texts: Iterable[str] = (),
     flow_texts: Iterable[str] = (),
     flow_state_prefixes: Iterable[str] = (),
+    keyboard_factory: Callable[[int], ReplyKeyboardMarkup] | None = None,
+    menu_button_texts: Iterable[str] = (),
 ) -> None:
     """``screen_texts`` — oddiy menyu ekranlari (tozalaydi + kuzatiladi); ``keep_texts`` — tozalaydi, lekin yangi
     xabarni KUZATMAYDI (muhim kartalar); ``flow_texts`` — tozalaydi va oqimning vaqtinchalik savollarini alohida
     kalitda kuzatadi; ``flow_state_prefixes`` — shu FSM holatlarida oqim savollari ham kuzatiladi (tozalamaydi)."""
-    global _screen_texts, _keep_texts, _flow_texts, _flow_state_prefixes, _denial_texts
+    global _screen_texts, _keep_texts, _flow_texts, _flow_state_prefixes, _denial_texts, _keyboard_factory, _menu_button_texts
     _screen_texts = frozenset(screen_texts)
     _keep_texts = frozenset(keep_texts)
     _flow_texts = frozenset(flow_texts)
     _flow_state_prefixes = tuple(flow_state_prefixes)
     _denial_texts = tuple(denial_texts)
+    _keyboard_factory = keyboard_factory
+    _menu_button_texts = frozenset(menu_button_texts)
 
 
 def screen_key(chat_id: int) -> str:
@@ -109,18 +128,55 @@ def _is_denial(text: str | None) -> bool:
     return bool(text) and any(text.startswith(denial) for denial in _denial_texts)
 
 
+def _is_menu_keyboard(markup: ReplyKeyboardMarkup) -> bool:
+    """Menyu klaviaturasi: barcha tugmalari ma'lum menyu yorliqlari (oqim klaviaturalari — rol/filial tanlash va h.k. — emas)."""
+    texts = [button.text for row in markup.keyboard for button in row]
+    return bool(texts) and bool(_menu_button_texts) and all(text in _menu_button_texts for text in texts)
+
+
+def _remember_keyboard(method, sent: Message) -> None:
+    """Har muvaffaqiyatli PRIVATE send: yuborilgan reply-klaviatura va uning egasi xabar chat bo'yicha eslab qolinadi
+    (jarayon xotirasida). Klaviatura olib tashlansa (ReplyKeyboardRemove) — unutiladi."""
+    markup = getattr(method, "reply_markup", None)
+    if isinstance(markup, ReplyKeyboardMarkup):
+        _last_keyboard[sent.chat.id] = _KeyboardRef(markup, sent.message_id, _is_menu_keyboard(markup))
+        _last_keyboard.move_to_end(sent.chat.id)
+        while len(_last_keyboard) > _MAX_CHATS:
+            _last_keyboard.popitem(last=False)
+    elif isinstance(markup, ReplyKeyboardRemove):
+        _last_keyboard.pop(sent.chat.id, None)
+
+
+def _keyboard_for(chat_id: int) -> ReplyKeyboardMarkup | None:
+    """Oddiy menyu javobi uchun klaviatura: oxirgi eslangan MENYU klaviaturasi (bo'lim ichida qoladi); xotira bo'sh
+    (restart) yoki oxirgisi oqim klaviaturasi bo'lsa — mavjud ``build_menu`` zaxirasi."""
+    ref = _last_keyboard.get(chat_id)
+    if ref is not None and ref.menu:
+        return ref.markup
+    return _keyboard_factory(chat_id) if _keyboard_factory is not None else None
+
+
 async def session_middleware(make_request, bot: Bot, method):
-    """``bot.session.middleware(...)``: menyu bosilishi paytida shu chatga yuborilgan xabarlarni yig'adi."""
-    result = await make_request(bot, method)
+    """``bot.session.middleware(...)``: menyu bosilishi paytida shu chatga yuborilgan xabarlarni yig'adi; kuzatiladigan
+    oddiy ``screen`` javobida reply_markup bo'lmasa oxirgi menyu klaviaturasini qayta yuboradi (inline/oqim/rad etish
+    xabarlari, guruhlar va fon bildirishnomalari o'zgarmaydi)."""
     capture = _capture.get()
-    if capture is not None and isinstance(method, _SEND_METHODS):
-        sent = getattr(result, "result", result)
-        if (
-            isinstance(sent, Message)
-            and sent.chat.id == capture.chat_id
-            and not _is_denial(getattr(method, "text", None))
-        ):
+    if (
+        capture is not None and capture.kind == "screen"
+        and isinstance(method, SendMessage) and method.chat_id == capture.chat_id and capture.chat_id > 0
+        and method.reply_markup is None and not _is_denial(method.text)
+    ):
+        markup = _keyboard_for(capture.chat_id)
+        if markup is not None:
+            method = method.model_copy(update={"reply_markup": markup})
+    result = await make_request(bot, method)
+    sent = getattr(result, "result", result)
+    if isinstance(sent, Message) and sent.chat.id > 0 and isinstance(method, _SEND_METHODS):
+        _remember_keyboard(method, sent)
+        if capture is not None and sent.chat.id == capture.chat_id and not _is_denial(getattr(method, "text", None)):
             capture.screens.append(sent)
+            if isinstance(getattr(method, "reply_markup", None), ReplyKeyboardMarkup):
+                capture.keyboard_ids.add(sent.message_id)
     return result
 
 
@@ -151,14 +207,24 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
     lock = _locks.setdefault(chat_id, asyncio.Lock())
     async with lock:
         new_ids = {screen.message_id for screen in capture.screens}
+        ref = _last_keyboard.get(chat_id)
+        # Joriy reply-klaviatura egasi: yangi ekranlar o'z klaviaturasini olib kelmagan bo'lsa (masalan inline ekran) o'chirilmaydi,
+        # tugmalari olinmaydi, stale qilinmaydi va kuzatuvdan yo'qolmaydi — keyingi klaviaturali ekrandan so'ng tozalanadi.
+        # Egasi NOMA'LUM (restartdan keyin xotira bo'sh) va yangi ekran klaviaturasiz bo'lsa — eski kuzatilgan bot xabarlarining
+        # hammasi saqlanadi (qaysi biri klaviatura egasi ekani noma'lum), keyingi klaviaturali ekrandan so'ng tozalanadi.
+        protect_all = ref is None and not capture.keyboard_ids
+        protected = ref.message_id if ref is not None and not capture.keyboard_ids else None
         if capture.tap_message_id < _latest_tap.get(chat_id, 0):
             # Kech tugagan eski so'rov: joriy (yangiroq) ekran hisobiga (``_latest_tap``, kuzatuv yozuvlari) tegmaymiz.
             # "keep" (masalan faol nizom kartasi) javobi O'CHIRILMAYDI, tugmalari olinmaydi, kuzatilmaydi — faqat eski
             # menyu tanlash matni tozalanadi. Oddiy ekran/oqim savollari o'z natijasini olib tashlaydi.
+            late_owner = ref.message_id if ref is not None and ref.message_id in new_ids else None  # joriy klaviatura egasi
             stale_ids = (capture.tap_message_id,) if capture.kind == "keep" else (*new_ids, capture.tap_message_id)
             for message_id in stale_ids:
                 if message_id == capture.tap_message_id:
                     await _remove_tap(bot, chat_id, message_id)
+                elif message_id == late_owner:
+                    _track_id(screen_key(chat_id), chat_id, message_id)  # o'chirilmaydi: keyin tozalanadi
                 else:
                     await _remove(bot, chat_id, message_id)
             return
@@ -172,8 +238,12 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
                 logger.error("Menyu ekranlari ro'yxatini olib bo'lmadi (chat=%s): %r", chat_id, error)
 
         for row in old_rows:
-            if row["message_id"] not in new_ids and row["message_id"] != capture.tap_message_id:
-                await _remove(bot, row["chat_id"], row["message_id"])  # o'chmasa eskirgan deb belgilanadi
+            if row["message_id"] in new_ids or row["message_id"] == capture.tap_message_id:
+                continue
+            if protect_all or (protected is not None and row["message_id"] == protected):
+                _track_id(key, row["chat_id"], row["message_id"])  # saqlanadi va kuzatuvda qoladi
+                continue
+            await _remove(bot, row["chat_id"], row["message_id"])  # o'chmasa eskirgan deb belgilanadi
 
         if capture.kind in ("screen", "flow"):  # "keep" (muhim karta) kuzatilmaydi
             target_key = key if capture.kind == "screen" else flow_key(chat_id)

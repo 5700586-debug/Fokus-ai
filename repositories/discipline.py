@@ -496,7 +496,8 @@ def get_month_point_totals(
 
 
 def save_daily_grade(
-    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int, ledger_reason: str
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int, ledger_reason: str,
+    session_branch: str | None = None,
 ) -> dict:
     """Bitta baholash — BITTA tranzaksiya: ``daily_evaluations`` + ``daily_evaluation_history`` +
     ``salaries.bonus_bank`` + ``bonus_bank_ledger``. Hammasi muvaffaqiyatli bo'lsagina commit; istalgan
@@ -506,7 +507,11 @@ def save_daily_grade(
     Xuddi shu baho (kalit + ball) allaqachon saqlangan bo'lsa hech narsa yozilmaydi (``changed=False``).
     Aks holda baho faqat o'qilgan qiymatda bo'lsagina o'zgaradi (``UPDATE ... WHERE grade_key/ball``;
     yangi qator uchun ``INSERT ... ON CONFLICT DO NOTHING``), shuning uchun parallel bir xil bosishlardan
-    faqat BITTASI g'olib bo'ladi — tarix, ball va xabar bir marta."""
+    faqat BITTASI g'olib bo'ladi — tarix, ball va xabar bir marta.
+
+    ``session_branch`` berilsa (aniq filial), YANGI yozilgan baho bilan BIR tranzaksiyada nazoratchi+filial+kun
+    sessiyasi ochiladi (``INSERT OR IGNORE``: mavjudi qayta ishlatiladi, yopilgani qayta ochilmaydi). O'zgarmagan
+    (takroriy) baho sessiya yaratmaydi — tarixiy baholardan backfill yo'q."""
     conn = get_connection()
     try:
         for _ in range(3):
@@ -553,6 +558,13 @@ def save_daily_grade(
             else:
                 salary = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (employee_id,)).fetchone()
                 balance = salary["bonus_bank"] if salary else 0
+
+            if session_branch:
+                conn.execute(
+                    "INSERT OR IGNORE INTO nazoratchi_branch_sessions "
+                    "(supervisor_id, branch, session_date, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
+                    (supervisor_id, session_branch, eval_date, now),
+                )
 
             conn.commit()
             return {"changed": True, "previous": previous, "balance": balance}
@@ -886,6 +898,29 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 # -------------------------------------------------------- supervisor audit --
 
 
+def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int) -> bool:
+    """Audit yozuvi + ``salaries.bonus_bank`` minusi + ``bonus_bank_ledger`` BITTA tranzaksiyada. Bir nazoratchi+ish kuni+hodisa
+    uchun faqat bir marta (``UNIQUE`` + ``INSERT OR IGNORE``): takroriy/parallel chaqiruv ``False`` qaytaradi va hech narsa
+    yozmaydi. Istalgan yozuv xato bersa hammasi bekor."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO supervisor_audit "
+            "(supervisor_id, audit_date, event_type, penalty_amount, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (supervisor_id, audit_date, event_type, penalty_amount, _now()),
+        )
+        if cursor.rowcount <= 0:
+            return False
+        _apply_bonus_delta(
+            conn, supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def try_record_supervisor_audit(
     supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int
 ) -> bool:
@@ -952,6 +987,21 @@ def close_branch_session(session_id: int, evaluated_count: int, total_count: int
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+def list_branch_sessions_up_to(supervisor_id: int, up_to_date: str) -> list[dict]:
+    """Nazoratchining ``up_to_date`` (shu kun ham) gacha BARCHA filial sessiyalari (ochiq va yopiq), sana bo'yicha."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND session_date <= ? "
+            "ORDER BY session_date, branch",
+            (supervisor_id, up_to_date),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
 
 
 def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None, on_date: str | None = None) -> list[dict]:

@@ -25,6 +25,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+import company_time
 import employees
 from config import COMPANY_TIMEZONE, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import is_authorized, list_users
@@ -151,60 +152,93 @@ def _branch_index(branch: str) -> int | None:
         return None
 
 
-def _branch_picker_keyboard(prefix: str, review_date: str) -> InlineKeyboardMarkup:
+def _now_company() -> datetime:
+    return company_time.now()
+
+
+def _display_date(iso_date: str) -> str:
+    year, month, day = iso_date.split("-")
+    return f"{day}.{month}.{year}"
+
+
+def _branch_picker_keyboard(prefix: str, review_date: str, supervisor_id: int | None = None) -> InlineKeyboardMarkup:
+    closed: set[str] = set()
+    if supervisor_id is not None:
+        closed = {
+            item["branch"]
+            for item in discipline_repo_sessions(supervisor_id, review_date)
+            if item["status"] == "closed"
+        }
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"📍 {name}", callback_data=f"{prefix}:{index}:{_ymd(review_date)}")]
+            [InlineKeyboardButton(
+                text=f"{'✅' if name in closed else '📍'} {name}", callback_data=f"{prefix}:{index}:{_ymd(review_date)}"
+            )]
             for index, name in enumerate(RECRUITING_BRANCH_NAMES)
         ]
     )
 
 
-def _day_phrase(session_date: str) -> str:
-    from datetime import timedelta
+def discipline_repo_sessions(supervisor_id: int, work_date: str) -> list[dict]:
+    from repositories import discipline as discipline_repo
 
-    if session_date == (_today() - timedelta(days=1)).isoformat():
-        return "Kecha"
-    year, month, day = session_date.split("-")
-    return f"{day}.{month}.{year} sanadagi"
-
-
-def _stale_offer(supervisor_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
-    """Oldingi kunlardan yopilmay qolgan filial sessiyalari bo'lsa taklif: avval shuni yopish yoki
-    bugungi nazoratga o'tish. Hech narsa majburlanmaydi, sessiya yo'qolmaydi."""
-    sessions = nazoratchi_day.stale_open_sessions(supervisor_id, _today().isoformat())
-    sessions = [item for item in sessions if _branch_index(item["branch"]) is not None]
-    if not sessions:
-        return None
-
-    lines = [f"{_day_phrase(item['session_date'])} {_branch_short(item['branch'])} nazorati tugallanmagan." for item in sessions[:3]]
-    if len(sessions) > 3:
-        lines.append(f"…va yana {len(sessions) - 3} ta.")
-    question = "Avval shuni yopamizmi yoki bugungi nazoratga o'tasizmi?"
-    if len(lines) == 1:
-        lines = [f"{lines[0]} {question}"]
-    else:
-        lines.append(question)
-
-    rows = [
-        [InlineKeyboardButton(
-            text=f"🔁 {_branch_short(item['branch'])} {item['session_date'][8:]}.{item['session_date'][5:7]} — avval shuni yopamiz",
-            callback_data=f"bos:br:{_branch_index(item['branch'])}:{_ymd(item['session_date'])}",
-        )]
-        for item in sessions[:3]
+    return [
+        item for item in discipline_repo.list_branch_sessions_up_to(supervisor_id, work_date)
+        if item["session_date"] == work_date
     ]
-    rows.append([InlineKeyboardButton(text="➡️ Bugungi nazoratga o'tish", callback_data="bos:today")])
-    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+RESUME_NOTE = "Avval shu ish kunini yakunlaymiz."
+
+
+def _day_header(day) -> str:
+    text = f"📅 Ish kuni: {_display_date(day.work_date)}"
+    if day.resumed:
+        text += f"\n{RESUME_NOTE}"
+    return text
+
+
+def _day_screen(supervisor_id: int, prefix: str) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Nazoratchi sana hisoblamaydi: faol ish kuni avtomatik. Yopilgan kun qayta ochilmaydi."""
+    day = nazoratchi_day.active_day(supervisor_id, _now_company())
+    if day.closed:
+        return (
+            f"📅 Ish kuni: {_display_date(day.work_date)}\n✅ Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.",
+            None,
+        )
+    return (
+        f"{_day_header(day)}\n\n🏬 Filialni tanlang:",
+        _branch_picker_keyboard(prefix, day.work_date, supervisor_id),
+    )
+
+
+_STALE_ANSWER = "Bu tugma eskirgan."
+_CLOSED_ANSWER = "Bu ish kuni yopilgan."
+
+
+async def _guard_active_day(callback: CallbackQuery, review_date: str | None, *, allow_closed: bool = False) -> bool:
+    """Eskirgan/kelajak/boshqa kun yoki yopilgan kun tugmalari hech narsa yozmaydi. ``allow_closed`` — faqat
+    idempotent "allaqachon yopilgan" javobi uchun (yozuv yaratmaydi)."""
+    reason = (
+        "stale" if review_date is None
+        else nazoratchi_day.check_active(callback.from_user.id, review_date, _now_company())
+    )
+    if reason is None or (reason == "closed" and allow_closed):
+        return True
+    await callback.answer(_CLOSED_ANSWER if reason == "closed" else _STALE_ANSWER, show_alert=True)
+    return False
 
 
 def _branch_screen(branch: str, review_date: str, supervisor_id: int, prefix: str = "") -> tuple[str, InlineKeyboardMarkup]:
     statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=supervisor_id)
     ymd = _ymd(review_date)
     index = _branch_index(branch)
+    pending = sum(1 for item in statuses if item.status in nazoratchi_day.BLOCKING_STATUSES)
+    head = f"{prefix}📅 Ish kuni: {_display_date(review_date)}\n🏬 Filial: {branch}\nBaholanmagan: {pending}"
     if not statuses:
-        text = f"{prefix}🏬 {branch} — {review_date}\n\nHozircha bu filialda aktiv xodim mavjud emas."
+        text = f"{head}\n\nHozircha bu filialda aktiv xodim mavjud emas."
     else:
-        text = f"{prefix}🏬 {branch} — {review_date}\n\n" + "\n".join(item.line() for item in statuses)
+        text = f"{head}\n\n" + "\n".join(item.line() for item in statuses)
 
     buttons = [
         InlineKeyboardButton(text=f"{item.emoji} {item.name}", callback_data=f"bos:emp:{item.profile['user_id']}:{ymd}")
@@ -453,23 +487,16 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        offer = _stale_offer(message.from_user.id)
-        if offer is not None:
-            await message.answer(offer[0], reply_markup=offer[1])
-            return
-
-        await message.answer(
-            "🏬 Avval filialni tanlang:", reply_markup=_branch_picker_keyboard("bos:br", _today().isoformat())
-        )
+        text, keyboard = _day_screen(message.from_user.id, "bos:br")
+        await message.answer(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data == "bos:today")
     async def baholash_today(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        await callback.message.edit_text(
-            "🏬 Avval filialni tanlang:", reply_markup=_branch_picker_keyboard("bos:br", _today().isoformat())
-        )
+        text, keyboard = _day_screen(callback.from_user.id, "bos:br")
+        await callback.message.edit_text(text, reply_markup=keyboard)
         await callback.answer()
 
     @dp.callback_query(F.data.startswith("bos:br:"))
@@ -484,9 +511,23 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Filial topilmadi.", show_alert=True)
             return
 
+        if not await _guard_active_day(callback, review_date):
+            return
+
         branch = RECRUITING_BRANCH_NAMES[index]
-        nazoratchi_day.open_session(callback.from_user.id, branch, review_date)
+        session = nazoratchi_day.open_session(callback.from_user.id, branch, review_date)
+        if session["status"] == "closed":
+            await callback.message.edit_text(
+                f"📅 Ish kuni: {_display_date(review_date)}\n🏬 Filial: {branch}\n✅ Bu filial shu ish kunida yopilgan.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="⬅️ Filialni tanlash", callback_data="bos:today")
+                ]]),
+            )
+            await callback.answer()
+            return
         text, keyboard = _branch_screen(branch, review_date, callback.from_user.id)
+        if (day := nazoratchi_day.active_day(callback.from_user.id, _now_company())).resumed:
+            text = f"{RESUME_NOTE}\n\n{text}"
         await callback.message.edit_text(text, reply_markup=keyboard)
         await callback.answer()
 
@@ -497,7 +538,9 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         parts = callback.data.split(":")
         employee_id = int(parts[2])
-        review_date = (_iso_from_ymd(parts[3]) if len(parts) > 3 else None) or _today().isoformat()
+        review_date = _iso_from_ymd(parts[3]) if len(parts) > 3 else None
+        if not await _guard_active_day(callback, review_date):
+            return
         profile = employees.get_profile(employee_id)
         name = _employee_name(employee_id)
         branch = profile.get("branch") if profile else None
@@ -527,13 +570,26 @@ def register(dp: Dispatcher, openai_client) -> None:
         parts = callback.data.split(":")
         employee_id = int(parts[2])
         grade_key = parts[3]
-        review_date = (_iso_from_ymd(parts[4]) if len(parts) > 4 else None) or _today().isoformat()
-
-        if employees.get_profile(employee_id) is None:
-            await callback.answer(discipline.grade_notice_reply(discipline.NOTICE_UNKNOWN_EMPLOYEE), show_alert=True)
+        review_date = _iso_from_ymd(parts[4]) if len(parts) > 4 else None
+        if not await _guard_active_day(callback, review_date):
             return
 
-        result = discipline.record_daily_grade(employee_id, callback.from_user.id, review_date, grade_key)
+        grade_profile = employees.get_profile(employee_id)
+        if grade_profile is None:
+            await callback.answer(discipline.grade_notice_reply(discipline.NOTICE_UNKNOWN_EMPLOYEE), show_alert=True)
+            return
+        if any(
+            item["branch"] == grade_profile.get("branch") and item["status"] == "closed"
+            for item in discipline_repo_sessions(callback.from_user.id, review_date)
+        ):
+            await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
+            return
+
+        grade_branch = grade_profile.get("branch")
+        result = discipline.record_daily_grade(
+            employee_id, callback.from_user.id, review_date, grade_key,
+            session_branch=grade_branch if _branch_index(grade_branch or "") is not None else None,
+        )
         outcome = await discipline.notify_employee_of_grade(callback.bot, employee_id, result)
         if outcome == discipline.NOTICE_UNCHANGED:
             await callback.answer(discipline.grade_notice_reply(outcome))
@@ -682,15 +738,10 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_CLOSE_DAY):
             return
 
-        offer = _stale_offer(message.from_user.id)
-        if offer is not None:
-            await message.answer(offer[0], reply_markup=offer[1])
-            return
-
-        await message.answer(
-            "✅ Qaysi filial nazoratini yopamiz?",
-            reply_markup=_branch_picker_keyboard("bos:close", _today().isoformat()),
-        )
+        text, keyboard = _day_screen(message.from_user.id, "bos:close")
+        if keyboard is not None:
+            text = text.replace("🏬 Filialni tanlang:", "✅ Qaysi filial nazoratini yopamiz?")
+        await message.answer(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data.startswith("bos:close:"))
     async def close_branch_handler(callback: CallbackQuery) -> None:
@@ -704,14 +755,20 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Filial topilmadi.", show_alert=True)
             return
 
+        if not await _guard_active_day(callback, review_date, allow_closed=True):
+            return
+
         branch = RECRUITING_BRANCH_NAMES[index]
         result = nazoratchi_day.close_session(callback.from_user.id, branch, review_date)
 
         if result.already_closed:
-            await callback.message.edit_text(f"ℹ️ {branch} — {review_date} nazorati allaqachon yopilgan.")
+            await callback.message.edit_text(
+                f"📅 Ish kuni: {_display_date(review_date)}\nℹ️ {branch} nazorati allaqachon yopilgan."
+            )
         elif result.blockers:
             await callback.message.edit_text(
-                nazoratchi_day.blockers_text(result.blockers),
+                f"📅 Ish kuni: {_display_date(review_date)}\n🏬 Filial: {branch}\n"
+                + nazoratchi_day.blockers_text(result.blockers),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                     InlineKeyboardButton(text="📋 Filialga qaytish", callback_data=f"bos:br:{index}:{ymd}"),
                 ]]),
@@ -719,9 +776,23 @@ def register(dp: Dispatcher, openai_client) -> None:
         else:
             statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=callback.from_user.id)
             chunks = close_report.build_close_report(branch, review_date, statuses, result.evaluated, result.total)
-            await callback.message.edit_text(chunks[0])
-            for chunk in chunks[1:]:
-                await callback.message.answer(chunk)
+            day_closed = nazoratchi_day.day_fully_closed(callback.from_user.id, review_date)
+            footer = (
+                f"\n\n✅ {_display_date(review_date)} ish kuni yopildi." if day_closed
+                else "\n\nIsh kuni hali yopilmadi: boshqa filiallar ham tekshirilishi kerak."
+            )
+            next_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="➡️ Keyingi ish kuni" if day_closed else "🏬 Boshqa filial", callback_data="bos:today"
+                )
+            ]])
+            if len(chunks) == 1:
+                await callback.message.edit_text(chunks[0] + footer, reply_markup=next_kb)
+            else:
+                await callback.message.edit_text(chunks[0])
+                for chunk in chunks[1:-1]:
+                    await callback.message.answer(chunk)
+                await callback.message.answer(chunks[-1] + footer, reply_markup=next_kb)
         await callback.answer()
 
     # ------------------------------------------------------- dashboardlar --
@@ -1315,43 +1386,59 @@ def register(dp: Dispatcher, openai_client) -> None:
 
 
 async def _day_close_tick(bot) -> None:
-    from roles import find_user_by_role
+    from roles import list_users_by_role
+    from services import attendance as attendance_service
+    from services import day_close_deadline
 
     tz = _resolve_timezone()
     now = datetime.now(tz)
-    today = now.date().isoformat()
     deadline = rules_service.get_bos_day_close_deadline()
-    if now.strftime("%H:%M") < deadline:
+    try:
+        due = day_close_deadline.due_work_date(
+            now, deadline, rules_service.get_bos_work_day_start(), rules_service.get_bos_close_policy_effective_at()
+        )
+    except ValueError as error:
+        print(f"Kun yopish muddati/chegarasi noto'g'ri formatda, tekshiruv o'tkazib yuborildi: {error!r}")
+        return
+    if due is None:
         return
 
-    supervisor_id = find_user_by_role("nazoratchi")
-    if supervisor_id is None:
-        return
-
-    if discipline.get_closure(supervisor_id, today) is not None:
-        return
-
+    work_date = due[0].isoformat()
     penalty_amount = rules_service.get_bos_supervisor_late_penalty()
-    if not discipline.penalize_supervisor_for_late_close(supervisor_id, today, penalty_amount):
-        return
+    for supervisor_id in list_users_by_role("nazoratchi"):
+        if discipline.get_closure(supervisor_id, work_date) is not None:
+            continue
 
-    try:
-        await bot.send_message(
-            supervisor_id,
-            f"⚠️ Bugungi kunni {deadline} gacha yopmadingiz — sizdan -{penalty_amount} "
-            "ball avtomatik yechildi (audit qayd etildi).",
-        )
-    except Exception as error:
-        print(f"Nazoratchiga avtomatik jarima xabarini yuborib bo'lmadi: {error!r}")
+        # Nazoratchining O'Z grafigida shu ish kuni dam bo'lsa jarima yo'q. Filial ishlamagan kun haqida ishonchli
+        # ma'lumot manbai yo'q — taxmin qilinmaydi (qarang STATE).
+        shift = attendance_service.get_shift_for_date(supervisor_id, work_date)
+        if shift is not None and shift.get("status") == "off":
+            continue
 
-    try:
-        await bot.send_message(
-            FOUNDER_ID,
-            f"🔔 Nazoratchi (user_id: {supervisor_id}) bugungi kunni {deadline} gacha "
-            f"yopmadi — avtomatik -{penalty_amount} ball audit qilindi.",
-        )
-    except Exception as error:
-        print(f"Founder'ga audit xabarini yuborib bo'lmadi: {error!r}")
+        try:
+            if not discipline.penalize_supervisor_for_late_close(supervisor_id, work_date, penalty_amount):
+                continue
+        except Exception as error:  # to'liq bekor qilingan (qisman audit/balans/ledger yo'q); keyingi tick qayta urinadi
+            print(f"Kun yopilmagani jarimasini yozib bo'lmadi (supervisor={supervisor_id}, work_date={work_date}): {error!r}")
+            continue
+
+        try:
+            await bot.send_message(
+                supervisor_id,
+                f"⚠️ {work_date} kunini {deadline} gacha yopmadingiz — sizdan -{penalty_amount} "
+                "ball avtomatik yechildi (audit qayd etildi).",
+            )
+        except Exception as error:
+            print(f"Nazoratchiga avtomatik jarima xabarini yuborib bo'lmadi: {error!r}")
+
+        try:
+            await bot.send_message(
+                FOUNDER_ID,
+                f"🔔 Nazoratchi (user_id: {supervisor_id}) {work_date} kunini {deadline} gacha "
+                f"yopmadi — avtomatik -{penalty_amount} ball audit qilindi.",
+            )
+        except Exception as error:
+            print(f"Founder'ga audit xabarini yuborib bo'lmadi: {error!r}")
 
 
 def start_scheduler(bot):

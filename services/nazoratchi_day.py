@@ -12,10 +12,14 @@ TODO: dam olishga "kim ruxsat berdi" ustuni hozir yo'q — ``employee_scheduled_
 
 from dataclasses import dataclass, field
 
+from datetime import datetime
+
 import employees
+from config import RECRUITING_BRANCH_NAMES
 from repositories import discipline as discipline_repo
 from services import attendance as attendance_service
-from services import discipline
+from services import day_close_deadline, discipline
+from services import rules as rules_service
 
 STATUS_EVALUATED = "evaluated"      # ✅ baholandi
 STATUS_PENDING = "pending"          # 🔵 ishda, baholanmagan
@@ -89,6 +93,74 @@ def branch_statuses(branch: str, review_date: str, exclude_user_id: int | None =
     return [employee_status(profile, review_date) for profile in branch_employees(branch, exclude_user_id)]
 
 
+def coverage_branches(supervisor_id: int) -> list[str]:
+    """Kun yopilishi uchun tekshirilishi SHART filiallar: mavjud filial ro'yxati (``RECRUITING_BRANCH_NAMES``) dan
+    tekshiriladigan xodimi bor filiallar. Xodimi yo'q filial tekshiruv talab qilmaydi; tekshirilmagan filial hech qachon
+    yopilgan deb TAXMIN QILINMAYDI."""
+    return [branch for branch in RECRUITING_BRANCH_NAMES if branch_employees(branch, supervisor_id)]
+
+
+def branch_pending_count(branch: str, work_date: str, supervisor_id: int) -> int:
+    """"Baholanmagan" = ishda (baholanmagan) + grafik yo'q (baholanmagan). Damdagilar va baholanganlar kirmaydi."""
+    return sum(1 for item in branch_statuses(branch, work_date, supervisor_id) if item.status in BLOCKING_STATUSES)
+
+
+def day_fully_closed(supervisor_id: int, work_date: str, sessions: list[dict] | None = None) -> bool:
+    """Ish kuni FAQAT barcha qamrov filiallari yopilgandagina yopilgan (bitta filial butun kunni yopmaydi)."""
+    if sessions is None:
+        sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, work_date)
+    closed = {item["branch"] for item in sessions if item["session_date"] == work_date and item["status"] == "closed"}
+    required = set(coverage_branches(supervisor_id))
+    if required:
+        return required <= closed
+    opened = [item for item in sessions if item["session_date"] == work_date]
+    return bool(opened) and all(item["status"] == "closed" for item in opened)
+
+
+@dataclass
+class ActiveDay:
+    work_date: str
+    resumed: bool = False  # oldingi yakunlanmagan kun davom ettirilmoqda
+    closed: bool = False   # joriy ish kuni allaqachon yopilgan (qayta ochilmaydi, yangisi hali boshlanmagan)
+
+
+def current_work_date(now: datetime) -> str:
+    """PR #54 siyosati: kompaniya vaqti + ``bos.work_day_start`` chegarasi."""
+    boundary = day_close_deadline.parse_hhmm(rules_service.get_bos_work_day_start())
+    return day_close_deadline.work_date_at(now, boundary).isoformat()
+
+
+def active_day(supervisor_id: int, now: datetime) -> ActiveDay:
+    """Nazoratchining faol ish kuni (faqat O'QIYDI, hech narsa yozmaydi/yopmaydi/ochmaydi):
+    eng eski yakunlanmagan kun (sessiyasi bor, barcha qamrov filiallari yopilmagan), kelajak sanalar e'tiborsiz;
+    bo'lmasa joriy ish kuni (yopilgan bo'lsa ``closed=True``). Oradagi kalendar kunlar yaratilmaydi."""
+    current = current_work_date(now)
+    sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, current)
+    for work_date in sorted({item["session_date"] for item in sessions}):
+        if not _is_closed_day(supervisor_id, work_date, sessions):
+            return ActiveDay(work_date, resumed=work_date < current)
+    if _is_closed_day(supervisor_id, current, sessions):
+        return ActiveDay(current, closed=True)
+    return ActiveDay(current)
+
+
+def _is_closed_day(supervisor_id: int, work_date: str, sessions: list[dict]) -> bool:
+    """Yopilgan kun: ``daily_closures`` yozuvi bor (har qanday TARIXIY kun uchun ham — keyin qo'shilgan filial/xodim uni
+    qayta ochmaydi) yoki shu kunning barcha qamrov filiallari yopilgan."""
+    return discipline.get_closure(supervisor_id, work_date) is not None or day_fully_closed(supervisor_id, work_date, sessions)
+
+
+def check_active(supervisor_id: int, review_date: str, now: datetime) -> str | None:
+    """Callback/yozuv uchun himoya: ``None`` — ruxsat; ``"stale"`` — sana faol ish kuni emas (eskirgan/kelajak/boshqa kun);
+    ``"closed"`` — faol kun yopilgan. Yopilgan yoki faol bo'lmagan kunga hech narsa yozilmaydi."""
+    day = active_day(supervisor_id, now)
+    if day.closed and review_date == day.work_date:
+        return "closed"
+    if review_date != day.work_date:
+        return "stale"
+    return None
+
+
 def open_session(supervisor_id: int, branch: str, review_date: str) -> dict:
     return discipline_repo.open_branch_session(supervisor_id, branch, review_date)
 
@@ -125,9 +197,9 @@ def close_session(supervisor_id: int, branch: str, review_date: str) -> CloseRes
     if not discipline_repo.close_branch_session(session["id"], evaluated, len(statuses)):
         return CloseResult(closed=False, already_closed=True)
 
-    # Mavjud kunlik yopish belgisi (scheduler "kun yopilmadi" jarimasi uchun) — nazoratchining shu
-    # sanadagi BARCHA ochilgan filial sessiyalari yopilgandagina qo'yiladi.
-    if not discipline_repo.list_open_branch_sessions(supervisor_id, on_date=review_date):
+    # Mavjud kunlik yopish belgisi (scheduler "kun yopilmadi" jarimasi uchun) — shu sanadagi BARCHA qamrov
+    # filiallari yopilgandagina qo'yiladi (bitta filial butun kunni yopmaydi).
+    if day_fully_closed(supervisor_id, review_date):
         discipline.close_day(supervisor_id, review_date, len(statuses))
 
     return CloseResult(closed=True, evaluated=evaluated, total=len(statuses), off_count=off_count)

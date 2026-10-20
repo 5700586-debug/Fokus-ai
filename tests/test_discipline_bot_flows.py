@@ -66,7 +66,7 @@ async def test_baholash_allowed_for_nazoratchi(bot_dp):
     _set_role(111, "kassir")
 
     sent = await send(main.dp, bot, 1, text="/baholash")
-    assert "Avval filialni tanlang" in sent[0].text  # hamma xodim emas — avval filial
+    assert "Filialni tanlang" in sent[0].text and "📅 Ish kuni:" in sent[0].text  # hamma xodim emas — avval filial
 
 
 async def test_grading_flow_updates_bonus_bank(bot_dp, monkeypatch):
@@ -75,10 +75,13 @@ async def test_grading_flow_updates_bonus_bank(bot_dp, monkeypatch):
     _set_role(111, "kassir")
     _approved_profile(111)
 
-    sent = await send_callback(main.dp, bot, 1, data="bos:emp:111:0", target_chat_id=1)
+    today_ymd = company_time.today().strftime("%Y%m%d")
+    sent = await send_callback(main.dp, bot, 1, data=f"bos:emp:111:{today_ymd}", target_chat_id=1)
     assert "Baho tanlang" in sent[0].text
 
-    sent = await send_callback(main.dp, bot, 1, data=f"bos:grade:111:{discipline_bot.discipline.GRADE_ALO}", target_chat_id=1)
+    sent = await send_callback(
+        main.dp, bot, 1, data=f"bos:grade:111:{discipline_bot.discipline.GRADE_ALO}:{today_ymd}", target_chat_id=1
+    )
     assert "3 ball" in next(m for m in sent if m.__class__.__name__ == "EditMessageText").text
 
     from services import discipline
@@ -571,12 +574,18 @@ def _ymd() -> str:
     return company_time.today().strftime("%Y%m%d")
 
 
+def discipline_bot_branch() -> str:
+    import employees
+
+    return employees.get_profile(EMPLOYEE)["branch"]
+
+
 async def _bos(main, bot, grade_key: str, actor: int = NAZORATCHI):
     return await send_callback(main.dp, bot, actor, data=f"bos:grade:{EMPLOYEE}:{grade_key}:{_ymd()}", target_chat_id=actor)
 
 
 async def _nzr(main, bot, grade_key: str, actor: int = NAZORATCHI):
-    return await send_callback(main.dp, bot, actor, data=f"nzr_grade:{EMPLOYEE}:{grade_key}", target_chat_id=actor)
+    return await send_callback(main.dp, bot, actor, data=f"nzr_grade:{EMPLOYEE}:{grade_key}:{_ymd()}", target_chat_id=actor)
 
 
 def _notices(sent, chat_id: int = EMPLOYEE) -> list:
@@ -827,6 +836,10 @@ def _freeze_now(monkeypatch, year: int, month: int, day: int, hour: int = 12) ->
 
 
 async def _bos_on(main, bot, grade_key: str, ymd: str):
+    # Eski sanaga baho faqat o'sha kun faol (yakunlanmagan sessiya) bo'lgandagina yoziladi.
+    from services import nazoratchi_day
+
+    nazoratchi_day.open_session(NAZORATCHI, discipline_bot_branch(), f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}")
     return await send_callback(
         main.dp, bot, NAZORATCHI, data=f"bos:grade:{EMPLOYEE}:{grade_key}:{ymd}", target_chat_id=NAZORATCHI
     )
@@ -851,8 +864,8 @@ async def test_correcting_an_old_month_grade_updates_only_that_month_in_the_mess
     main, bot = bot_dp
     _setup()
     _freeze_now(monkeypatch, 2026, 11, 5)
+    await _nzr(main, bot, discipline.GRADE_ALO)  # noyabr (bugungi) bahosi — 3 (oktabr kuni hali ochilmagan: faol kun = noyabr)
     await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
-    await _nzr(main, bot, discipline.GRADE_ALO)  # noyabr (bugungi) bahosi — 3
 
     sent = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")  # oktabr 3 -> 2
 

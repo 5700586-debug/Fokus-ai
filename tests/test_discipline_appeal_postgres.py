@@ -63,7 +63,7 @@ def pg(pg_schema, temp_db, monkeypatch):
     conn.autocommit = True
     try:
         conn.cursor().execute(
-            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules RESTART IDENTITY CASCADE"
+            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit, nazoratchi_branch_sessions, daily_evaluations, daily_evaluation_history RESTART IDENTITY CASCADE"
         )
     finally:
         conn.close()
@@ -225,3 +225,94 @@ def test_delivery_claim_is_exclusive_and_mark_is_once_on_postgres(pg):
     assert discipline.claim_appeal_delivery(penalty_id) is False  # yetkazilgan: yangi karta yo'q
     row = discipline.get_penalty(penalty_id)
     assert row["appeal_founder_message_id"] == 4242 and row["appeal_delivered_at"]
+
+
+# ----------------------- nazoratchi "kun yopilmadi" minusi: audit + balans + ledger BITTA tranzaksiya (PgConnection) --
+
+
+def _audit_state(supervisor_id: int) -> tuple:
+    return (
+        _scalar(f"SELECT COUNT(*) FROM supervisor_audit WHERE supervisor_id = {supervisor_id}"),
+        _scalar(f"SELECT COALESCE(SUM(bonus_bank), 0) FROM salaries WHERE user_id = {supervisor_id}"),
+        _scalar(f"SELECT COUNT(*) FROM bonus_bank_ledger WHERE user_id = {supervisor_id}"),
+    )
+
+
+def test_supervisor_late_close_penalty_is_written_once_consistently_on_postgres(pg):
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is True
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is False  # takroriy
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-02", 40) is True   # boshqa ish kuni
+    assert _audit_state(EMPLOYEE) == (2, -80, 2)
+
+
+def test_parallel_supervisor_penalties_for_one_work_date_write_exactly_one_on_postgres(pg):
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = [f.result() for f in [pool.submit(discipline.penalize_supervisor_for_late_close, EMPLOYEE, "2026-03-01", 40) for _ in range(4)]]
+    assert results.count(True) == 1
+    assert _audit_state(EMPLOYEE) == (1, -40, 1)
+
+
+@pytest.mark.parametrize(("table", "event"), [("bonus_bank_ledger", "INSERT"), ("salaries", "INSERT")])
+def test_supervisor_penalty_failure_leaves_nothing_partial_on_postgres(pg, table, event):
+    _break(table, event)
+    try:
+        with pytest.raises(Exception):
+            discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40)
+        assert _audit_state(EMPLOYEE) == (0, 0, 0)
+    finally:
+        _repair(table)
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is True  # qayta urinish
+    assert _audit_state(EMPLOYEE) == (1, -40, 1)
+
+
+# ------------------- baho + filial sessiyasi BITTA tranzaksiya (PgConnection) --
+
+
+def _grade_state(employee_id: int) -> tuple:
+    return (
+        _scalar("SELECT COUNT(*) FROM daily_evaluations"),
+        _scalar("SELECT COUNT(*) FROM daily_evaluation_history"),
+        _scalar(f"SELECT COUNT(*) FROM bonus_bank_ledger WHERE user_id = {employee_id}"),
+        _scalar("SELECT COUNT(*) FROM nazoratchi_branch_sessions"),
+    )
+
+
+def test_first_grade_opens_the_session_once_and_repeats_or_races_add_nothing_on_postgres(pg):
+    discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "norma", session_branch="SATURN Charhiy")
+    assert _grade_state(EMPLOYEE) == (1, 1, 1, 1)
+    discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "norma", session_branch="SATURN Charhiy")  # takroriy
+    assert _grade_state(EMPLOYEE) == (1, 1, 1, 1)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda n: discipline.record_daily_grade(EMPLOYEE + n, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy"), range(1, 5)))
+    assert _scalar("SELECT COUNT(*) FROM nazoratchi_branch_sessions") == 1
+
+
+def test_closed_session_is_not_reopened_and_no_branch_means_no_session_on_postgres(pg):
+    discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "norma", session_branch="SATURN Charhiy")
+    _scalar("SELECT 1")
+    conn = psycopg2.connect(_DSN)
+    conn.autocommit = True
+    try:
+        conn.cursor().execute("UPDATE nazoratchi_branch_sessions SET status = 'closed'")
+    finally:
+        conn.close()
+
+    discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy")
+    discipline.record_daily_grade(EMPLOYEE + 9, FOUNDER, "2026-03-10", "alo")  # filial aniqlanmagan
+
+    assert _scalar("SELECT COUNT(*) FROM nazoratchi_branch_sessions WHERE status = 'closed'") == 1
+    assert _scalar("SELECT COUNT(*) FROM nazoratchi_branch_sessions") == 1
+
+
+@pytest.mark.parametrize("table", ["nazoratchi_branch_sessions", "bonus_bank_ledger", "daily_evaluation_history"])
+def test_grade_or_session_failure_rolls_everything_back_on_postgres(pg, table):
+    _break(table, "INSERT")
+    try:
+        with pytest.raises(Exception):
+            discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy")
+        assert _grade_state(EMPLOYEE) == (0, 0, 0, 0)
+    finally:
+        _repair(table)
+    discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy")  # qayta urinish
+    assert _grade_state(EMPLOYEE) == (1, 1, 1, 1)

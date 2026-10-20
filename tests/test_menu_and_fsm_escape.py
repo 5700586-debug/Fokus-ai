@@ -150,13 +150,13 @@ async def test_nazoratchi_friendly_button_still_triggers_real_command(bot_dp):
 
     assert sent != []
     assert "tugmalardan birini tanlang" not in sent[0].text
-    assert "Avval filialni tanlang" in sent[0].text
+    assert "Filialni tanlang" in sent[0].text
 
 
 @pytest.mark.parametrize(
     "old_label, expected_text",
     [
-        ("📋 Xodimni baholash", "Avval filialni tanlang"),  # eski keshlangan tugma ham ishlaydi
+        ("📋 Xodimni baholash", "Filialni tanlang"),  # eski keshlangan tugma ham ishlaydi
         ("🏬 Filiallar", "Filiallar"),
         ("✅ Kunni yopish", "Qaysi filial nazoratini yopamiz"),
     ],

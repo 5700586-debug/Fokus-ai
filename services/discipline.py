@@ -188,7 +188,9 @@ class EvaluationResult:
     old_grade_points: int | None = None
 
 
-def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> EvaluationResult:
+def record_daily_grade(
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
+) -> EvaluationResult:
     grade_points_map = get_grade_points()
     if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")
@@ -196,7 +198,8 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
     grade_points = grade_points_map[grade_key]
     # Baho + tarix + bonus balansi + ledger — repository'da BITTA tranzaksiya (xato bo'lsa hammasi bekor).
     saved = discipline_repo.save_daily_grade(
-        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}"
+        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}",
+        session_branch=session_branch,
     )
     previous = saved["previous"]
     old_key = previous["grade_key"] if previous else None
@@ -519,14 +522,10 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 
 
 def penalize_supervisor_for_late_close(supervisor_id: int, audit_date: str, penalty_amount: int) -> bool:
-    recorded = discipline_repo.try_record_supervisor_audit(
+    """``audit_date`` — ISH KUNI (work_date). Audit + balans + ledger bitta tranzaksiyada, bir ish kuni uchun bir marta."""
+    return discipline_repo.record_supervisor_audit_with_penalty(
         supervisor_id, audit_date, "day_not_closed", penalty_amount
     )
-    if recorded:
-        discipline_repo.adjust_bonus_bank(
-            supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
-        )
-    return recorded
 
 
 # ------------------------------------------------ nizom katalogi: o'qish, tanlash, iqtibos --

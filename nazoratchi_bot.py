@@ -52,10 +52,11 @@ import employees
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from roles import get_role, role_name
 from services import attendance as attendance_service
+from repositories import discipline as discipline_repo
 from services import audit
 from services import one_on_one as one_on_one_service
 from services import schedule_range
-from services import dialog_cleanup, discipline, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
+from services import dialog_cleanup, discipline, nazoratchi_day, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
 class PenaltyOtherStates(StatesGroup):
@@ -91,6 +92,7 @@ _CB_BRANCH_PREFIX = "nzr_branch:"
 _CB_EMPLOYEE_PREFIX = "nzr_emp:"
 _CB_TIME_BONUS_PREFIX = "nzr_timebonus:"
 _CB_GRADE_PREFIX = "nzr_grade:"
+_STALE_CARD_ANSWER = "Bu tugma eskirgan — xodim kartasini qayta oching."
 _CB_PENALTY_PREFIX = "nzr_penalty:"
 _CB_PENALTY_APPLY_PREFIX = "nzr_penalty_apply:"
 _CB_PENALTY_OTHER_PREFIX = "nzr_penalty_other:"
@@ -277,9 +279,16 @@ def _employees_keyboard(branch: str, *, exclude_user_id: int | None = None) -> I
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _simple_employee_card_text(profile: dict) -> str:
+def _simple_employee_card_text(profile: dict, work_date: str | None = None) -> str:
+    """``work_date`` — nazoratchining FAOL ish kuni (yarim tundan keyin ham davom etayotgan kun); berilmasa bugun."""
+    today = company_time.today().isoformat()
+    work_date = work_date or today
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
-    lines = [
+    year, month, day = work_date.split("-")
+    lines = [f"📅 Ish kuni: {day}.{month}.{year}"]
+    if work_date != today:
+        lines.append("Avval shu ish kunini yakunlaymiz.")
+    lines += [
         f"👤 {full_name}",
         f"🏷 Lavozim: {role_name(profile.get('role_key'))}",
         f"🏬 Filial: {profile.get('branch') or '-'}",
@@ -302,13 +311,13 @@ def _simple_employee_card_text(profile: dict) -> str:
         lines.append(f"🕒 Bugungi vaqt bonusi: ✅ berildi ({source_label})")
 
     lines.append("")
-    today = company_time.today().isoformat()
-    grade = discipline.get_daily_grade(profile["user_id"], today)
+    grade = discipline.get_daily_grade(profile["user_id"], work_date)
+    grade_title = "Bugungi ish bahosi" if work_date == today else "Ish kuni bahosi"
     if grade is None:
-        lines.append("⭐ Bugungi ish bahosi: hali qo'yilmagan")
+        lines.append(f"⭐ {grade_title}: hali qo'yilmagan")
     else:
         label = discipline.GRADE_LABELS.get(grade["grade_key"], grade["grade_key"])
-        lines.append(f"⭐ Bugungi ish bahosi: {grade['grade_points']} ({label})")
+        lines.append(f"⭐ {grade_title}: {grade['grade_points']} ({label})")
 
     lines.append("")
     yesterday = attendance_service.get_yesterday_summary(profile["user_id"])
@@ -320,7 +329,10 @@ def _simple_employee_card_text(profile: dict) -> str:
     return "\n".join(lines)
 
 
-def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus_button: bool) -> InlineKeyboardMarkup:
+def _employee_card_keyboard(
+    branch: str | None, user_id: int, *, show_time_bonus_button: bool, work_date: str
+) -> InlineKeyboardMarkup:
+    """Baho tugmalari karta yaratilgan ISH KUNI (``work_date``) bilan bog'lanadi: ``nzr_grade:<xodim>:<baho>:<YYYYMMDD>``."""
     back_data = _CB_BRANCHES
     if branch is not None:
         index = _branch_index(branch)
@@ -334,7 +346,7 @@ def _employee_card_keyboard(branch: str | None, user_id: int, *, show_time_bonus
         )
     rows.append(
         [
-            InlineKeyboardButton(text=label, callback_data=f"{_CB_GRADE_PREFIX}{user_id}:{grade_key}")
+            InlineKeyboardButton(text=label, callback_data=f"{_CB_GRADE_PREFIX}{user_id}:{grade_key}:{work_date.replace('-', '')}")
             for label, grade_key in _GRADE_BUTTONS
         ]
     )
@@ -1081,14 +1093,21 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(f"🏬 {branch}\n\n👥 Xodimni tanlang:", reply_markup=keyboard)
         await callback.answer()
 
+    def _card_keyboard(profile: dict, actor_id: int, *, show_time_bonus_button: bool) -> InlineKeyboardMarkup:
+        return _employee_card_keyboard(
+            profile.get("branch"), profile["user_id"], show_time_bonus_button=show_time_bonus_button,
+            work_date=nazoratchi_day.active_day(actor_id, company_time.now()).work_date,
+        )
+
+    def _card_text(profile: dict, actor_id: int) -> str:
+        return _simple_employee_card_text(profile, nazoratchi_day.active_day(actor_id, company_time.now()).work_date)
+
     async def _render_employee_card(callback: CallbackQuery, profile: dict) -> None:
         user_id = profile["user_id"]
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
-                reply_markup=_employee_card_keyboard(
-                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                ),
+                _card_text(profile, callback.from_user.id),
+                reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
             )
 
     @dp.callback_query(F.data.startswith(_CB_EMPLOYEE_PREFIX))
@@ -1121,8 +1140,8 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
-                reply_markup=_employee_card_keyboard(profile.get("branch"), user_id, show_time_bonus_button=False),
+                _card_text(profile, callback.from_user.id),
+                reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=False),
             )
 
     @dp.callback_query(F.data.startswith(_CB_GRADE_PREFIX))
@@ -1130,20 +1149,48 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
-        parts = callback.data.split(":", 2)
-        if len(parts) != 3:
-            await callback.answer()
+        # nzr_grade:<xodim>:<baho>:<YYYYMMDD> — sanasiz (eski formatdagi) tugma bugunga TAXMIN QILINMAYDI, rad etiladi.
+        parts = callback.data.split(":")
+        work_date = None
+        if len(parts) == 4 and len(parts[3]) == 8 and parts[3].isdigit() and parts[1].isdigit():
+            work_date = f"{parts[3][:4]}-{parts[3][4:6]}-{parts[3][6:]}"
+        if work_date is None:
+            await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
 
         user_id = int(parts[1])
         grade_key = parts[2]
+        if grade_key not in discipline.GRADE_LABELS:
+            await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
+            return
         profile = employees.get_profile(user_id)
         if profile is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        today = company_time.today().isoformat()
-        result = discipline.record_daily_grade(user_id, callback.from_user.id, today, grade_key)
+        # Server: karta sanasi hamon FAOL ish kuni bo'lishi, kun/filial yopilmagan bo'lishi shart.
+        reason = nazoratchi_day.check_active(callback.from_user.id, work_date, company_time.now())
+        if reason == "closed":
+            await callback.answer("Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.", show_alert=True)
+            return
+        if reason is not None:
+            await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
+            return
+        if any(
+            item["branch"] == profile.get("branch") and item["status"] == "closed"
+            for item in discipline_repo.list_branch_sessions_up_to(callback.from_user.id, work_date)
+            if item["session_date"] == work_date
+        ):
+            await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
+            return
+        # Birinchi muvaffaqiyatli baho shu nazoratchi+filial+ish kuni sessiyasini (bitta tranzaksiyada) ochadi: shunda
+        # "Filiallar -> xodim" orqali baholangan kun yarim tundan keyin ham yakunlanmagan kun sifatida davom etadi.
+        # Filial aniqlanmasa taxminiy filial bilan sessiya yozilmaydi.
+        branch = profile.get("branch")
+        result = discipline.record_daily_grade(
+            user_id, callback.from_user.id, work_date, grade_key,
+            session_branch=branch if _branch_index(branch or "") is not None else None,
+        )
         outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
         if outcome == discipline.NOTICE_UNCHANGED:
             await callback.answer(discipline.grade_notice_reply(outcome))
@@ -1154,9 +1201,9 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         if callback.message:
             await callback.message.edit_text(
-                _simple_employee_card_text(profile),
-                reply_markup=_employee_card_keyboard(
-                    profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
+                _card_text(profile, callback.from_user.id),
+                reply_markup=_card_keyboard(
+                    profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
                 ),
             )
 
@@ -1233,9 +1280,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                     f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
                     f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
                     "ℹ️ Fiks oylikka ta'sir qilmaydi.",
-                    reply_markup=_employee_card_keyboard(
-                        profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                    ),
+                    reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
                 )
 
             try:
@@ -1585,9 +1630,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                     f"✅ {_rule_label(entry)} — {entry['title']}\n➖ -{amount} ball qayd etildi."
                     + (" Yozma ogohlantirish alohida beriladi." if option and option["written_warning"] else "")
                     + f"\n💰 Bonus banki: {result['bonus_bank_balance']} ball\nℹ️ Fiks oylikka ta'sir qilmaydi.",
-                    _employee_card_keyboard(
-                        profile.get("branch"), user_id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                    ),
+                    _card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
                 )
             except Exception as error:  # noqa: BLE001
                 print(f"Natija ekranini tahrirlab bo'lmadi (minus saqlangan): {error!r}")

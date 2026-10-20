@@ -27,6 +27,16 @@ def get_rule(rule_key: str) -> str | None:
     return row["rule_value"] if row else None
 
 
+def get_rule_updated_at(rule_key: str) -> str | None:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT updated_at FROM rules WHERE rule_key = ?", (rule_key,)).fetchone()
+    finally:
+        conn.close()
+
+    return row["updated_at"] if row else None
+
+
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
     conn = get_connection()
     try:

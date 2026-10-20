@@ -94,6 +94,24 @@ def get_bos_day_close_deadline() -> str:
     return value if value is not None else "20:00"
 
 
+def get_bos_work_day_start() -> str:
+    """Ish kuni chegarasi (HH:MM). Kodda ishonchli mavjud chegara YO'Q, shuning uchun standart ``00:00`` — ya'ni
+    ish kuni = kalendar kun (avvalgi xulq). Faqat Founder ``/setrule bos.work_day_start 08:00`` kabi belgilasa o'zgaradi."""
+    value = performance_repo.get_rule("bos.work_day_start")
+    return value if value is not None else "00:00"
+
+
+def get_bos_close_policy_effective_at() -> str | None:
+    """Muddat/chegara sozlamalari oxirgi marta o'zgargan vaqt (ISO, UTC) — yangi muddat eski kunlarga orqaga
+    qo'llanmasligi uchun. Sozlama hech qachon o'zgartirilmagan bo'lsa ``None``."""
+    stamps = [
+        performance_repo.get_rule_updated_at("bos.day_close_deadline"),
+        performance_repo.get_rule_updated_at("bos.work_day_start"),
+    ]
+    stamps = [stamp for stamp in stamps if stamp]
+    return max(stamps) if stamps else None
+
+
 def get_bos_supervisor_late_penalty() -> int:
     value = performance_repo.get_rule("bos.supervisor_late_penalty")
     return int(value) if value is not None else 40

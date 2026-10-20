@@ -63,7 +63,7 @@ def pg(pg_schema, temp_db, monkeypatch):
     conn.autocommit = True
     try:
         conn.cursor().execute(
-            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules RESTART IDENTITY CASCADE"
+            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit RESTART IDENTITY CASCADE"
         )
     finally:
         conn.close()
@@ -225,3 +225,41 @@ def test_delivery_claim_is_exclusive_and_mark_is_once_on_postgres(pg):
     assert discipline.claim_appeal_delivery(penalty_id) is False  # yetkazilgan: yangi karta yo'q
     row = discipline.get_penalty(penalty_id)
     assert row["appeal_founder_message_id"] == 4242 and row["appeal_delivered_at"]
+
+
+# ----------------------- nazoratchi "kun yopilmadi" minusi: audit + balans + ledger BITTA tranzaksiya (PgConnection) --
+
+
+def _audit_state(supervisor_id: int) -> tuple:
+    return (
+        _scalar(f"SELECT COUNT(*) FROM supervisor_audit WHERE supervisor_id = {supervisor_id}"),
+        _scalar(f"SELECT COALESCE(SUM(bonus_bank), 0) FROM salaries WHERE user_id = {supervisor_id}"),
+        _scalar(f"SELECT COUNT(*) FROM bonus_bank_ledger WHERE user_id = {supervisor_id}"),
+    )
+
+
+def test_supervisor_late_close_penalty_is_written_once_consistently_on_postgres(pg):
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is True
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is False  # takroriy
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-02", 40) is True   # boshqa ish kuni
+    assert _audit_state(EMPLOYEE) == (2, -80, 2)
+
+
+def test_parallel_supervisor_penalties_for_one_work_date_write_exactly_one_on_postgres(pg):
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = [f.result() for f in [pool.submit(discipline.penalize_supervisor_for_late_close, EMPLOYEE, "2026-03-01", 40) for _ in range(4)]]
+    assert results.count(True) == 1
+    assert _audit_state(EMPLOYEE) == (1, -40, 1)
+
+
+@pytest.mark.parametrize(("table", "event"), [("bonus_bank_ledger", "INSERT"), ("salaries", "INSERT")])
+def test_supervisor_penalty_failure_leaves_nothing_partial_on_postgres(pg, table, event):
+    _break(table, event)
+    try:
+        with pytest.raises(Exception):
+            discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40)
+        assert _audit_state(EMPLOYEE) == (0, 0, 0)
+    finally:
+        _repair(table)
+    assert discipline.penalize_supervisor_for_late_close(EMPLOYEE, "2026-03-01", 40) is True  # qayta urinish
+    assert _audit_state(EMPLOYEE) == (1, -40, 1)

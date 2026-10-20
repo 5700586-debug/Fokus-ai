@@ -886,6 +886,29 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 # -------------------------------------------------------- supervisor audit --
 
 
+def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int) -> bool:
+    """Audit yozuvi + ``salaries.bonus_bank`` minusi + ``bonus_bank_ledger`` BITTA tranzaksiyada. Bir nazoratchi+ish kuni+hodisa
+    uchun faqat bir marta (``UNIQUE`` + ``INSERT OR IGNORE``): takroriy/parallel chaqiruv ``False`` qaytaradi va hech narsa
+    yozmaydi. Istalgan yozuv xato bersa hammasi bekor."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO supervisor_audit "
+            "(supervisor_id, audit_date, event_type, penalty_amount, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (supervisor_id, audit_date, event_type, penalty_amount, _now()),
+        )
+        if cursor.rowcount <= 0:
+            return False
+        _apply_bonus_delta(
+            conn, supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def try_record_supervisor_audit(
     supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int
 ) -> bool:

@@ -1315,43 +1315,59 @@ def register(dp: Dispatcher, openai_client) -> None:
 
 
 async def _day_close_tick(bot) -> None:
-    from roles import find_user_by_role
+    from roles import list_users_by_role
+    from services import attendance as attendance_service
+    from services import day_close_deadline
 
     tz = _resolve_timezone()
     now = datetime.now(tz)
-    today = now.date().isoformat()
     deadline = rules_service.get_bos_day_close_deadline()
-    if now.strftime("%H:%M") < deadline:
+    try:
+        due = day_close_deadline.due_work_date(
+            now, deadline, rules_service.get_bos_work_day_start(), rules_service.get_bos_close_policy_effective_at()
+        )
+    except ValueError as error:
+        print(f"Kun yopish muddati/chegarasi noto'g'ri formatda, tekshiruv o'tkazib yuborildi: {error!r}")
+        return
+    if due is None:
         return
 
-    supervisor_id = find_user_by_role("nazoratchi")
-    if supervisor_id is None:
-        return
-
-    if discipline.get_closure(supervisor_id, today) is not None:
-        return
-
+    work_date = due[0].isoformat()
     penalty_amount = rules_service.get_bos_supervisor_late_penalty()
-    if not discipline.penalize_supervisor_for_late_close(supervisor_id, today, penalty_amount):
-        return
+    for supervisor_id in list_users_by_role("nazoratchi"):
+        if discipline.get_closure(supervisor_id, work_date) is not None:
+            continue
 
-    try:
-        await bot.send_message(
-            supervisor_id,
-            f"⚠️ Bugungi kunni {deadline} gacha yopmadingiz — sizdan -{penalty_amount} "
-            "ball avtomatik yechildi (audit qayd etildi).",
-        )
-    except Exception as error:
-        print(f"Nazoratchiga avtomatik jarima xabarini yuborib bo'lmadi: {error!r}")
+        # Nazoratchining O'Z grafigida shu ish kuni dam bo'lsa jarima yo'q. Filial ishlamagan kun haqida ishonchli
+        # ma'lumot manbai yo'q — taxmin qilinmaydi (qarang STATE).
+        shift = attendance_service.get_shift_for_date(supervisor_id, work_date)
+        if shift is not None and shift.get("status") == "off":
+            continue
 
-    try:
-        await bot.send_message(
-            FOUNDER_ID,
-            f"🔔 Nazoratchi (user_id: {supervisor_id}) bugungi kunni {deadline} gacha "
-            f"yopmadi — avtomatik -{penalty_amount} ball audit qilindi.",
-        )
-    except Exception as error:
-        print(f"Founder'ga audit xabarini yuborib bo'lmadi: {error!r}")
+        try:
+            if not discipline.penalize_supervisor_for_late_close(supervisor_id, work_date, penalty_amount):
+                continue
+        except Exception as error:  # to'liq bekor qilingan (qisman audit/balans/ledger yo'q); keyingi tick qayta urinadi
+            print(f"Kun yopilmagani jarimasini yozib bo'lmadi (supervisor={supervisor_id}, work_date={work_date}): {error!r}")
+            continue
+
+        try:
+            await bot.send_message(
+                supervisor_id,
+                f"⚠️ {work_date} kunini {deadline} gacha yopmadingiz — sizdan -{penalty_amount} "
+                "ball avtomatik yechildi (audit qayd etildi).",
+            )
+        except Exception as error:
+            print(f"Nazoratchiga avtomatik jarima xabarini yuborib bo'lmadi: {error!r}")
+
+        try:
+            await bot.send_message(
+                FOUNDER_ID,
+                f"🔔 Nazoratchi (user_id: {supervisor_id}) {work_date} kunini {deadline} gacha "
+                f"yopmadi — avtomatik -{penalty_amount} ball audit qilindi.",
+            )
+        except Exception as error:
+            print(f"Founder'ga audit xabarini yuborib bo'lmadi: {error!r}")
 
 
 def start_scheduler(bot):

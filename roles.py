@@ -173,6 +173,11 @@ def is_single_slot_role(role_key: str) -> bool:
     return role_key in SINGLE_SLOT_ROLES
 
 
+def list_users_by_role(role_key: str) -> list[int]:
+    """Berilgan roldagi BARCHA foydalanuvchilar (``find_user_by_role`` faqat birinchisini qaytaradi)."""
+    return [user_id for user_id, info in _USERS.items() if info["role"] == role_key]
+
+
 def find_user_by_role(role_key: str) -> int | None:
     for user_id, info in _USERS.items():
         if info["role"] == role_key:

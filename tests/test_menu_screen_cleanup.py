@@ -38,6 +38,7 @@ class FakeSession(BaseSession):
         self.deleted: list[tuple[int, int]] = []
         self.markup_removed: list[tuple[int, int]] = []
         self.answers: list[str | None] = []
+        self.keyboard_owners: dict[int, int] = {}
         self.fail_send = None
         self.fail_delete = None  # callable(chat, id) -> bool | True
         self.hold = None  # callable(method) -> bool: mos SendMessage `release` bo'lguncha kutadi (boshqariladigan kechikish)
@@ -54,6 +55,8 @@ class FakeSession(BaseSession):
             if self.fail_delete and (self.fail_delete is True or self.fail_delete(method.chat_id, method.message_id)):
                 raise RuntimeError("o'chirib bo'lmadi (48 soat / allaqachon o'chgan)")
             self.deleted.append((method.chat_id, method.message_id))
+            if self.keyboard_owners.get(method.chat_id) == method.message_id:
+                self.keyboard_owners.pop(method.chat_id)
             return True
         if isinstance(method, EditMessageReplyMarkup):
             self.markup_removed.append((method.chat_id, method.message_id))
@@ -71,6 +74,8 @@ class FakeSession(BaseSession):
                     await self.release.wait()
                 message_id = next(self.ids)
                 self.sent.append({"chat": method.chat_id, "id": message_id, "text": method.text, "markup": method.reply_markup})
+                if isinstance(method.reply_markup, ReplyKeyboardMarkup):
+                    self.keyboard_owners[method.chat_id] = message_id
             else:
                 message_id = method.message_id or 1
             return Message(
@@ -149,6 +154,41 @@ async def test_bottom_reply_keyboard_is_never_removed(env):
     last = env.screens(EMP)[-1]
     assert isinstance(last["markup"], ReplyKeyboardMarkup)  # asosiy menyu klaviaturasi yangi ekran bilan keladi
     assert not any(m["markup"].__class__.__name__ == "ReplyKeyboardRemove" for m in env.session.sent)
+
+
+@pytest.mark.parametrize("user", [EMP, NAZ, FOUNDER_ID])
+async def test_plain_read_screen_resends_keyboard_before_deleting_its_old_owner(env, user):
+    await env.tap(user, "⭐ Mening natijalarim")
+    old = env.screens(user)[-1]
+    await env.tap(user, "💰 Oyligim")
+    last = env.screens(user)[-1]
+    assert (user, old["id"]) in env.session.deleted
+    assert isinstance(last["markup"], ReplyKeyboardMarkup)
+    assert last["markup"].keyboard and last["markup"].is_persistent
+    assert env.session.keyboard_owners[user] == last["id"]
+    assert env.alive(user) == {last["id"]}
+
+
+async def test_start_home_and_read_screens_replace_one_another(env):
+    for text in ("/start", "🏠 Asosiy menyu", "💰 Oyligim", "/start"):
+        await env.tap(EMP, text)
+        latest = env.screens(EMP)[-1]
+        assert env.alive(EMP) == {latest["id"]}
+        assert env.session.keyboard_owners[EMP] == latest["id"]
+
+
+async def test_abandoned_schedule_prompts_are_cleaned_on_home_but_answers_stay(env):
+    _enroll_with_rules(EMP)
+    await env.tap(EMP, "📅 Grafik so'rovi")
+    first = env.screens(EMP)[-1]
+    answer = await env.tap(EMP, "22.10.2026")
+    second = env.screens(EMP)[-1]
+    assert "Shu kunga" in second["text"]
+    await env.tap(EMP, "🏠 Asosiy menyu")
+    assert (EMP, first["id"]) in env.session.deleted
+    assert (EMP, second["id"]) in env.session.deleted
+    assert (EMP, answer) not in env.session.deleted
+    assert env.session.keyboard_owners[EMP] == env.screens(EMP)[-1]["id"]
 
 
 async def test_send_failure_keeps_previous_screen_and_tap_text(env):

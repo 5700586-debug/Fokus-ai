@@ -10,6 +10,14 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Birlashtirilgan kodning mustaqil targeted SQLite tekshiruvi: 184 passed, 0 failed (menu_screen_cleanup, active_work_day, day_close_work_date, nazoratchi_daily_flow, discipline_service, nazoratchi_close_report). Telegram/OpenAI mock; production DB ulanmagan; PostgreSQL qayta ishlatilmadi.
 - Deploy va real telefonda tekshiruv natijasi hali tasdiqlanmagan. Keyingi qadam: yakuniy main deploy'ini tekshirish, keyin Muhammadiyning sinov akkauntida menyu va ish kuni oqimini tekshirish.
 
+## Menyu klaviaturasi real sinov tuzatishi — 2026-10-21
+
+- Muhammadiyning real telefon sinovida pastki klaviatura yo'qolgan, /start, asosiy menyu va grafik savoli qolgan. Oldingi mock test faqat Orqaga javobidagi markup borligini tekshirgan, klaviaturasiz o'qish ekranida eski klaviatura egasi o'chirilishini tekshirmagan.
+- `services/menu_screens.session_middleware`: faqat shaxsiy chatdagi kuzatiladigan oddiy `screen` javobi SendMessage bo'lib, o'z reply_markup'i bo'lmasa mavjud `main.build_menu` orqali joriy rol menyusi shu yangi javob bilan yuboriladi. Inline, nizom kartasi, flow klaviaturasi va boshqa chat/oqimlarga tegilmaydi.
+- /start va “🏠 Asosiy menyu” ham oddiy ekran sifatida kuzatiladi. /grafik va ScheduleChangeStates vaqtinchalik savollari mavjud flow kalitida kuzatiladi; tark etilgach yangi ekran muvaffaqiyatli chiqqanda eski savollar o'chadi. Erkin javoblar, yakuniy natijalar va biznes yozuvlari o'zgarmaydi.
+- Testlar: menu_screen_cleanup 29 passed; tuzatishsiz aynan klaviatura yo'qolishini tekshiradigan 3 rol testi yiqiladi. Tegishli menu/FSM/invite/rule-learning/grafik SQLite to'plami: 143 passed, 2 failed; ikkala failure toza d62bac2 da ham tekshirildi. Full suite va PostgreSQL ishlatilmadi (DB o'zgarmagan), Telegram/OpenAI mock.
+- Cheklov: avval kuzatilmagan eski chat tarixi qidirilmaydi va ommaviy o'chirilmaydi. Haqiqiy telefondagi klaviatura ko'rinishi deploydan keyin qayta tekshirilishi kerak.
+
 ## Joriy holat (git log + faqat MERGE qilingan PR'lar)
 
 - `main` HEAD = `d824bfa` — PR #49 merge'i (2-qadam: baholar eval_date oyiga); oldin #48 (`dd0c492`), #47 (`ea55eb6`), #45 (`9ead58b`).

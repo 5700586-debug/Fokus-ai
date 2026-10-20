@@ -23,11 +23,11 @@ import logging
 from collections import OrderedDict, deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Callable, Iterable
 
 from aiogram import BaseMiddleware, Bot
 from aiogram.methods import SendAnimation, SendAudio, SendDocument, SendMessage, SendPhoto, SendVideo, SendVoice
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup
 
 from repositories import bot_messages as repo
 from services import chat_cleanup
@@ -45,6 +45,7 @@ _keep_texts: frozenset[str] = frozenset()
 _flow_texts: frozenset[str] = frozenset()
 _flow_state_prefixes: tuple[str, ...] = ()
 _denial_texts: tuple[str, ...] = ()
+_keyboard_factory: Callable[[int], ReplyKeyboardMarkup] | None = None
 _latest_tap: "OrderedDict[int, int]" = OrderedDict()
 _locks: dict[int, asyncio.Lock] = {}
 _stale: dict[int, deque] = {}
@@ -68,16 +69,18 @@ def configure(
     keep_texts: Iterable[str] = (),
     flow_texts: Iterable[str] = (),
     flow_state_prefixes: Iterable[str] = (),
+    keyboard_factory: Callable[[int], ReplyKeyboardMarkup] | None = None,
 ) -> None:
     """``screen_texts`` — oddiy menyu ekranlari (tozalaydi + kuzatiladi); ``keep_texts`` — tozalaydi, lekin yangi
     xabarni KUZATMAYDI (muhim kartalar); ``flow_texts`` — tozalaydi va oqimning vaqtinchalik savollarini alohida
     kalitda kuzatadi; ``flow_state_prefixes`` — shu FSM holatlarida oqim savollari ham kuzatiladi (tozalamaydi)."""
-    global _screen_texts, _keep_texts, _flow_texts, _flow_state_prefixes, _denial_texts
+    global _screen_texts, _keep_texts, _flow_texts, _flow_state_prefixes, _denial_texts, _keyboard_factory
     _screen_texts = frozenset(screen_texts)
     _keep_texts = frozenset(keep_texts)
     _flow_texts = frozenset(flow_texts)
     _flow_state_prefixes = tuple(flow_state_prefixes)
     _denial_texts = tuple(denial_texts)
+    _keyboard_factory = keyboard_factory
 
 
 def screen_key(chat_id: int) -> str:
@@ -111,8 +114,17 @@ def _is_denial(text: str | None) -> bool:
 
 async def session_middleware(make_request, bot: Bot, method):
     """``bot.session.middleware(...)``: menyu bosilishi paytida shu chatga yuborilgan xabarlarni yig'adi."""
-    result = await make_request(bot, method)
     capture = _capture.get()
+    # Yangi ekran o'z klaviaturasiga ega bo'lsin: oldingi klaviatura egasi o'chirilganda
+    # Telegram mijozidagi menyu yo'qolishiga tayanmaymiz. Inline/oqim klaviaturasini almashtirmaymiz.
+    if (
+        capture is not None and capture.kind == "screen"
+        and isinstance(method, SendMessage) and method.chat_id == capture.chat_id
+        and method.reply_markup is None and not _is_denial(method.text)
+        and _keyboard_factory is not None
+    ):
+        method = method.model_copy(update={"reply_markup": _keyboard_factory(capture.chat_id)})
+    result = await make_request(bot, method)
     if capture is not None and isinstance(method, _SEND_METHODS):
         sent = getattr(result, "result", result)
         if (

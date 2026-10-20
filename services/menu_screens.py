@@ -210,6 +210,9 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
         ref = _last_keyboard.get(chat_id)
         # Joriy reply-klaviatura egasi: yangi ekranlar o'z klaviaturasini olib kelmagan bo'lsa (masalan inline ekran) o'chirilmaydi,
         # tugmalari olinmaydi, stale qilinmaydi va kuzatuvdan yo'qolmaydi — keyingi klaviaturali ekrandan so'ng tozalanadi.
+        # Egasi NOMA'LUM (restartdan keyin xotira bo'sh) va yangi ekran klaviaturasiz bo'lsa — eski kuzatilgan bot xabarlarining
+        # hammasi saqlanadi (qaysi biri klaviatura egasi ekani noma'lum), keyingi klaviaturali ekrandan so'ng tozalanadi.
+        protect_all = ref is None and not capture.keyboard_ids
         protected = ref.message_id if ref is not None and not capture.keyboard_ids else None
         if capture.tap_message_id < _latest_tap.get(chat_id, 0):
             # Kech tugagan eski so'rov: joriy (yangiroq) ekran hisobiga (``_latest_tap``, kuzatuv yozuvlari) tegmaymiz.
@@ -237,8 +240,8 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
         for row in old_rows:
             if row["message_id"] in new_ids or row["message_id"] == capture.tap_message_id:
                 continue
-            if protected is not None and row["message_id"] == protected:
-                _track_id(key, chat_id, protected)  # klaviatura egasi saqlanadi va kuzatuvda qoladi
+            if protect_all or (protected is not None and row["message_id"] == protected):
+                _track_id(key, row["chat_id"], row["message_id"])  # saqlanadi va kuzatuvda qoladi
                 continue
             await _remove(bot, row["chat_id"], row["message_id"])  # o'chmasa eskirgan deb belgilanadi
 

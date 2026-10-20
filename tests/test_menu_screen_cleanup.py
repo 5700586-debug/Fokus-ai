@@ -507,7 +507,7 @@ async def test_multi_message_screen_is_kept_whole_and_replaced_whole(env):
     await menu_screens._commit(env.bot, menu_screens._Capture(chat, 10, [screen(101), screen(102), screen(103)]))
     assert not any(c == chat and m in (101, 102, 103) for c, m in env.session.deleted)  # barcha qismlari saqlangan
 
-    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 11, [screen(201)]))
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 11, [screen(201)], keyboard_ids={201}))
     assert {(chat, 101), (chat, 102), (chat, 103)} <= set(env.session.deleted)
 
 
@@ -518,9 +518,9 @@ async def test_tap_text_deletion_failure_is_retried_on_next_switch(env):
     def screen(message_id):
         return Message(message_id=message_id, date=datetime.now(), chat=Chat(id=chat, type="private"), text="e")
 
-    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 9500, [screen(101)]))
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 9500, [screen(101)], keyboard_ids={101}))
     env.session.fail_delete = None
-    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 9501, [screen(102)]))
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 9501, [screen(102)], keyboard_ids={102}))
 
     assert (chat, 9500) in env.session.deleted and (chat, 101) in env.session.deleted
 
@@ -604,3 +604,55 @@ async def test_sequential_salary_then_rules_still_cleans_salary_and_keeps_card(e
     await env.tap(EMP, "🏆 Bugungi o'rnim")
 
     assert (EMP, salary["id"]) in env.session.deleted and (EMP, card["id"]) not in env.session.deleted
+
+
+# ------------------------- restartdan keyin "Nizomlar": klaviatura egasi noma'lum --
+
+
+def _tracked(chat: int) -> list[int]:
+    rows = bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(chat))
+    ids = [r["message_id"] for r in rows]
+    for message_id in ids:  # pop yozuvlarni olib tashlaydi — qayta qo'yamiz
+        bot_messages.log_message(menu_screens.WORKFLOW, menu_screens.screen_key(chat), chat, message_id)
+    return ids
+
+
+def _restart() -> None:
+    menu_screens._last_keyboard.clear()
+    menu_screens._latest_tap.clear()  # DB kuzatuvi saqlanadi
+
+
+async def test_after_restart_opening_rules_keeps_unknown_keyboard_owner_until_next_keyboard_screen(env):
+    _enroll_with_rules(EMP)
+    await env.tap(EMP, "💰 Oyligim")
+    owner = env.screens(EMP)[-1]["id"]
+    assert env.session.keyboard_owners[EMP] == owner
+    _restart()
+
+    rules_tap = await env.tap(EMP, "📋 Nizomlar")
+
+    card = env.screens(EMP)[-1]
+    assert "1-nizom" in card["text"]
+    assert (EMP, owner) not in env.session.deleted and (EMP, owner) not in env.session.markup_removed
+    assert owner not in menu_screens._stale.get(EMP, ())
+    assert owner in _tracked(EMP) and card["id"] not in _tracked(EMP)  # kuzatuvda qoldi; nizom kartasi kuzatilmagan
+    assert (EMP, rules_tap) in env.session.deleted  # menyu tanlash matni mavjud xulq bo'yicha tozalandi
+
+    await env.tap(EMP, "🏆 Bugungi o'rnim")  # oddiy reply-klaviaturali ekran
+
+    last = env.screens(EMP)[-1]
+    assert isinstance(last["markup"], ReplyKeyboardMarkup) and env.session.keyboard_owners[EMP] == last["id"]
+    assert (EMP, owner) in env.session.deleted  # eski ega endi tozalandi
+    assert (EMP, card["id"]) not in env.session.deleted  # faol nizom kartasi saqlangan
+
+
+async def test_after_restart_rules_send_failure_keeps_old_messages_and_tracking(env):
+    _enroll_with_rules(EMP)
+    await env.tap(EMP, "💰 Oyligim")
+    owner = env.screens(EMP)[-1]["id"]
+    _restart()
+    env.session.fail_send = lambda m: m.chat_id == EMP
+
+    await env.tap(EMP, "📋 Nizomlar")
+
+    assert (EMP, owner) not in env.session.deleted and owner in _tracked(EMP)

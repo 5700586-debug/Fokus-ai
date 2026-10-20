@@ -40,6 +40,8 @@ class FakeSession(BaseSession):
         self.answers: list[str | None] = []
         self.fail_send = None
         self.fail_delete = None  # callable(chat, id) -> bool | True
+        self.hold = None  # callable(method) -> bool: mos SendMessage `release` bo'lguncha kutadi (boshqariladigan kechikish)
+        self.release = asyncio.Event()
 
     async def close(self):
         return None
@@ -65,6 +67,8 @@ class FakeSession(BaseSession):
             if isinstance(method, SendMessage):
                 if self.fail_send and self.fail_send(method):
                     raise RuntimeError("yuborib bo'lmadi")
+                if self.hold and self.hold(method):
+                    await self.release.wait()
                 message_id = next(self.ids)
                 self.sent.append({"chat": method.chat_id, "id": message_id, "text": method.text, "markup": method.reply_markup})
             else:
@@ -381,3 +385,84 @@ async def test_tap_text_deletion_failure_is_retried_on_next_switch(env):
     await menu_screens._commit(env.bot, menu_screens._Capture(chat, 9501, [screen(102)]))
 
     assert (chat, 9500) in env.session.deleted and (chat, 101) in env.session.deleted
+
+
+# ---------------------------------------- kech tugagan "keep" (faol nizom kartasi) --
+
+
+async def test_late_keep_reply_after_newer_screen_is_untouched_through_real_middleware_chain(env, monkeypatch):
+    from aiogram.fsm.storage.memory import DisabledEventIsolation
+
+    # Productionda ``SimpleEventIsolation`` bitta foydalanuvchi yangilanishlarini ketma-ket bajaradi; bu test shu
+    # himoyasiz (parallel) holatni — himoya qatlami sifatida — boshqariladigan kechikish bilan sinaydi.
+    monkeypatch.setattr(env.main.dp.fsm, "events_isolation", DisabledEventIsolation())
+    _enroll_with_rules(EMP)
+    env.session.hold = lambda m: m.chat_id == EMP and "1-nizom" in (m.text or "")  # nizom kartasi kechikadi
+
+    rules_task = asyncio.create_task(env.tap(EMP, "📋 Nizomlar"))
+    await asyncio.sleep(0)  # so'rov handlerga kirib, yuborishda kutib turadi
+    await asyncio.sleep(0)
+    salary_tap = await env.tap(EMP, "💰 Oyligim")  # keyingi bosish oldin tugaydi
+    salary_screen = env.screens(EMP)[-1]
+    latest_before = dict(menu_screens._latest_tap)
+    tracked_before = [r["message_id"] for r in bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(EMP))]
+    for message_id in tracked_before:  # pop yozuvlarni olib tashlaydi — qayta qo'yamiz
+        bot_messages.log_message(menu_screens.WORKFLOW, menu_screens.screen_key(EMP), EMP, message_id)
+    deleted_before = list(env.session.deleted)
+    markup_before = list(env.session.markup_removed)
+
+    env.session.release.set()
+    rules_tap = await rules_task
+
+    card = next(m for m in env.screens(EMP) if "1-nizom" in (m["text"] or ""))
+    assert card["id"] not in {mid for _, mid in env.session.deleted}  # faol nizom kartasi o'chmagan
+    assert (EMP, card["id"]) not in env.session.markup_removed  # tugmalari olinmagan
+    assert env.session.markup_removed == markup_before and card["markup"] is not None
+    assert menu_screens._latest_tap == latest_before  # eski so'rov _latest_tap'ni qaytarmaydi
+    assert salary_screen["id"] in env.alive(EMP) and salary_tap > 0  # yangiroq ekran saqlangan
+    assert [r["message_id"] for r in bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(EMP))] == tracked_before
+    assert card["id"] not in tracked_before
+    assert bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.flow_key(EMP)) == []  # kartalar kuzatuvga kirmagan
+    assert (EMP, rules_tap) in env.session.deleted  # faqat eski menyu tanlash matni tozalangan
+    assert set(env.session.deleted) - set(deleted_before) <= {(EMP, rules_tap)}
+    assert card["id"] not in menu_screens._stale.get(EMP, ())  # stale deb belgilanmagan
+
+
+async def test_late_keep_reply_with_several_parts_keeps_every_part(env):
+    chat = EMP
+
+    def part(message_id):
+        return Message(message_id=message_id, date=datetime.now(), chat=Chat(id=chat, type="private"), text="karta")
+
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 20, [part(201)]))
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 10, [part(101), part(102), part(103)], kind="keep"))
+
+    assert {(chat, 101), (chat, 102), (chat, 103)}.isdisjoint(env.session.deleted)
+    assert env.session.markup_removed == [] and menu_screens._stale.get(chat) is None
+    assert menu_screens._latest_tap[chat] == 20
+    assert [r["message_id"] for r in bot_messages.pop_messages(menu_screens.WORKFLOW, menu_screens.screen_key(chat))] == [201]
+    assert (chat, 10) in env.session.deleted  # faqat eski tugma matni
+
+
+async def test_late_plain_screen_is_still_cleaned_and_newer_one_stays(env):
+    chat = EMP
+
+    def screen(message_id):
+        return Message(message_id=message_id, date=datetime.now(), chat=Chat(id=chat, type="private"), text="e")
+
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 20, [screen(201)]))
+    await menu_screens._commit(env.bot, menu_screens._Capture(chat, 10, [screen(101)], kind="screen"))
+
+    assert {(chat, 101), (chat, 10)} <= set(env.session.deleted) and (chat, 201) not in env.session.deleted
+
+
+async def test_sequential_salary_then_rules_still_cleans_salary_and_keeps_card(env):
+    _enroll_with_rules(EMP)
+    await env.tap(EMP, "💰 Oyligim")
+    salary = env.screens(EMP)[0]
+
+    await env.tap(EMP, "📋 Nizomlar")
+    card = env.screens(EMP)[-1]
+    await env.tap(EMP, "🏆 Bugungi o'rnim")
+
+    assert (EMP, salary["id"]) in env.session.deleted and (EMP, card["id"]) not in env.session.deleted

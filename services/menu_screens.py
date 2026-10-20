@@ -152,9 +152,15 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
     async with lock:
         new_ids = {screen.message_id for screen in capture.screens}
         if capture.tap_message_id < _latest_tap.get(chat_id, 0):
-            # Kech tugagan eski so'rov: joriy (yangiroq) ekran hisobiga tegmaymiz, o'z natijasini olib tashlaymiz.
-            for message_id in (*new_ids, capture.tap_message_id):
-                await _remove(bot, chat_id, message_id)
+            # Kech tugagan eski so'rov: joriy (yangiroq) ekran hisobiga (``_latest_tap``, kuzatuv yozuvlari) tegmaymiz.
+            # "keep" (masalan faol nizom kartasi) javobi O'CHIRILMAYDI, tugmalari olinmaydi, kuzatilmaydi — faqat eski
+            # menyu tanlash matni tozalanadi. Oddiy ekran/oqim savollari o'z natijasini olib tashlaydi.
+            stale_ids = (capture.tap_message_id,) if capture.kind == "keep" else (*new_ids, capture.tap_message_id)
+            for message_id in stale_ids:
+                if message_id == capture.tap_message_id:
+                    await _remove_tap(bot, chat_id, message_id)
+                else:
+                    await _remove(bot, chat_id, message_id)
             return
 
         key = screen_key(chat_id)

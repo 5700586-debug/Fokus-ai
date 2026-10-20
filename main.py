@@ -58,7 +58,7 @@ import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_ADDRESSES, RECRUITING_BRANCH_NAMES  # noqa: E402
 from repositories import recruiting as recruiting_repo  # noqa: E402
-from services import founder_today_problems, latency_probe, messages, permissions  # noqa: E402
+from services import founder_today_problems, latency_probe, menu_screens, messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -871,6 +871,24 @@ class _NormalizeStaleMenuButtonMiddleware(BaseMiddleware):
 
 
 dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
+
+# Shaxsiy chatda almashadigan menyu bo'limlari (ko'rish ekranlari va bo'lim menyulari): yangi ekran chiqqach eski menyu
+# ekranlari va menyu tugma matni tozalanadi (``services/menu_screens``). Oqimlarni boshlaydigan tugmalar (kassa smenasi,
+# baholash, nizom o'qish va h.k.) ATAYLAB ro'yxatda yo'q.
+_MENU_SCREEN_TEXTS = (
+    set(_ALL_MENU_BUTTON_TEXTS)
+    | {BACK_TEXT, "🚨 Bugungi muammolar"}
+    | {"/mystars", "/mymaosh", "/bugungiporga", "/oylikturnir", "/natijam"}
+)
+menu_screens.configure(
+    _MENU_SCREEN_TEXTS,
+    (messages.GENERIC_DENIAL, messages.CASH_FINANCE_DENIAL, messages.MANAGEMENT_DENIAL, messages.REPEAT_OFFENDER_DENIAL),
+    keep_texts={"/listnizom"},  # nizom o'qish/tasdiqlash kartasi: eski ekranlarni tozalaydi, o'zi kuzatilmaydi
+    flow_texts={"👤 Xodim qo'shish"},  # oqim savollari alohida kalitda kuzatiladi
+    flow_state_prefixes=("InviteFlowStates:",),
+)
+dp.message.outer_middleware(menu_screens.MenuScreenMiddleware())
+dp.callback_query.outer_middleware(menu_screens.StaleMenuCallbackMiddleware())
 
 HOME_TEXT = cash_shift_bot.HOME_TEXT
 
@@ -1988,6 +2006,7 @@ async def error_handler(event: ErrorEvent, bot: Bot) -> None:
 
 async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
+    bot.session.middleware(menu_screens.session_middleware)
     scheduler = inventory_bot.start_scheduler(bot)
     calibration_scheduler = calibration_bot.start_scheduler(bot)
     discipline_scheduler = discipline_bot.start_scheduler(bot)

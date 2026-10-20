@@ -188,7 +188,9 @@ class EvaluationResult:
     old_grade_points: int | None = None
 
 
-def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> EvaluationResult:
+def record_daily_grade(
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
+) -> EvaluationResult:
     grade_points_map = get_grade_points()
     if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")
@@ -196,7 +198,8 @@ def record_daily_grade(employee_id: int, supervisor_id: int, eval_date: str, gra
     grade_points = grade_points_map[grade_key]
     # Baho + tarix + bonus balansi + ledger — repository'da BITTA tranzaksiya (xato bo'lsa hammasi bekor).
     saved = discipline_repo.save_daily_grade(
-        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}"
+        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}",
+        session_branch=session_branch,
     )
     previous = saved["previous"]
     old_key = previous["grade_key"] if previous else None

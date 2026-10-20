@@ -489,3 +489,135 @@ async def test_repeating_the_same_grade_press_adds_no_record_or_message(bot_dp, 
 
     assert len(_notices(first, 111)) == 1 and _notices(second, 111) == []
     assert _snapshot() == snapshot and discipline.get_salary(111)["bonus_bank"] == bank
+
+
+# ------------------------- "Filiallar -> xodim" baho yo'li ham filial sessiyasini ochadi --
+
+
+def _sessions_of(branch: str, day: str) -> list[str]:
+    return [status for b, d, status in _session_dates() if b == branch and d == day]
+
+
+async def test_first_card_grade_opens_session_so_day_survives_midnight_and_restart(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D, 23, 50)
+    sent = await send_callback(main.dp, bot, SUP, data="nzr_emp:111", target_chat_id=SUP)
+    assert _session_dates() == []  # faqat kartani ko'rish sessiya yaratmaydi
+    button = next(data for data in _grade_buttons(sent) if f":{discipline.GRADE_NORMA}:" in data)
+
+    await send_callback(main.dp, bot, SUP, data=button, target_chat_id=SUP)
+
+    assert _sessions_of(A, D) == ["open"] and _sessions_of(B, D) == []
+    _pin(monkeypatch, _shift(D, 1), 0, 20)  # yarim tundan keyin; "restart" — holat faqat bazadan o'qiladi
+    day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
+    assert (day.work_date, day.resumed) == (D, True)
+
+    # D kartasi tugmasi yarim tundan keyin ham D ga yozadi (D faol)
+    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}", target_chat_id=SUP)
+    assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_ALO
+    assert discipline.get_daily_grade(111, _shift(D, 1)) is None
+    sent = await send(main.dp, bot, SUP, text="/baholash")
+    assert "📅 Ish kuni: 10.03.2026" in sent[0].text and "Avval shu ish kunini yakunlaymiz." in sent[0].text
+
+
+async def test_existing_repeated_and_parallel_grading_never_duplicate_or_reopen_the_session(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _employee(113, A, "Ikkinchi")
+    _pin(monkeypatch, D)
+    nazoratchi_day.open_session(SUP, A, D)  # mavjud sessiya qayta ishlatiladi
+
+    for user in (111, 113, 111):  # ketma-ket va takroriy bosish (parallel poyga alohida thread testida)
+        await send_callback(main.dp, bot, SUP, data=f"nzr_grade:{user}:{discipline.GRADE_NORMA}:{_ymd(D)}", target_chat_id=SUP)
+    assert _sessions_of(A, D) == ["open"]
+
+    # yopilgan sessiya qayta ochilmaydi (service darajasida ham)
+    _work(111, D)
+    _work(113, D)
+    assert nazoratchi_day.close_session(SUP, A, D).closed
+    discipline.record_daily_grade(111, SUP, D, discipline.GRADE_ALO, session_branch=A)
+    assert _sessions_of(A, D) == ["closed"]
+
+
+async def test_session_is_written_with_a_thread_race_exactly_once(bot_dp, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _setup_two_branches()
+    for user in (113, 114, 115):
+        _employee(user, A, f"E{user}")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda u: discipline.record_daily_grade(u, SUP, D, discipline.GRADE_NORMA, session_branch=A), (113, 114, 115)))
+    assert _sessions_of(A, D) == ["open"]
+
+
+async def test_repeat_same_grade_and_unknown_branch_and_historic_grades_create_no_session(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _employee(555, "Noma'lum filial", "Begona")
+    _pin(monkeypatch, D)
+    discipline.record_daily_grade(111, SUP, D, discipline.GRADE_NORMA)  # tarixiy baho: sessiyasiz
+    assert _session_dates() == []
+
+    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_NORMA}:{_ymd(D)}", target_chat_id=SUP)  # takroriy
+    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:555:{discipline.GRADE_NORMA}:{_ymd(D)}", target_chat_id=SUP)  # filial noma'lum
+
+    assert _session_dates() == []  # backfill va taxminiy filial yo'q
+    assert discipline.get_daily_grade(555, D) is not None
+
+
+async def test_closed_day_or_branch_and_stale_button_write_neither_grade_nor_session(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _pin(monkeypatch, D)
+    _close_everything(D)
+    before = _snapshot()
+
+    for data in (
+        f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}",          # kun yopilgan
+        f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(_shift(D, 1))}",  # kelajak
+        f"nzr_grade:111:{discipline.GRADE_ALO}",                       # sanasiz
+    ):
+        await send_callback(main.dp, bot, SUP, data=data, target_chat_id=SUP)
+    assert _snapshot() == before
+
+
+@pytest.mark.parametrize("table", ["nazoratchi_branch_sessions", "bonus_bank_ledger", "daily_evaluation_history"])
+async def test_grade_or_session_write_failure_rolls_everything_back(bot_dp, monkeypatch, table):
+    _setup_two_branches()
+    conn = db.get_connection()
+    try:
+        conn.execute(f"CREATE TRIGGER fokus_break BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'sinov xatosi'); END")
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(Exception):
+        discipline.record_daily_grade(111, SUP, D, discipline.GRADE_ALO, session_branch=A)
+
+    conn = db.get_connection()
+    try:
+        conn.execute("DROP TRIGGER fokus_break")
+        conn.commit()
+        counts = [
+            conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            for name in ("daily_evaluations", "daily_evaluation_history", "bonus_bank_ledger", "nazoratchi_branch_sessions")
+        ]
+    finally:
+        conn.close()
+    assert counts == [0, 0, 0, 0] and discipline.get_salary(111)["bonus_bank"] == 0
+
+
+async def test_both_grading_paths_continue_the_same_unfinished_work_date(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _setup_two_branches()
+    _employee(113, A, "Ikkinchi")
+    _pin(monkeypatch, D, 23, 55)
+    await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_NORMA}:{_ymd(D)}", target_chat_id=SUP)  # "Filiallar" yo'li
+    _pin(monkeypatch, _shift(D, 1), 0, 30)
+
+    await send_callback(main.dp, bot, SUP, data=f"bos:grade:113:{discipline.GRADE_NORMA}:{_ymd(D)}", target_chat_id=SUP)  # "Baholash" yo'li
+
+    assert discipline.get_daily_grade(113, D) is not None and discipline.get_daily_grade(113, _shift(D, 1)) is None
+    assert _sessions_of(A, D) == ["open"]
+    assert nazoratchi_day.active_day(SUP, discipline_bot._now_company()).work_date == D

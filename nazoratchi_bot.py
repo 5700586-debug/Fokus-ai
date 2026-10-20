@@ -1183,7 +1183,14 @@ def register(dp: Dispatcher, openai_client) -> None:
         ):
             await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
             return
-        result = discipline.record_daily_grade(user_id, callback.from_user.id, work_date, grade_key)
+        # Birinchi muvaffaqiyatli baho shu nazoratchi+filial+ish kuni sessiyasini (bitta tranzaksiyada) ochadi: shunda
+        # "Filiallar -> xodim" orqali baholangan kun yarim tundan keyin ham yakunlanmagan kun sifatida davom etadi.
+        # Filial aniqlanmasa taxminiy filial bilan sessiya yozilmaydi.
+        branch = profile.get("branch")
+        result = discipline.record_daily_grade(
+            user_id, callback.from_user.id, work_date, grade_key,
+            session_branch=branch if _branch_index(branch or "") is not None else None,
+        )
         outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
         if outcome == discipline.NOTICE_UNCHANGED:
             await callback.answer(discipline.grade_notice_reply(outcome))

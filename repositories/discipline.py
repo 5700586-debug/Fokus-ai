@@ -496,7 +496,8 @@ def get_month_point_totals(
 
 
 def save_daily_grade(
-    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int, ledger_reason: str
+    employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, grade_points: int, ledger_reason: str,
+    session_branch: str | None = None,
 ) -> dict:
     """Bitta baholash — BITTA tranzaksiya: ``daily_evaluations`` + ``daily_evaluation_history`` +
     ``salaries.bonus_bank`` + ``bonus_bank_ledger``. Hammasi muvaffaqiyatli bo'lsagina commit; istalgan
@@ -506,7 +507,11 @@ def save_daily_grade(
     Xuddi shu baho (kalit + ball) allaqachon saqlangan bo'lsa hech narsa yozilmaydi (``changed=False``).
     Aks holda baho faqat o'qilgan qiymatda bo'lsagina o'zgaradi (``UPDATE ... WHERE grade_key/ball``;
     yangi qator uchun ``INSERT ... ON CONFLICT DO NOTHING``), shuning uchun parallel bir xil bosishlardan
-    faqat BITTASI g'olib bo'ladi — tarix, ball va xabar bir marta."""
+    faqat BITTASI g'olib bo'ladi — tarix, ball va xabar bir marta.
+
+    ``session_branch`` berilsa (aniq filial), YANGI yozilgan baho bilan BIR tranzaksiyada nazoratchi+filial+kun
+    sessiyasi ochiladi (``INSERT OR IGNORE``: mavjudi qayta ishlatiladi, yopilgani qayta ochilmaydi). O'zgarmagan
+    (takroriy) baho sessiya yaratmaydi — tarixiy baholardan backfill yo'q."""
     conn = get_connection()
     try:
         for _ in range(3):
@@ -553,6 +558,13 @@ def save_daily_grade(
             else:
                 salary = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (employee_id,)).fetchone()
                 balance = salary["bonus_bank"] if salary else 0
+
+            if session_branch:
+                conn.execute(
+                    "INSERT OR IGNORE INTO nazoratchi_branch_sessions "
+                    "(supervisor_id, branch, session_date, status, opened_at) VALUES (?, ?, ?, 'open', ?)",
+                    (supervisor_id, session_branch, eval_date, now),
+                )
 
             conn.commit()
             return {"changed": True, "previous": previous, "balance": balance}

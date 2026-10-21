@@ -20,6 +20,13 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Testlar: `tests/test_menu_screen_cleanup.py` 38 passed (haqiqiy `bot.session.middleware` zanjiri, Telegram mock). Yangi klaviatura testlari va restartdan keyingi "Nizomlar" testi eski kodda yiqiladi. Tegishli menyu/FSM/invite/rule-learning/active-work-day/sandbox/kassa-navigatsiya SQLite to'plami: 169 passed, 1 failed (`test_start_shows_founder_category_for_founder` — oldindan mavjud). Full suite va PostgreSQL ishlatilmadi (DB o'zgarmagan). Mock test telefondagi klaviatura ko'rinishini ISBOTLAMAYDI.
 - Cheklov: eslangan klaviatura jarayon xotirasida (restartdan keyin zaxira `build_menu`); haqiqiy telefonda deploydan keyin qayta tekshirilishi kerak. Avariya varianti (`MENU_CLEANUP_ENABLED`) kerak bo'lmadi.
 
+## Xodimni tasdiqlash: callback timeout tuzatishi — 2026-10-21 (merge/deploy YO'Q)
+
+- Production live `33fabf2`; Render logida 2026-10-21 10:32:38 UTC da `query is too old and response timeout expired or query ID is invalid` qayd etilgan. `approval.handle_approve` oldin profil/rol/nizom/xabar ishlari tugagandan keyin callback javobini berardi; tasdiqlangan profil bilan birga umumiy xato ko'rinishi mumkin edi.
+- `approval.py`: profil va single-slot tekshiruvlaridan so'ng, tasdiqlash yozuvlaridan OLDIN callback javobi beriladi. Callback muddati allaqachon o'tgan bo'lsa aynan shu TelegramBadRequest e'tiborga olinmaydi; yakuniy natija Founderga oddiy xabar bilan yuboriladi. Rol berish muvaffaqiyatsiz bo'lsa muvaffaqiyat emas, mavjud ogohlantirish oddiy xabarda ko'rsatiladi. Takroriy tasdiqlash himoyasi saqlangan. DB sxemasi va qabul qilish qarori o'zgarmagan.
+- Mustaqil targeted SQLite: yangi timeout/ruxsat/takroriy tasdiq/rol xatosi testlari va mavjud approval/nizom/kalibratsiya regressiyalari 32 passed, 46 deselected. Callback javobi tartibi va eskirgan query holati uchun yangi ikkita test tuzatishsiz yiqiladi. Telegram/OpenAI mock; production DB va haqiqiy xodimga tegilmadi. PostgreSQL/full suite/real Telegram ishlatilmadi.
+- Keyingi qadam: Muhammadiy ruxsatidan so'ng merge/deploy va natijani tekshirish. Boshqa Telegram yuborish yoki DB xatolari bu tuzatish bilan umumiy ravishda yashirilmaydi; mavjud approved/rolsiz holatlarni avtomatik qayta yozish yo'q.
+
 ## Joriy holat (git log + faqat MERGE qilingan PR'lar)
 
 - `main` HEAD = `d824bfa` — PR #49 merge'i (2-qadam: baholar eval_date oyiga); oldin #48 (`dd0c492`), #47 (`ea55eb6`), #45 (`9ead58b`).

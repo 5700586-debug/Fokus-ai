@@ -6,6 +6,7 @@ allowed users ro'yxatiga (roles.py) qo'shiladi va ichki menyu ochiladi.
 """
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 import calibration_bot
@@ -71,6 +72,13 @@ def register(dp: Dispatcher) -> None:
                 )
                 return
 
+        # Telegram callback muddati DB/rol/nizom ishlari tugashidan oldin o'tib ketishi mumkin.
+        try:
+            await callback.answer("Qabul qilinmoqda…")
+        except TelegramBadRequest as error:
+            if "query is too old" not in error.message.lower() and "query id is invalid" not in error.message.lower():
+                raise
+
         approved_profile = employees.approve_profile(user_id, approved_by=FOUNDER_ID)
         if approved_profile is None:
             # Boshqa so'rov (masalan ikki marta bosilgan tugma yoki
@@ -80,7 +88,7 @@ def register(dp: Dispatcher) -> None:
             # ``employees.approve_profile``).
             if callback.message:
                 await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.answer("Bu profil allaqachon ko'rib chiqilgan.", show_alert=True)
+            await callback.bot.send_message(callback.from_user.id, "Bu profil allaqachon ko'rib chiqilgan.")
             return
 
         try:
@@ -105,10 +113,10 @@ def register(dp: Dispatcher) -> None:
             # kerak (masalan /setrole orqali).
             if callback.message:
                 await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.answer(
+            await callback.bot.send_message(
+                callback.from_user.id,
                 f"⚠️ Profil tasdiqlandi, lekin {roles.role_name(role_key)} lavozimi band bo'lib qoldi "
                 f"(parallel urinish). /setrole {user_id} orqali qo'lda rol bering.",
-                show_alert=True,
             )
             return
 
@@ -136,7 +144,7 @@ def register(dp: Dispatcher) -> None:
         except Exception as error:
             print(f"Nizom o'qishni boshlashda xato (user_id={user_id}): {error!r}")
 
-        await callback.answer("Tasdiqlandi ✅")
+        await callback.bot.send_message(callback.from_user.id, "✅ Xodim qabul qilindi.")
 
     @dp.callback_query(F.data.startswith("reject:"))
     async def handle_reject(callback: CallbackQuery) -> None:

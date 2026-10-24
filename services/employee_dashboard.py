@@ -7,6 +7,9 @@ view-model funksiyasi orqali yig'iladi — handler (``performance_bot.py``
 chaqiruvlarini o'zi aralashtirmaydi.
 """
 
+from datetime import timedelta
+
+import company_time
 import employees
 from roles import role_name
 from services import attendance as attendance_service
@@ -20,6 +23,13 @@ def build_dashboard(user_id: int) -> dict | None:
 
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
 
+    # "Kecha" va "oxirgi 2 kun" bir xil kunni o'z ichiga oladi: kun bir marta o'qiladi.
+    recent_days = attendance_service.get_recent_days_summary(user_id, days=2)
+    yesterday_iso = (company_time.today() - timedelta(days=1)).isoformat()
+    yesterday = next((day for day in recent_days if day["date"] == yesterday_iso), None)
+    if yesterday is None:
+        yesterday = attendance_service.get_yesterday_summary(user_id)
+
     return {
         "profile": {
             "full_name": full_name,
@@ -28,9 +38,9 @@ def build_dashboard(user_id: int) -> dict | None:
             "photo_file_id": profile.get("photo_file_id"),
         },
         "points": discipline.get_period_point_totals(user_id),
-        "yesterday": attendance_service.get_yesterday_summary(user_id),
-        "hours": attendance_service.get_month_to_date_hours(user_id),
-        "recent_days": attendance_service.get_recent_days_summary(user_id, days=2),
+        "yesterday": yesterday,
+        "hours": attendance_service.get_month_to_date_hours(user_id, profile=profile),
+        "recent_days": recent_days,
     }
 
 

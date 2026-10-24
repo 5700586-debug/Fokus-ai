@@ -4,6 +4,16 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## PR #59 production natijasi — 2026-10-25 (Asia/Tashkent)
+
+- PR #59 merge: `4783cc78a4fd7b55d862a29d5689f9dd061ea89f`; Render deploy `dep-dbehg215efls73b28mdg` LIVE. Health HTTP 200. Eski instance SIGTERM 01:43:59 +05; undan keyingi tekshirilgan loglarda yangi xato yo'q.
+- Startup probe: median 63.7 ms (7 sample, 63.5–64.0 ms).
+- Muhammadiyning ikki real Yulduzlarim chaqiruvi: 01:45:14 +05 — 1659 ms, SQL 11, db 968 ms, pool 2, rollback 2 / 64 ms, Telegram 679 ms; 01:45:23 +05 — 1325 ms, SQL 11, db 957 ms, pool 2, rollback 2 / 63 ms, Telegram 365 ms. Ikkalasi outcome=ok.
+- Oldingi PR #58: 3068/2548 ms, SQL 17, pool 5. Hozir SQL 11, pool 2; DB vaqti ~960 ms. Total vaqt farqining asosiy o'zgaruvchisi Telegram (679 vs 365 ms).
+- 1500 ms maqsad: ikkinchi sample o'tdi, birinchisi 159 ms yuqori. Ikkalasi ham <1500 ms bo'ldi yoki barqaror maqsad bajarildi deb DA'VO QILINMAYDI.
+- Kelishilgan menyu optimallashtirish PR'i bajarildi. Qo'shimcha tezlik PR'i avtomatik ochilmaydi; region tahlilining >70 ms sharti bajarilmagan.
+- Muhammadiy Founder menyusidagi “🧪 Rol testi” tugmasi kerak emasligini bildirdi; olib tashlash keyingi kichik vazifa. Asosiy navbat: Fiks kelishuvi → Oylik baholarim → oy boshidan hisob → solishtirish.
+
 ## Menyu qatnovlarini qisqartirish — tayyorlanmoqda (2026-10-25)
 
 - Branch `fix/menu-latency-final`, base `c19ab9a`; merge/deploy yo'q. Maqsad: “Yulduzlarim” 1500 ms dan tez; production'da hali isbotlanmagan.

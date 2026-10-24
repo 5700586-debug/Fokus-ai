@@ -156,8 +156,10 @@ def try_insert_monthly_performance(
 # --------------------------------------------------------- star_history --
 
 
-def get_current_stars(user_id: int) -> int:
-    conn = get_connection()
+def get_current_stars(user_id: int, conn=None) -> int:
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         row = conn.execute(
             "SELECT new_stars FROM star_history WHERE user_id = ? "
@@ -165,7 +167,8 @@ def get_current_stars(user_id: int) -> int:
             (user_id,),
         ).fetchone()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return row["new_stars"] if row else 0
 
@@ -225,13 +228,16 @@ def try_record_bonus(user_id: int, year_month: str, stars: int, bonus_amount: in
         conn.close()
 
 
-def get_bonus_history(user_id: int) -> list[dict]:
-    conn = get_connection()
+def get_bonus_history(user_id: int, conn=None) -> list[dict]:
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM bonus_history WHERE user_id = ? ORDER BY year_month", (user_id,)
         ).fetchall()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return [dict(row) for row in rows]

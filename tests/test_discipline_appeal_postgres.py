@@ -344,3 +344,37 @@ def test_explicit_rollback_is_counted_once_and_time_is_inside_db_ms_on_postgres(
         assert metrics.rollbacks == 2 and metrics.rollback_total <= metrics.db_total
     finally:
         latency_probe._metrics.reset(token)
+
+
+# ------------------- /mystars: eski/yangi execute, pool va rollback sonlari (PgConnection) --
+
+
+def test_mystars_reads_use_one_connection_and_one_rollback_on_postgres(pg, monkeypatch):
+    from datetime import date, timedelta
+
+    from services import employee_dashboard, latency_probe
+    from tests.test_month_hours_queries import _employee, _seed, _today
+    from tests.test_mystars_roundtrips import _legacy_mystars
+
+    _today(monkeypatch, "2026-03-31")
+    user = _employee()
+    _seed(user, date(2026, 3, 1), date(2026, 4, 2))
+
+    def counted(fn):
+        token = latency_probe._metrics.set(latency_probe._Metrics())
+        try:
+            metrics = latency_probe._metrics.get()
+            result = fn()
+            return result, (metrics.db_queries, metrics.pool_acquires, metrics.rollbacks)
+        finally:
+            latency_probe._metrics.reset(token)
+
+    (stars_n, history_n, dash), new = counted(lambda: employee_dashboard.read_mystars(user))
+    (stars_o, history_o, old), legacy = counted(lambda: _legacy_mystars(user))
+
+    assert (stars_n, history_n) == (stars_o, history_o)
+    assert dash["points"] == old["points"] and dash["hours"] == old["hours"]
+    assert dash["yesterday"] == old["yesterday"] and dash["recent_days"] == old["recent_days"]
+    print(f"PG /mystars (execute, pool, rollback): yangi={new} eski={legacy}")
+    assert new[1] == 1 and new[2] == 1  # bitta ulanish, bitta rollback
+    assert new[0] < legacy[0] and new[1] < legacy[1] and new[2] < legacy[2]

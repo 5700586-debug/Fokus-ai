@@ -463,8 +463,7 @@ def upsert_daily_evaluation(
 
 
 def get_month_point_totals(
-    user_id: int, start_date: str, end_date_exclusive: str, since_iso: str, until_iso_exclusive: str
-) -> dict:
+    user_id: int, start_date: str, end_date_exclusive: str, since_iso: str, until_iso_exclusive: str, conn=None) -> dict:
     """Bitta oy uchun Bonus/Minus/Jami. KUNLIK BAHO bonusi kanonik jadvaldan —
     ``daily_evaluations`` (employee_id + ``eval_date`` + ``grade_points``, ``start_date <= eval_date <
     end_date_exclusive``): baho qachon kiritilgani/tuzatilgani oyni o'zgartirmaydi. Shu kunlik baho
@@ -472,7 +471,9 @@ def get_month_point_totals(
     hisoblash yo'q). Boshqa yozuvlar (jarima, apellyatsiya qaytarishi, boshqa bonuslar) ledgerdan o'z
     ``created_at`` oyi bo'yicha, ishorasiga ko'ra olinadi — ularning sanasi taxmin bilan ko'chirilmaydi.
     Hech narsa yozilmaydi/o'zgartirilmaydi."""
-    conn = get_connection()
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         grades = conn.execute(
             "SELECT COALESCE(SUM(grade_points), 0) AS points FROM daily_evaluations "
@@ -488,7 +489,8 @@ def get_month_point_totals(
             (user_id, since_iso, until_iso_exclusive),
         ).fetchone()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     bonus = (grades["points"] if grades else 0) + (other["bonus"] if other else 0)
     minus = other["minus"] if other else 0

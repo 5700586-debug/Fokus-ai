@@ -163,7 +163,7 @@ def test_result_is_identical_to_legacy_and_queries_do_not_scale_with_days(monkey
 
     assert new == old
     print(f"{today}: yangi sql={new_queries} pool={new_pools}; eski sql={old_queries} pool={old_pools}")
-    _, profile_queries, profile_pools = _counted(lambda: employees.get_profile(user))
+    _, profile_queries, profile_pools = _counted(lambda: employees.get_profile(user, include_contacts=False))
     if new["range_start"] is not None:
         # profil + reja diapazoni (1) + voqealar diapazoni (1) -- kunlar soniga bog'liq emas
         assert new_queries == profile_queries + 2 and new_pools == profile_pools + 2

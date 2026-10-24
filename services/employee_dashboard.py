@@ -11,24 +11,50 @@ from datetime import timedelta
 
 import company_time
 import employees
+from db import get_connection
 from roles import role_name
 from services import attendance as attendance_service
-from services import discipline
+from services import discipline, star_engine
 
 
-def build_dashboard(user_id: int) -> dict | None:
-    profile = employees.get_profile(user_id)
+def build_dashboard(user_id: int, conn=None) -> dict | None:
+    """Dashboard ma'lumotlari. ``conn`` berilsa barcha o'qishlar shu ulanishda bajariladi (yopilmaydi/commit qilinmaydi —
+    egasi yopadi). Berilmasa BITTA ulanish ochiladi va qaytishdan oldin yopiladi (Telegram javobi kutilganda ochiq qolmaydi)."""
+    owns = conn is None
+    if owns:
+        conn = get_connection()
+    try:
+        return _build_dashboard(user_id, conn)
+    finally:
+        if owns:
+            conn.close()
+
+
+def read_mystars(user_id: int) -> tuple[int, list[dict], dict | None]:
+    """``/mystars`` uchun barcha o'qishlar BITTA ulanishda: (joriy yulduzlar, bonus tarixi, dashboard). Ulanish
+    qaytishdan oldin yopiladi; Telegram javobi shundan KEYIN yuboriladi."""
+    conn = get_connection()
+    try:
+        stars = star_engine.get_current_stars(user_id, conn=conn)
+        bonus_history = star_engine.get_bonus_history(user_id, conn=conn)
+        return stars, bonus_history, _build_dashboard(user_id, conn)
+    finally:
+        conn.close()
+
+
+def _build_dashboard(user_id: int, conn) -> dict | None:
+    profile = employees.get_profile(user_id, conn=conn, include_contacts=False)  # kontaktlar dashboardda ishlatilmaydi
     if profile is None:
         return None
 
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
 
     # "Kecha" va "oxirgi 2 kun" bir xil kunni o'z ichiga oladi: kun bir marta o'qiladi.
-    recent_days = attendance_service.get_recent_days_summary(user_id, days=2)
+    recent_days = attendance_service.get_recent_days_summary(user_id, days=2, conn=conn)
     yesterday_iso = (company_time.today() - timedelta(days=1)).isoformat()
     yesterday = next((day for day in recent_days if day["date"] == yesterday_iso), None)
     if yesterday is None:
-        yesterday = attendance_service.get_yesterday_summary(user_id)
+        yesterday = attendance_service.get_day_summary(user_id, yesterday_iso, conn=conn)
 
     return {
         "profile": {
@@ -37,9 +63,9 @@ def build_dashboard(user_id: int) -> dict | None:
             "branch": profile.get("branch") or "-",
             "photo_file_id": profile.get("photo_file_id"),
         },
-        "points": discipline.get_period_point_totals(user_id),
+        "points": discipline.get_period_point_totals(user_id, conn=conn),
         "yesterday": yesterday,
-        "hours": attendance_service.get_month_to_date_hours(user_id, profile=profile),
+        "hours": attendance_service.get_month_to_date_hours(user_id, profile=profile, conn=conn),
         "recent_days": recent_days,
     }
 

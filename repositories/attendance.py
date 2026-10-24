@@ -28,8 +28,10 @@ def record_event(employee_id: int, event_type: str, event_time: str, source: str
         conn.close()
 
 
-def list_events_for_date(employee_id: int, date_str: str) -> list[dict]:
-    conn = get_connection()
+def list_events_for_date(employee_id: int, date_str: str, conn=None) -> list[dict]:
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM attendance_events WHERE employee_id = ? AND event_time LIKE ? "
@@ -37,17 +39,20 @@ def list_events_for_date(employee_id: int, date_str: str) -> list[dict]:
             (employee_id, f"{date_str}%"),
         ).fetchall()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return [dict(row) for row in rows]
 
 
-def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive: str) -> list[dict]:
+def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive: str, conn=None) -> list[dict]:
     """``[start_date, end_date_exclusive)`` oralig'idagi barcha eventlar —
     ``event_time`` doim ``YYYY-MM-DD``dan boshlanadigan ISO satr sifatida
     saqlanadi (qarang ``record_event``), shuning uchun oddiy satr
     solishtiruvi sana chegarasini to'g'ri ushlaydi."""
-    conn = get_connection()
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM attendance_events WHERE employee_id = ? AND event_time >= ? AND event_time < ? "
@@ -55,7 +60,8 @@ def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive:
             (employee_id, start_date, end_date_exclusive),
         ).fetchall()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return [dict(row) for row in rows]
 
@@ -188,11 +194,13 @@ def list_schedule_revisions(employee_id: int, shift_date: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive: str) -> list[dict]:
+def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive: str, conn=None) -> list[dict]:
     """``[start_date, end_date_exclusive)`` oralig'idagi reja smenalari
     -- shu oraliqda yozuvi yo'q sana ro'yxatda umuman ko'rinmaydi
     (chaqiruvchi buni UNKNOWN deb talqin qilishi kerak, OFF emas)."""
-    conn = get_connection()
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         rows = conn.execute(
             "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
@@ -200,7 +208,8 @@ def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive
             (employee_id, start_date, end_date_exclusive),
         ).fetchall()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return [dict(row) for row in rows]
 
@@ -577,17 +586,40 @@ def confirm_reason(employee_id: int, event_date: str, confirmed_by: int) -> None
         conn.close()
 
 
-def get_reason(employee_id: int, event_date: str) -> dict | None:
-    conn = get_connection()
+def get_reason(employee_id: int, event_date: str, conn=None) -> dict | None:
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         row = conn.execute(
             "SELECT * FROM attendance_reasons WHERE employee_id = ? AND event_date = ?",
             (employee_id, event_date),
         ).fetchone()
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
     return dict(row) if row else None
+
+
+def list_reasons_for_dates(employee_id: int, event_dates: list[str], conn=None) -> dict[str, dict]:
+    """Bir nechta sana uchun sabablar BITTA so'rovda: ``{event_date: reason}`` (yozuvi yo'q sana ro'yxatda yo'q)."""
+    if not event_dates:
+        return {}
+    owns = conn is None
+    if owns:
+        conn = get_connection()
+    try:
+        placeholders = ", ".join("?" for _ in event_dates)
+        rows = conn.execute(
+            f"SELECT * FROM attendance_reasons WHERE employee_id = ? AND event_date IN ({placeholders})",
+            (employee_id, *event_dates),
+        ).fetchall()
+    finally:
+        if owns:
+            conn.close()
+
+    return {row["event_date"]: dict(row) for row in rows}
 
 
 def decide_manager_permission(

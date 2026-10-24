@@ -218,6 +218,9 @@ def end_update() -> None:
 #                    olish vaqti KIRMAYDI (``pool_ms`` alohida).
 #   pool_acquires  — ``pool.getconn()`` (SQLite'da ``sqlite3.connect``) chaqiruvlari soni. Bu YANGI FIZIK ulanish
 #                    degani EMAS: pool bo'sh ulanishni qayta ishlatadi; fizik ulanish ochilishi alohida o'lchanmaydi.
+#   rollbacks/rollback_ms — ochiq ``rollback()`` chaqiruvlari soni va vaqti (``db_ms`` ICHIDA, qayta qo'shilmaydi). Python
+#                    ``rollback()`` chaqiruvi har doim tarmoq qatnovi degani EMAS (psycopg2 tranzaksiya ochiq bo'lmasa
+#                    serverga hech narsa yubormaydi). ``psycopg2`` pool'ining ichki ``putconn`` rollback'i kuzatilMAYDI.
 #   telegram_ms    — Telegram API so'rovlari (``bot.session`` middleware) kutish vaqti yig'indisi.
 #   outcome        — ok | error (handler istisno ko'tarsa; istisno o'zgarishsiz qayta ko'tariladi).
 # Xabar matni, callback_data, SQL, parametrlar, foydalanuvchi ID/ismi va sirlar HECH QACHON yozilmaydi —
@@ -232,6 +235,8 @@ class _Metrics:
     pool_acquires: int = 0
     pool_total: float = 0.0
     telegram_total: float = 0.0
+    rollbacks: int = 0
+    rollback_total: float = 0.0
     handler: str | None = None  # haqiqiy mos handler nomi (inner middleware o'rnatadi)
 
 
@@ -268,9 +273,10 @@ def db_execute():
 
 
 @contextmanager
-def db_finish(legacy: bool = True):
+def db_finish(legacy: bool = True, rollback: bool = False):
     """``commit()``/``rollback()`` atrofida: vaqt ``db_ms``ga bir marta qo'shiladi, ``db_queries``ga QO'SHILMAYDI.
-    ``legacy=True`` — ``LATENCY_PROBE`` avvalgidek commit'ni so'rov deb sanashda davom etadi."""
+    ``legacy=True`` — ``LATENCY_PROBE`` avvalgidek commit'ni so'rov deb sanashda davom etadi. ``rollback=True`` —
+    shu vaqt ``rollbacks``/``rollback_ms``ga ham yoziladi (``db_ms`` ichida qoladi, qo'shimcha qo'shilmaydi)."""
     start = time.monotonic()
     try:
         yield
@@ -285,6 +291,8 @@ def db_finish(legacy: bool = True):
             except Exception:  # noqa: BLE001
                 pass
         _add_metrics(db_total=elapsed)
+        if rollback:
+            _add_metrics(rollbacks=1, rollback_total=elapsed)
 
 
 def note_pool_acquire(elapsed: float = 0.0) -> None:
@@ -358,6 +366,7 @@ async def measure_handler(kind: str, handler, event, data: dict):
                     f"handler={metrics.handler} kind={kind} total_ms={_ms(time.monotonic() - started)} "
                     f"db_queries={metrics.db_queries} db_ms={_ms(metrics.db_total)} "
                     f"pool_acquires={metrics.pool_acquires} pool_ms={_ms(metrics.pool_total)} "
+                    f"rollbacks={metrics.rollbacks} rollback_ms={_ms(metrics.rollback_total)} "
                     f"telegram_ms={_ms(metrics.telegram_total)} outcome={outcome}",
                     flush=True,
                 )

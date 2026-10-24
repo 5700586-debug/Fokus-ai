@@ -316,3 +316,31 @@ def test_grade_or_session_failure_rolls_everything_back_on_postgres(pg, table):
         _repair(table)
     discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy")  # qayta urinish
     assert _grade_state(EMPLOYEE) == (1, 1, 1, 1)
+
+
+# -------------------- startup "SELECT 1" o'lchovi va rollback hisoblagichi (PgConnection) --
+
+
+def test_startup_probe_runs_against_real_postgres_and_returns_the_connection(pg):
+    from services import db_startup_probe
+
+    line = db_startup_probe._probe_sync(lambda: db_postgres.PgConnection(_DSN))
+
+    assert line.startswith("DB_STARTUP_PROBE outcome=ok samples=7 ")
+    assert len(db_postgres._get_pool(_DSN)._used) == 0  # ulanish pool'ga qaytarilgan
+
+
+def test_explicit_rollback_is_counted_once_and_time_is_inside_db_ms_on_postgres(pg):
+    from services import latency_probe
+
+    token = latency_probe._metrics.set(latency_probe._Metrics())
+    try:
+        metrics = latency_probe._metrics.get()
+        conn = db_postgres.PgConnection(_DSN)
+        conn.execute("SELECT 1 AS one").fetchone()
+        conn.rollback()
+        conn.close()  # idle: ichki rollback ham db_finish orqali sanaladi
+        assert metrics.db_queries == 1 and metrics.pool_acquires == 1
+        assert metrics.rollbacks == 2 and metrics.rollback_total <= metrics.db_total
+    finally:
+        latency_probe._metrics.reset(token)

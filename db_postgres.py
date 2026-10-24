@@ -247,6 +247,13 @@ class PgConnection:
         with latency_probe.db_finish():
             self._conn.commit()
 
+    def rollback(self) -> None:
+        """Ochiq rollback (o'lchov/diagnostika uchun); ``close()`` xulqi o'zgarmagan."""
+        from services import latency_probe
+
+        with latency_probe.db_finish(legacy=False, rollback=True):
+            self._conn.rollback()
+
     def close(self) -> None:
         # Idempotent: chaqiruvchi kod (masalan ikkinchi marta bosilgan
         # tugma yo'lidagi ``finally``) ba'zan ``close()``ni ikki marta
@@ -275,7 +282,7 @@ class PgConnection:
                 # chaqirilmagan har qanday o'zgarish shu yerda bekor
                 # qilinadi (mavjud xatti-harakat: chaqiruvchi kod
                 # tranzaksiyani xohlasa ANIQ ``commit()`` chaqiradi).
-                with latency_probe.db_finish(legacy=False):
+                with latency_probe.db_finish(legacy=False, rollback=True):
                     conn.rollback()
             except Exception:  # noqa: BLE001
                 # Rollback o'zi yiqilsa (masalan server aloqani kutilmagan

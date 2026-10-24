@@ -55,7 +55,7 @@ async def test_one_line_with_counts_execute_only_and_commit_time_separate(capsys
     (line,) = _lines(capsys.readouterr().out)
     assert line["handler"] == "calc" and line["kind"] == "callback" and line["outcome"] == "ok"
     assert line["db_queries"] == "2" and line["pool_acquires"] == "1"  # PRAGMA va commit sanalmadi
-    assert set(line) == {"handler", "kind", "total_ms", "db_queries", "db_ms", "pool_acquires", "pool_ms", "telegram_ms", "outcome"}
+    assert set(line) == {"handler", "kind", "total_ms", "db_queries", "db_ms", "pool_acquires", "pool_ms", "rollbacks", "rollback_ms", "telegram_ms", "outcome"}
 
 
 async def test_executemany_and_executescript_count_as_one_call_each(capsys):
@@ -171,3 +171,18 @@ async def test_unmatched_update_writes_no_line(bot_dp, capsys):
     await send(main.dp, bot, 7002, text="hech qaysi handlerga mos kelmaydigan matn 12345")
 
     assert _lines(capsys.readouterr().out) == []
+
+
+async def test_explicit_rollbacks_are_counted_and_time_stays_inside_db_ms(capsys):
+    async def handler(event, data):
+        conn = db.get_connection()
+        conn.execute("SELECT 1")
+        conn.rollback()
+        conn.rollback()
+        conn.close()
+
+    await measure("message", handler)
+
+    line = _lines(capsys.readouterr().out)[0]
+    assert line["rollbacks"] == "2" and line["db_queries"] == "1"
+    assert int(line["rollback_ms"]) <= int(line["db_ms"])  # db_ms ichida, qayta qo'shilmagan

@@ -127,8 +127,7 @@ def record_manual_departure(employee_id: int, event_date: str, departure_time_te
     return True
 
 
-def get_arrival_time(employee_id: int, event_date: str) -> str | None:
-    events = attendance_repo.list_events_for_date(employee_id, event_date)
+def _arrival_from_events(events: list[dict]) -> str | None:
     check_ins = [e for e in events if e["event_type"] == EVENT_CHECK_IN]
     if not check_ins:
         return None
@@ -140,9 +139,11 @@ def get_arrival_time(employee_id: int, event_date: str) -> str | None:
         return check_ins[0]["event_time"]
 
 
-def get_day_summary(employee_id: int, event_date: str) -> dict:
-    arrival_time = get_arrival_time(employee_id, event_date)
-    reason = attendance_repo.get_reason(employee_id, event_date)
+def get_arrival_time(employee_id: int, event_date: str, conn=None) -> str | None:
+    return _arrival_from_events(attendance_repo.list_events_for_date(employee_id, event_date, conn=conn))
+
+
+def _day_summary(event_date: str, arrival_time: str | None, reason: dict | None) -> dict:
     reason_status = reason["reason_status"] if reason else None
 
     if arrival_time is None:
@@ -161,17 +162,35 @@ def get_day_summary(employee_id: int, event_date: str) -> dict:
     }
 
 
+def get_day_summary(employee_id: int, event_date: str, conn=None) -> dict:
+    arrival_time = get_arrival_time(employee_id, event_date, conn=conn)
+    reason = attendance_repo.get_reason(employee_id, event_date, conn=conn)
+    return _day_summary(event_date, arrival_time, reason)
+
+
 def get_yesterday_summary(employee_id: int) -> dict:
     yesterday = (company_time.today() - timedelta(days=1)).isoformat()
     return get_day_summary(employee_id, yesterday)
 
 
-def get_recent_days_summary(employee_id: int, days: int = 2) -> list[dict]:
+def get_recent_days_summary(employee_id: int, days: int = 2, conn=None) -> list[dict]:
     """Faqat oxirgi ``days`` kalendar kunini qaytaradi — bu FAQAT
     ko'rsatish uchun chegara, eski ``attendance_events``/
-    ``attendance_reasons`` yozuvlari DBda butunligicha qoladi."""
+    ``attendance_reasons`` yozuvlari DBda butunligicha qoladi.
+    Voqealar va sabablar butun oraliq uchun BITTADAN so'rovda o'qiladi (kun soniga bog'liq emas);
+    har kun hisobi ``get_day_summary`` bilan bir xil qoida (kun prefiksi bo'yicha)."""
     today = company_time.today()
-    return [get_day_summary(employee_id, (today - timedelta(days=i)).isoformat()) for i in range(days)]
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(days)]
+    if not dates:
+        return []
+    events = attendance_repo.list_events_for_range(
+        employee_id, min(dates), (today + timedelta(days=1)).isoformat(), conn=conn
+    )
+    reasons = attendance_repo.list_reasons_for_dates(employee_id, dates, conn=conn)
+    return [
+        _day_summary(day, _arrival_from_events([e for e in events if e["event_time"][:10] == day]), reasons.get(day))
+        for day in dates
+    ]
 
 
 # ----------------------------------------------------- ishlangan soatlar --
@@ -576,7 +595,7 @@ def get_month_to_date_planned_hours(employee_id: int, profile: dict | None = Non
     return _planned_from_shifts(range_start, range_end, {shift["shift_date"]: shift for shift in shifts})
 
 
-def get_month_to_date_hours(employee_id: int, profile: dict | None = None) -> dict | None:
+def get_month_to_date_hours(employee_id: int, profile: dict | None = None, conn=None) -> dict | None:
     """Oy boshidan (yoki ``hire_date``dan, qaysi biri keyinroq bo'lsa)
     bugungacha REJA va HAQIQIY ishlangan soat. Xodim topilmasa ``None``.
 
@@ -590,7 +609,7 @@ def get_month_to_date_hours(employee_id: int, profile: dict | None = None) -> di
     1 ta (tun smenasining ertasi kuni uchun +1 kun bilan), davomat voqealari butun diapazon uchun 1 ta
     (oxirgi kunning tun smenasi chiqishi uchun +1 kun bilan). Har kun hisobi olingan yozuvlardan bajariladi,
     tun smenasi qoidalari (ertangi smena oynasi) ``get_worked_hours_for_day`` bilan bir xil kod orqali."""
-    profile = profile if profile is not None else employees.get_profile(employee_id)
+    profile = profile if profile is not None else employees.get_profile(employee_id, conn=conn, include_contacts=False)
     if profile is None:
         return None
 
@@ -603,9 +622,9 @@ def get_month_to_date_hours(employee_id: int, profile: dict | None = None) -> di
 
     range_start, range_end = date_range
     fetch_end = (range_end + timedelta(days=2)).isoformat()  # ertasi kun smenasi va chiqish voqealari ham kerak
-    shifts = attendance_repo.get_schedule_for_range(employee_id, range_start.isoformat(), fetch_end)
+    shifts = attendance_repo.get_schedule_for_range(employee_id, range_start.isoformat(), fetch_end, conn=conn)
     shifts_by_date = {shift["shift_date"]: shift for shift in shifts}
-    events = attendance_repo.list_events_for_range(employee_id, range_start.isoformat(), fetch_end)
+    events = attendance_repo.list_events_for_range(employee_id, range_start.isoformat(), fetch_end, conn=conn)
 
     planned = _planned_from_shifts(range_start, range_end, shifts_by_date)
 

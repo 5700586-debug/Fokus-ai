@@ -244,7 +244,7 @@ class _MeasuredSqliteConnection(sqlite3.Connection):
     def rollback(self):
         from services import latency_probe
 
-        with latency_probe.db_finish(legacy=False):
+        with latency_probe.db_finish(legacy=False, rollback=True):
             return super().rollback()
 
 

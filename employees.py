@@ -121,21 +121,29 @@ def submit_profile(user_id: int, data: dict) -> None:
         conn.close()
 
 
-def get_profile(user_id: int) -> dict | None:
-    conn = get_connection()
+def get_profile(user_id: int, conn=None, include_contacts: bool = True) -> dict | None:
+    """``conn`` berilsa o'sha ulanishda o'qiladi (yopilmaydi/commit qilinmaydi — egasi yopadi). ``include_contacts=False``
+    kontaktlar so'rovini o'tkazib yuboradi (``profile["contacts"]`` bo'sh ro'yxat): kontaktlar kerak bo'lmagan o'qishlar uchun."""
+    owns = conn is None
+    if owns:
+        conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM employees WHERE user_id = ?", (user_id,)).fetchone()
         if row is None:
             return None
 
         profile = dict(row)
-        contacts = conn.execute(
-            "SELECT * FROM employee_contacts WHERE user_id = ?", (user_id,)
-        ).fetchall()
-        profile["contacts"] = [dict(c) for c in contacts]
+        if include_contacts:
+            contacts = conn.execute(
+                "SELECT * FROM employee_contacts WHERE user_id = ?", (user_id,)
+            ).fetchall()
+            profile["contacts"] = [dict(c) for c in contacts]
+        else:
+            profile["contacts"] = []
         return profile
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
 
 def list_approved_by_branch(branch: str) -> list[dict]:

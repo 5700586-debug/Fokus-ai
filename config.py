@@ -31,6 +31,8 @@ FOUNDER_ID = int(os.getenv("FOUNDER_ID") or "34213422")
 
 # Har bir ishlov berilgan message/callback handler uchun bitta ``HANDLER_METRICS`` log qatori
 # (qarang ``services/latency_probe.py``). Standart yoqilgan; ``HANDLER_METRICS_ENABLED=0`` o'chiradi.
+# Bot ishga tushganda bir martalik fon "SELECT 1" o'lchovi (faqat Postgres; qarang ``services/db_startup_probe.py``).
+DB_STARTUP_PROBE_ENABLED = (os.getenv("DB_STARTUP_PROBE_ENABLED") or "1").strip().lower() not in ("0", "false", "no", "off")
 HANDLER_METRICS_ENABLED = (os.getenv("HANDLER_METRICS_ENABLED") or "1").strip().lower() not in ("0", "false", "no", "off")
 
 # Tashqi providerlar (SMS, ob-havo) hali ulanmagan. Flag'lar False bo'lsa

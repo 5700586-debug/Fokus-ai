@@ -280,8 +280,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
 
-        stars = star_engine.get_current_stars(message.from_user.id)
-        bonus_history = star_engine.get_bonus_history(message.from_user.id)
+        # Barcha o'qishlar BITTA ulanishda (qaytishdan oldin yopiladi); Telegram javobi shundan keyin.
+        stars, bonus_history, dashboard = employee_dashboard.read_mystars(message.from_user.id)
 
         lines = [f"⭐ Joriy yulduzlar: {star_engine.format_star_progress(stars)} ({stars}/5)", ""]
         if bonus_history:
@@ -291,7 +291,6 @@ def register(dp: Dispatcher, openai_client) -> None:
         else:
             lines.append("Hali bonus tarixi yo'q.")
 
-        dashboard = employee_dashboard.build_dashboard(message.from_user.id)
         if dashboard is not None:
             photo_file_id = dashboard["profile"]["photo_file_id"]
             if photo_file_id:

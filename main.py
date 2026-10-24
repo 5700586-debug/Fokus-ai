@@ -58,7 +58,7 @@ import saturn_group_bot  # noqa: E402
 import supplier_chat_bot  # noqa: E402
 from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_ADDRESSES, RECRUITING_BRANCH_NAMES  # noqa: E402
 from repositories import recruiting as recruiting_repo  # noqa: E402
-from services import founder_today_problems, latency_probe, menu_screens, messages, permissions  # noqa: E402
+from services import db_startup_probe, founder_today_problems, latency_probe, menu_screens, messages, permissions  # noqa: E402
 from roles import (  # noqa: E402
     ROLES,
     SINGLE_SLOT_ROLES,
@@ -2048,10 +2048,13 @@ async def main() -> None:
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
     health_runner = await health_server.start()
+    probe_tasks: list = []
+    db_startup_probe.start(probe_tasks)  # bir martalik fon "SELECT 1" o'lchovi: polling'ni kutib qoldirmaydi
 
     try:
         await dp.start_polling(bot)
     finally:
+        await db_startup_probe.shutdown(probe_tasks)
         await health_runner.cleanup()
         scheduler.shutdown(wait=False)
         calibration_scheduler.shutdown(wait=False)

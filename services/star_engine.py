@@ -87,16 +87,16 @@ def process_month(user_id: int, year_month: str, inputs: MonthInputs) -> MonthRe
     )
 
 
-def get_current_stars(user_id: int) -> int:
-    return performance_repo.get_current_stars(user_id)
+def get_current_stars(user_id: int, conn=None) -> int:
+    return performance_repo.get_current_stars(user_id, conn=conn)
 
 
 def get_star_history(user_id: int) -> list[dict]:
     return performance_repo.get_star_history(user_id)
 
 
-def get_bonus_history(user_id: int) -> list[dict]:
-    return performance_repo.get_bonus_history(user_id)
+def get_bonus_history(user_id: int, conn=None) -> list[dict]:
+    return performance_repo.get_bonus_history(user_id, conn=conn)
 
 
 def format_star_progress(stars: int) -> str:

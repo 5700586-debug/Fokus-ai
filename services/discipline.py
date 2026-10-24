@@ -104,7 +104,7 @@ def _month_bounds(year_month: str) -> tuple[str, str, str, str]:
     return start.isoformat(), following.isoformat(), utc_iso(start), utc_iso(following)
 
 
-def get_period_point_totals(user_id: int, year_month: str | None = None) -> dict:
+def get_period_point_totals(user_id: int, year_month: str | None = None, conn=None) -> dict:
     """Berilgan oy (``"YYYY-MM"``; berilmasa kompaniyaning joriy oyi) uchun Bonus/Minus/Jami ball.
     Kunlik baho bonusi baho OYIGA (``eval_date``) tegishli — baho qachon kiritilgani yoki tuzatilgani
     oyni o'zgartirmaydi; boshqa bonus va haqiqiy minuslar ledgerdan o'z yozilgan oyi bo'yicha olinadi
@@ -112,7 +112,7 @@ def get_period_point_totals(user_id: int, year_month: str | None = None) -> dict
     funksiya faqat KO'RSATISH uchun hisoblaydi va hech narsa yozmaydi."""
     key = company_time.today().strftime("%Y-%m") if year_month is None else year_month
     start_date, end_date, since_iso, until_iso = _month_bounds(key)
-    totals = discipline_repo.get_month_point_totals(user_id, start_date, end_date, since_iso, until_iso)
+    totals = discipline_repo.get_month_point_totals(user_id, start_date, end_date, since_iso, until_iso, conn=conn)
     return {"period_key": key, "bonus": totals["bonus"], "minus": totals["minus"], "net": totals["net"]}
 
 

@@ -316,3 +316,68 @@ def test_grade_or_session_failure_rolls_everything_back_on_postgres(pg, table):
         _repair(table)
     discipline.record_daily_grade(EMPLOYEE, FOUNDER, "2026-03-10", "alo", session_branch="SATURN Charhiy")  # qayta urinish
     assert _grade_state(EMPLOYEE) == (1, 1, 1, 1)
+
+
+# -------------------- startup "SELECT 1" o'lchovi va rollback hisoblagichi (PgConnection) --
+
+
+def test_startup_probe_runs_against_real_postgres_and_returns_the_connection(pg):
+    from services import db_startup_probe
+
+    line = db_startup_probe._probe_sync(lambda: db_postgres.PgConnection(_DSN))
+
+    assert line.startswith("DB_STARTUP_PROBE outcome=ok samples=7 ")
+    assert len(db_postgres._get_pool(_DSN)._used) == 0  # ulanish pool'ga qaytarilgan
+
+
+def test_explicit_rollback_is_counted_once_and_time_is_inside_db_ms_on_postgres(pg):
+    from services import latency_probe
+
+    token = latency_probe._metrics.set(latency_probe._Metrics())
+    try:
+        metrics = latency_probe._metrics.get()
+        conn = db_postgres.PgConnection(_DSN)
+        conn.execute("SELECT 1 AS one").fetchone()
+        conn.rollback()
+        conn.close()  # idle: ichki rollback ham db_finish orqali sanaladi
+        assert metrics.db_queries == 1 and metrics.pool_acquires == 1
+        assert metrics.rollbacks == 2 and metrics.rollback_total <= metrics.db_total
+    finally:
+        latency_probe._metrics.reset(token)
+
+
+# ------------------- /mystars: eski/yangi execute, pool va rollback sonlari (PgConnection) --
+
+
+def test_mystars_reads_use_one_connection_and_one_rollback_vs_real_base_on_postgres(pg, monkeypatch):
+    from datetime import date, timedelta
+
+    from services import employee_dashboard, latency_probe
+    from tests.test_month_hours_queries import _employee, _seed, _today
+    from tests.test_mystars_roundtrips import _base_mystars, _legacy_mystars
+
+    _today(monkeypatch, "2026-03-31")
+    user = _employee()
+    _seed(user, date(2026, 3, 1), date(2026, 4, 2))
+
+    def counted(fn):
+        token = latency_probe._metrics.set(latency_probe._Metrics())
+        try:
+            metrics = latency_probe._metrics.get()
+            result = fn()
+            return result, (metrics.db_queries, metrics.pool_acquires, metrics.rollbacks)
+        finally:
+            latency_probe._metrics.reset(token)
+
+    (stars_n, history_n, dash), new = counted(lambda: employee_dashboard.read_mystars(user))
+    (stars_b, history_b, base), base_counts = counted(lambda: _base_mystars(user))
+    (stars_o, history_o, old), legacy = counted(lambda: _legacy_mystars(user))
+
+    for stars, history, other in ((stars_b, history_b, base), (stars_o, history_o, old)):
+        assert (stars_n, history_n) == (stars, history)
+        assert dash["points"] == other["points"] and dash["hours"] == other["hours"]
+        assert dash["yesterday"] == other["yesterday"] and dash["recent_days"] == other["recent_days"]
+    print(f"PG /mystars (execute, pool, rollback): yangi={new} haqiqiy base 555fef4={base_counts} tarixiy pre-#57={legacy}")
+    assert base_counts == (12, 10, 10)  # PostgreSQL'da close() har ulanishda rollback qiladi
+    assert new == (9, 1, 1)  # bitta ulanish, bitta rollback
+    assert new[0] < legacy[0] and new[1] < legacy[1] and new[2] < legacy[2]

@@ -116,6 +116,7 @@ def time_db_connect():
                 state.db_connections += 1
         except Exception:  # noqa: BLE001
             pass
+        note_pool_acquire(time.monotonic() - start)
 
 
 @contextmanager
@@ -196,3 +197,159 @@ def end_update() -> None:
             _active.set(None)
         except Exception:  # noqa: BLE001
             pass
+
+
+# ----------------------------------------------------------------------------------------------
+# HANDLER_METRICS — HAR BIR ishlov berilgan message/callback handler uchun bitta log qatori.
+#
+# Mavjud ``LATENCY_PROBE`` (faqat sinovchi uchun, beshta oqim) O'ZGARMAGAN. Quyidagi hisoblagichlar
+# alohida ``ContextVar``da (parallel Update'lar aralashmaydi) va FAQAT shu qatorni to'ldiradi; mavjud
+# hook'lar (``time_db_connect``/``db_execute``/``db_finish``) bir chaqiruvda ikkala hisobni alohida
+# yuritadi, bitta o'lchovni ikki marta qo'shmaydi.
+#
+# Ma'nolari (HECH QAYERDA "tugma bosilgandan beri" EMAS):
+#   total_ms       — handlerga KIRISHDAN (marshrutlash/filtrlar mos kelib, ``dp.message``/``dp.callback_query``
+#                    outer middleware ishga tushgan payt) handler QAYTGUNIGACHA. Telegram'dan kelish vaqti,
+#                    FSM/event-isolation navbati va filtr tekshiruvi KIRMAYDI.
+#   db_queries     — bajarilgan SQL ``execute`` chaqiruvlari soni. ``executemany`` va ``executescript`` BITTA
+#                    chaqiruv hisoblanadi. Postgres'da ``INSERT``dan keyingi ichki ``SELECT lastval()`` ham
+#                    haqiqiy tarmoq qatnovi bo'lgani uchun alohida sanaladi. commit/rollback SONGA QO'SHILMAYDI.
+#   db_ms          — execute + commit + rollback vaqtlari yig'indisi (har biri bir marta). Pool'dan ulanish
+#                    olish vaqti KIRMAYDI (``pool_ms`` alohida).
+#   pool_acquires  — ``pool.getconn()`` (SQLite'da ``sqlite3.connect``) chaqiruvlari soni. Bu YANGI FIZIK ulanish
+#                    degani EMAS: pool bo'sh ulanishni qayta ishlatadi; fizik ulanish ochilishi alohida o'lchanmaydi.
+#   telegram_ms    — Telegram API so'rovlari (``bot.session`` middleware) kutish vaqti yig'indisi.
+#   outcome        — ok | error (handler istisno ko'tarsa; istisno o'zgarishsiz qayta ko'tariladi).
+# Xabar matni, callback_data, SQL, parametrlar, foydalanuvchi ID/ismi va sirlar HECH QACHON yozilmaydi —
+# faqat statik handler funksiya nomi va son qiymatlar.
+# ----------------------------------------------------------------------------------------------
+
+
+@dataclass
+class _Metrics:
+    db_queries: int = 0
+    db_total: float = 0.0
+    pool_acquires: int = 0
+    pool_total: float = 0.0
+    telegram_total: float = 0.0
+
+
+_metrics: ContextVar["_Metrics | None"] = ContextVar("fokus_handler_metrics", default=None)
+
+
+def _add_metrics(**deltas: float) -> None:
+    try:
+        metrics = _metrics.get()
+        if metrics is None:
+            return
+        for name, value in deltas.items():
+            setattr(metrics, name, getattr(metrics, name) + value)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@contextmanager
+def db_execute():
+    """Bitta SQL ``execute`` atrofida: ``LATENCY_PROBE`` (avvalgidek) va ``HANDLER_METRICS`` uchun bir marta."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        elapsed = time.monotonic() - start
+        try:
+            state = _active.get()
+            if state is not None:
+                state.db_query_total += elapsed
+                state.db_queries += 1
+        except Exception:  # noqa: BLE001
+            pass
+        _add_metrics(db_queries=1, db_total=elapsed)
+
+
+@contextmanager
+def db_finish(legacy: bool = True):
+    """``commit()``/``rollback()`` atrofida: vaqt ``db_ms``ga bir marta qo'shiladi, ``db_queries``ga QO'SHILMAYDI.
+    ``legacy=True`` — ``LATENCY_PROBE`` avvalgidek commit'ni so'rov deb sanashda davom etadi."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        elapsed = time.monotonic() - start
+        if legacy:
+            try:
+                state = _active.get()
+                if state is not None:
+                    state.db_query_total += elapsed
+                    state.db_queries += 1
+            except Exception:  # noqa: BLE001
+                pass
+        _add_metrics(db_total=elapsed)
+
+
+def note_pool_acquire(elapsed: float = 0.0) -> None:
+    _add_metrics(pool_acquires=1, pool_total=elapsed)
+
+
+def note_telegram(elapsed: float) -> None:
+    _add_metrics(telegram_total=elapsed)
+
+
+async def telegram_request_middleware(make_request, bot, method):
+    """``bot.session.middleware(...)``: Telegram API so'rovi kutish vaqtini ``telegram_ms``ga qo'shadi."""
+    start = time.monotonic()
+    try:
+        return await make_request(bot, method)
+    finally:
+        note_telegram(time.monotonic() - start)
+
+
+def _handler_name(data: dict) -> str:
+    try:
+        callback = data["handler"].callback
+        name = getattr(callback, "__name__", None) or getattr(getattr(callback, "func", None), "__name__", None)
+        return name or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+async def measure_handler(kind: str, handler, event, data: dict):
+    """``dp.message``/``dp.callback_query`` outer middleware ichida chaqiriladi: handler tugagach bitta
+    ``HANDLER_METRICS`` qatori. O'lchov xatosi oqimni buzmaydi; handler istisnosi o'zgarishsiz qayta ko'tariladi.
+    ContextVar ``finally``da tiklanadi."""
+    try:
+        from config import HANDLER_METRICS_ENABLED
+
+        enabled = HANDLER_METRICS_ENABLED and _metrics.get() is None  # ichma-ich bo'lsa ikki marta sanalmasin
+    except Exception:  # noqa: BLE001
+        enabled = False
+    if not enabled:
+        return await handler(event, data)
+
+    token = _metrics.set(_Metrics())
+    metrics = _metrics.get()
+    started = time.monotonic()
+    outcome = "ok"
+    try:
+        return await handler(event, data)
+    except BaseException:
+        outcome = "error"
+        raise
+    finally:
+        try:
+            print(
+                "HANDLER_METRICS "
+                f"handler={_handler_name(data)} kind={kind} total_ms={_ms(time.monotonic() - started)} "
+                f"db_queries={metrics.db_queries} db_ms={_ms(metrics.db_total)} "
+                f"pool_acquires={metrics.pool_acquires} pool_ms={_ms(metrics.pool_total)} "
+                f"telegram_ms={_ms(metrics.telegram_total)} outcome={outcome}",
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            _metrics.reset(token)
+        except Exception:  # noqa: BLE001
+            try:
+                _metrics.set(None)
+            except Exception:  # noqa: BLE001
+                pass

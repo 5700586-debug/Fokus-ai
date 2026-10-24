@@ -11,7 +11,7 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Telegram o'chirishlari 100 tadan oshmagan deleteMessages guruhlariga birlashtirildi; xatoda avvalgi individual delete/inline/stale/tap retry himoyasi saqlangan. Eski chat tarixi skanerlanmaydi.
 - Suratli Yulduzlarim matni 1024 UTF-16 birlikdan oshmasa, surat+caption bitta xabar; uzun tarixda eski ikki xabar, foto xatosida to'liq matn fallback. Reply-klaviatura captionli menyu suratida ham qayta yuboriladi.
 - Lokal haqiqiy middleware testi: suratli Yulduzlarim <=11 execute / 2 pool olish, bitta send + bitta batch delete. Oldingi production: 17 execute / 5 pool, suratli takroriy ekran 2 send va 3 delete. SQLite vaqti production tezligi emas.
-- SQLite targeted: 130 passed, 1 failed (Founder “Rol testi” testi — oldindan mavjud); undan torroq menyu/dashboard/cleanup to'plami 80 passed. PostgreSQL targeted CI natijasi hali kutilmoqda; full suite ishlatilmadi.
+- SQLite targeted: 130 passed, 1 failed (Founder “Rol testi” testi — oldindan mavjud); undan torroq menyu/dashboard/cleanup to'plami 80 passed. PostgreSQL 16.15 haqiqiy adapter bilan GitHub Actions #40130584590: 49 passed, 0 failed, 0 skipped (kod a78d90b; keyingi commit faqat ushbu STATE qaydi); full suite ishlatilmadi.
 - Keyingi qadam: PostgreSQL targeted tekshiruv, Muhammadiy tasdig'idan keyin deploy, ikki real Yulduzlarim o'lchovi. 1500 ms maqsad faqat production o'lchov bilan yopiladi.
 
 ## Production tezlik tekshiruvi — 2026-10-25 (Asia/Tashkent)

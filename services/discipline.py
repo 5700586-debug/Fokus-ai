@@ -62,13 +62,23 @@ _RULE_NUMBER_RE = re.compile(r"\d+")
 
 
 def set_fixed_salary(user_id: int, fixed_salary: int, updated_by: int) -> None:
-    discipline_repo.upsert_fixed_salary(user_id, fixed_salary, updated_by)
+    """Eski ``/setsalary`` yo'li: yangi kelishuv oqimi bilan BIR XIL yozish yo'li (``salary_agreement``) — bugundan amal
+    qiladigan, kun/soat noma'lum kelishuv qatori + ``salaries.fixed_salary`` sinxroni. ``bonus_bank``ga tegmaydi."""
+    from services import salary_agreement
+
+    salary_agreement.save_legacy_fixed_salary(user_id, fixed_salary, updated_by)
 
 
 def get_salary(user_id: int) -> dict:
+    from services import salary_agreement
+
     salary = discipline_repo.get_salary(user_id)
     if salary is None:
-        return {"user_id": user_id, "fixed_salary": 0, "bonus_bank": 0}
+        salary = {"user_id": user_id, "fixed_salary": 0, "bonus_bank": 0}
+    # Amaldagi kelishuv sanaga qarab o'qiladi (scheduler yo'q): kelajak sanali kelishuv hali fiksni o'zgartirmaydi.
+    agreement = salary_agreement.get_current(user_id)
+    if agreement is not None:
+        salary = {**salary, "fixed_salary": agreement["fixed_salary"]}
     return salary
 
 

@@ -2,6 +2,7 @@
 ``tests/test_discipline_appeal_postgres.py``da (lokal Docker)."""
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -145,3 +146,101 @@ async def test_probe_failure_never_raises_and_does_not_touch_handler_metrics(mon
 
     out = capsys.readouterr().out
     assert len(_lines(out)) == 2 and "SECRET" not in out
+
+
+# ------------------------------------ shutdown: pool oqim tugamaguncha yopilmaydi --
+
+
+class _GatedConn(_FakeConn):
+    """Birinchi ``execute``da ``gate`` ochilmaguncha ushlab turadi (boshqariladigan DB ishi)."""
+
+    def __init__(self, gate: threading.Event, events: list, entered: threading.Event):
+        super().__init__()
+        self.gate, self.events, self.entered = gate, events, entered
+
+    def execute(self, sql, params=()):
+        self.entered.set()
+        self.gate.wait(10)
+        return super().execute(sql, params)
+
+    def close(self):
+        self.events.append("connection_returned")
+        super().close()
+
+
+async def _start_gated(monkeypatch):
+    monkeypatch.setattr(db, "_DATABASE_URL", "x")
+    monkeypatch.setattr(config, "DB_STARTUP_PROBE_ENABLED", True)
+    gate, entered, events = threading.Event(), threading.Event(), []
+    conn = _GatedConn(gate, events, entered)
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    holder: list = []
+    db_startup_probe.start(holder)
+    while not entered.is_set():  # oqim haqiqatan DB ishida
+        await asyncio.sleep(0.005)
+    return gate, events, holder, conn
+
+
+async def _main_finally(holder, events):
+    """``main.py`` ``finally`` tartibi: avval probe shutdown, keyin ``close_all_pools()``."""
+    await db_startup_probe.shutdown(holder, timeout=0.05)
+    events.append("pool_closed")
+
+
+async def test_pool_is_not_closed_until_the_running_db_thread_has_returned_its_connection(monkeypatch):
+    gate, events, holder, conn = await _start_gated(monkeypatch)
+    try:
+        closing = asyncio.create_task(_main_finally(holder, events))
+        await asyncio.sleep(0.4)  # timeout (0.05 s) o'tdi, task bekor qilindi, lekin oqim hamon DB ishida
+
+        assert not closing.done() and "pool_closed" not in events and holder  # havola yo'qotilmagan, pool yopilmagan
+        assert holder[0].task.done() and not holder[0].done.is_set()  # task bekor, oqim tugamagan
+
+        gate.set()  # DB ishi tugasin
+        await asyncio.wait_for(closing, 5)
+
+        assert events == ["connection_returned", "pool_closed"] and holder == [] and conn.closed
+        assert conn.rollbacks == 1  # yakuniy rollback ham bajarilgan
+    finally:
+        gate.set()
+
+
+async def test_cancelling_shutdown_still_waits_for_the_thread_then_reraises_cancelled(monkeypatch):
+    gate, events, holder, conn = await _start_gated(monkeypatch)
+    try:
+        closing = asyncio.create_task(_main_finally(holder, events))
+        await asyncio.sleep(0.2)
+        closing.cancel()  # shutdown o'zi bekor qilindi
+        await asyncio.sleep(0.2)
+        assert not closing.done() and "pool_closed" not in events  # cleanup tugamaguncha bekor qilish yutilmaydi ham, yakunlanmaydi ham
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(closing, 5)
+
+        assert events == ["connection_returned"]  # ulanish qaytdi; bekor qilish holati saqlandi (pool yopish bosqichiga o'tilmadi)
+        assert holder == []
+    finally:
+        gate.set()
+
+
+async def test_shutdown_returns_immediately_when_nothing_ran_or_it_already_finished(monkeypatch):
+    monkeypatch.setattr(db, "_DATABASE_URL", None)  # Postgres emas: probe ishlamaydi
+    holder: list = []
+    db_startup_probe.start(holder)
+
+    await asyncio.wait_for(db_startup_probe.shutdown(holder), 2)
+
+    assert holder == []
+
+
+async def test_task_cancelled_before_first_step_does_not_hang_shutdown(monkeypatch):
+    monkeypatch.setattr(db, "_DATABASE_URL", "x")
+    monkeypatch.setattr(config, "DB_STARTUP_PROBE_ENABLED", True)
+    holder: list = []
+    db_startup_probe.start(holder)
+    holder[0].task.cancel()  # coroutine hali bir qadam ham yurmagan
+
+    await asyncio.wait_for(db_startup_probe.shutdown(holder, timeout=0.05), 3)
+
+    assert holder == []

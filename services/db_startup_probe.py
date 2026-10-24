@@ -18,7 +18,9 @@ ishlaydi. Faqat Render jarayonining o'zida ishlaganda Render natijasi bo'ladi; b
 
 import asyncio
 import statistics
+import threading
 import time
+from dataclasses import dataclass, field
 
 SAMPLES = 7
 
@@ -27,8 +29,18 @@ def _fmt(values: list[float]) -> str:
     return "[" + ",".join(f"{value:.1f}" for value in values) + "]"
 
 
-def _probe_sync(connect) -> str:
-    """Sinxron o'lchov (alohida oqimda chaqiriladi). Qaytaradi: yakuniy log qatori (exception ko'tarmaydi)."""
+def _probe_sync(connect, done: threading.Event | None = None) -> str:
+    """Sinxron o'lchov (alohida oqimda chaqiriladi). Qaytaradi: yakuniy log qatori (exception ko'tarmaydi).
+    ``done`` berilsa, ulanish ``finally``da qaytarilgandan KEYIN o'rnatiladi: shutdown shu belgi bo'yicha oqim HAQIQATAN
+    tugaganini biladi (asyncio task'ining bekor bo'lishi oqimni to'xtatmaydi)."""
+    try:
+        return _probe_body(connect)
+    finally:
+        if done is not None:
+            done.set()
+
+
+def _probe_body(connect) -> str:
     from services import latency_probe
 
     # Bu oqim kontekst nusxasini oladi: agar chaqiruvchida HANDLER_METRICS/LATENCY_PROBE faol bo'lsa ham, bu
@@ -83,8 +95,20 @@ def _probe_sync(connect) -> str:
     )
 
 
-async def run_once(connect=None) -> None:
-    """Bitta fon o'lchovi: sozlama o'chiq yoki Postgres bo'lmasa hech narsa qilmaydi. Hech qachon exception ko'tarmaydi."""
+@dataclass
+class _Entry:
+    """Fon o'lchovining ikkala tomoni: asyncio ``task`` VA haqiqiy oqim tugaganini bildiruvchi ``done`` belgisi."""
+
+    task: "asyncio.Task"
+    done: threading.Event = field(default_factory=threading.Event)
+    started: threading.Event = field(default_factory=threading.Event)  # oqim ishga tushirildimi
+
+
+async def run_once(connect=None, done: threading.Event | None = None, started: threading.Event | None = None) -> None:
+    """Bitta fon o'lchovi: sozlama o'chiq yoki Postgres bo'lmasa hech narsa qilmaydi. Hech qachon exception ko'tarmaydi
+    (faqat ``CancelledError`` qayta ko'tariladi). ``done`` — oqim ishlamagan bo'lsa shu yerda, ishlagan bo'lsa oqimning
+    o'zida (ulanish qaytgandan keyin) o'rnatiladi."""
+    thread_started = False
     try:
         import config
         import db
@@ -93,7 +117,10 @@ async def run_once(connect=None) -> None:
             return
         if connect is None:
             connect = db.get_connection
-        line = await asyncio.to_thread(_probe_sync, connect)
+        thread_started = True
+        if started is not None:
+            started.set()
+        line = await asyncio.to_thread(_probe_sync, connect, done)
         print(line, flush=True)
     except asyncio.CancelledError:
         raise
@@ -102,23 +129,87 @@ async def run_once(connect=None) -> None:
             print("DB_STARTUP_PROBE outcome=error stage=run samples=0", flush=True)
         except Exception:  # noqa: BLE001
             pass
+    finally:
+        if done is not None and not thread_started:
+            done.set()
 
 
-def start(loop_task_holder: list) -> None:
-    """Fon vazifasini yaratadi va havolasini ``loop_task_holder``da saqlaydi (GC to'xtatmasin)."""
+def start(holder: list) -> None:
+    """Fon vazifasini yaratadi; ``task`` havolasi va ``done`` belgisi ``holder``da ish TUGAGUNCHA saqlanadi."""
     try:
-        loop_task_holder.append(asyncio.create_task(run_once(), name="db_startup_probe"))
+        entry = _Entry(task=None)  # type: ignore[arg-type]
+        entry.task = asyncio.create_task(run_once(done=entry.done, started=entry.started), name="db_startup_probe")
+        holder.append(entry)
     except Exception:  # noqa: BLE001
         pass
 
 
-async def shutdown(loop_task_holder: list, timeout: float = 5.0) -> None:
-    """To'xtashda vazifani xavfsiz yakunlaydi (pool yopilishidan OLDIN chaqiriladi)."""
-    for task in loop_task_holder:
+async def _wait_thread(done: threading.Event, limit: float) -> bool:
+    """Oqim tugashini event loop'ni to'smasdan kutadi; ``CancelledError`` bu yerda kutishni to'xtatmaydi (qayta
+    ko'tarish chaqiruvchida). Qaytaradi: oqim tugadimi."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limit
+    cancelled = False
+    while not done.is_set() and loop.time() < deadline:
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-        except Exception:  # noqa: BLE001
-            task.cancel()
+            await asyncio.sleep(0.02)
         except asyncio.CancelledError:
-            task.cancel()
-    loop_task_holder.clear()
+            cancelled = True  # kutish davom etadi: pool oqim ishlayotganda yopilmasin
+    if cancelled:
+        raise asyncio.CancelledError()
+    return done.is_set()
+
+
+def _self_cancelled(entry_task: "asyncio.Task") -> bool:
+    """``await`` paytida kelgan ``CancelledError`` — ``shutdown``ning O'ZI bekor qilinganidanmi (``True``) yoki kutilayotgan
+    probe task'i bekor bo'lganidanmi (``False``)?"""
+    current = asyncio.current_task()
+    cancelling = getattr(current, "cancelling", None)  # Python 3.11+
+    if cancelling is not None:
+        return cancelling() > 0
+    return not entry_task.cancelled()
+
+
+async def shutdown(holder: list, timeout: float = 5.0, thread_timeout: float = 30.0) -> None:
+    """To'xtashda (``close_all_pools()`` dan OLDIN chaqiriladi) o'lchovni xavfsiz yakunlaydi.
+
+    Kutish chegaralari: (1) ``timeout`` — task o'zi tugashini kutish; keyin task bekor qilinadi. Task'ning bekor bo'lishi
+    ``asyncio.to_thread`` ichidagi DB ishini TO'XTATMAYDI, shuning uchun (2) ``thread_timeout`` — oqim HAQIQATAN tugab,
+    ulanish ``finally``da pool'ga qaytganini bildiruvchi ``done`` belgisini kutish (event loop to'silmaydi). Faqat shundan
+    keyin ``holder`` tozalanadi va chaqiruvchi pool'ni yopadi. ``thread_timeout`` o'tib ham oqim tugamagan bo'lsa (juda
+    kam holat) bu haqda bitta xavfsiz qator yoziladi va to'xtash davom etadi — oqim shu paytda ishlayotgan bo'lishi mumkin
+    ("to'xtadi" deb hisoblanmaydi). ``shutdown`` o'zi bekor qilinsa, tozalash baribir oxirigacha bajariladi va
+    ``CancelledError`` qayta ko'tariladi."""
+    cancelled = False
+    for entry in list(holder):
+        try:
+            await asyncio.wait_for(asyncio.shield(entry.task), timeout=timeout)
+        except asyncio.TimeoutError:
+            entry.task.cancel()
+        except asyncio.CancelledError:
+            cancelled = cancelled or _self_cancelled(entry.task)
+            entry.task.cancel()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if entry.task.cancelled() or entry.task.done():
+                pass
+            else:
+                try:
+                    await asyncio.wait_for(asyncio.shield(entry.task), timeout=1.0)  # bekor qilingan task tugashini kut
+                except asyncio.CancelledError:
+                    # task'ning o'zi bekor bo'lgani ham, shutdown bekor qilingani ham shu yerga tushadi: ikkinchisini
+                    # yutib yubormaslik uchun shunday belgilanadi (cleanup davom etadi, oxirida qayta ko'tariladi)
+                    cancelled = cancelled or _self_cancelled(entry.task)
+                except Exception:  # noqa: BLE001
+                    pass
+            if entry.task.done() and not entry.started.is_set():
+                entry.done.set()  # oqim umuman ishga tushmagan (masalan, task birinchi qadamdan oldin bekor bo'lgan)
+            finished = await _wait_thread(entry.done, thread_timeout)
+            if not finished:
+                print("DB_STARTUP_PROBE outcome=error stage=shutdown samples=0", flush=True)
+        except asyncio.CancelledError:
+            cancelled = True
+    holder.clear()
+    if cancelled:
+        raise asyncio.CancelledError()

@@ -24,8 +24,30 @@ def anyio_backend():
     return "asyncio"
 
 
+def _base_mystars(user: int):
+    """PR #58 ning HAQIQIY baseline'i (main 555fef4, PR #57 dan keyin): har o'qish alohida ulanishda; profil kontaktlari bilan
+    o'qiladi; oxirgi 2 kun har kun uchun alohida voqealar+sabab so'rovi; oylik soat diapazon bo'yicha (PR #57); 'kecha'
+    'oxirgi 2 kun'dan olinadi. Mustaqil o'lchovda (555fef4 worktree) 31 kunlik ma'lumotda 12 execute / 10 pool."""
+    profile = employees.get_profile(user)
+    recent = [svc.get_day_summary(user, (company_time.today() - timedelta(days=i)).isoformat()) for i in range(2)]
+    yesterday_iso = (company_time.today() - timedelta(days=1)).isoformat()
+    yesterday = next(day for day in recent if day["date"] == yesterday_iso)
+    return (
+        star_engine.get_current_stars(user),
+        star_engine.get_bonus_history(user),
+        {
+            "full_name": " ".join(p for p in (profile.get("familiya"), profile.get("ism")) if p) or "-",
+            "points": discipline.get_period_point_totals(user),
+            "yesterday": yesterday,
+            "hours": svc.get_month_to_date_hours(user, profile=profile),
+            "recent_days": recent,
+        },
+    )
+
+
 def _legacy_mystars(user: int):
-    """ESKI yo'l: har o'qish alohida ulanishda, profil/kunlar takror o'qiladi."""
+    """TARIXIY (PR #57 dan OLDINGI) yo'l: har o'qish alohida ulanishda, kunlar bo'yicha o'qish. PR #58 ning baseline'i EMAS —
+    faqat tarixiy regressiya (kunlar soniga chiziqli o'sish) uchun."""
     profile = employees.get_profile(user)
     return (
         star_engine.get_current_stars(user),
@@ -43,7 +65,23 @@ def _legacy_mystars(user: int):
 
 
 @pytest.mark.parametrize("today", ["2026-03-01", "2026-03-31", "2026-04-02", "2027-01-02"])
-def test_new_single_connection_path_returns_exactly_the_legacy_result(monkeypatch, today):
+def test_single_connection_path_returns_exactly_the_real_base_result_with_fewer_round_trips(monkeypatch, today):
+    _today(monkeypatch, today)
+    user = _employee()
+    _seed(user, date.fromisoformat(today) - timedelta(days=35), date.fromisoformat(today) + timedelta(days=2))
+
+    (stars_n, history_n, dash), q_new, p_new = _counted(lambda: employee_dashboard.read_mystars(user))
+    (stars_b, history_b, base), q_base, p_base = _counted(lambda: _base_mystars(user))
+
+    assert (stars_n, history_n) == (stars_b, history_b)
+    assert dash["profile"]["full_name"] == base["full_name"] and dash["points"] == base["points"]
+    assert dash["hours"] == base["hours"] and dash["yesterday"] == base["yesterday"] and dash["recent_days"] == base["recent_days"]
+    print(f"{today}: yangi sql={q_new} pool={p_new}; haqiqiy base (555fef4) sql={q_base} pool={p_base}")
+    assert (q_base, p_base) == (12, 10) and (q_new, p_new) == (9, 1)  # kunlar soniga bog'liq emas
+
+
+@pytest.mark.parametrize("today", ["2026-03-01", "2026-03-31", "2026-04-02", "2027-01-02"])
+def test_new_single_connection_path_returns_exactly_the_pre_pr57_historical_result(monkeypatch, today):
     _today(monkeypatch, today)
     user = _employee()
     _seed(user, date.fromisoformat(today) - timedelta(days=35), date.fromisoformat(today) + timedelta(days=2))

@@ -291,23 +291,25 @@ def register(dp: Dispatcher, openai_client) -> None:
         else:
             lines.append("Hali bonus tarixi yo'q.")
 
+        photo_file_id = None
         if dashboard is not None:
             photo_file_id = dashboard["profile"]["photo_file_id"]
-            if photo_file_id:
-                # Foto o'zining alohida try/except'ida — muvaffaqiyatsiz
-                # bo'lsa ham (masalan eskirgan file_id) pastdagi matnli
-                # dashboard baribir yuboriladi (qarang recruiting_bot.py
-                # dagi bir xil izolyatsiya naqshi).
-                try:
-                    await message.answer_photo(photo_file_id)
-                except Exception as error:  # noqa: BLE001
-                    print(f"/mystars fotosini yuborib bo'lmadi ({message.from_user.id}): {error!r}")
-
             lines.append("")
             lines.append("—" * 10)
             lines.append(employee_dashboard.format_dashboard_text(dashboard))
 
-        await message.answer("\n".join(lines))
+        text = "\n".join(lines)
+        if photo_file_id:
+            # Telegram captions have a 1024-character limit. Keep the text fallback
+            # for long history or an expired photo ID; never lose the actual result.
+            combined = len(text.encode("utf-16-le")) // 2 <= 1024
+            try:
+                await message.answer_photo(photo_file_id, caption=text if combined else None)
+                if combined:
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+        await message.answer(text)
 
     # ------------------------------------------------------- /grafik --
 

@@ -9,7 +9,7 @@ import pytest
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
-    AnswerCallbackQuery, DeleteMessage, EditMessageReplyMarkup, EditMessageText, GetMe, SendMessage,
+    AnswerCallbackQuery, DeleteMessage, DeleteMessages, EditMessageReplyMarkup, EditMessageText, GetMe, SendMessage, SendPhoto,
 )
 from aiogram.types import CallbackQuery, Chat, Message, ReplyKeyboardMarkup, Update
 from aiogram.types import User as TgUser
@@ -36,6 +36,7 @@ class FakeSession(BaseSession):
         self.ids = itertools.count(100)
         self.sent: list[dict] = []
         self.deleted: list[tuple[int, int]] = []
+        self.batches: list[list[int]] = []
         self.markup_removed: list[tuple[int, int]] = []
         self.answers: list[str | None] = []
         self.keyboard_owners: dict[int, int] = {}
@@ -51,6 +52,14 @@ class FakeSession(BaseSession):
         yield b""
 
     async def make_request(self, bot, method, timeout=None):
+        if isinstance(method, DeleteMessages):
+            self.batches.append(list(method.message_ids))
+            if self.fail_delete and (self.fail_delete is True or any(self.fail_delete(method.chat_id, mid) for mid in method.message_ids)):
+                raise RuntimeError("batch delete failed")
+            self.deleted.extend((method.chat_id, mid) for mid in method.message_ids)
+            if self.keyboard_owners.get(method.chat_id) in method.message_ids:
+                self.keyboard_owners.pop(method.chat_id)
+            return True
         if isinstance(method, DeleteMessage):
             if self.fail_delete and (self.fail_delete is True or self.fail_delete(method.chat_id, method.message_id)):
                 raise RuntimeError("o'chirib bo'lmadi (48 soat / allaqachon o'chgan)")
@@ -66,20 +75,21 @@ class FakeSession(BaseSession):
             return True
         if isinstance(method, GetMe):
             return TgUser(id=bot.id, is_bot=True, first_name="T", username="t")
-        if isinstance(method, (SendMessage, EditMessageText)):
-            if isinstance(method, SendMessage):
+        if isinstance(method, (SendMessage, SendPhoto, EditMessageText)):
+            text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+            if isinstance(method, (SendMessage, SendPhoto)):
                 if self.fail_send and self.fail_send(method):
                     raise RuntimeError("yuborib bo'lmadi")
                 if self.hold and self.hold(method):
                     await self.release.wait()
                 message_id = next(self.ids)
-                self.sent.append({"chat": method.chat_id, "id": message_id, "text": method.text, "markup": method.reply_markup})
+                self.sent.append({"chat": method.chat_id, "id": message_id, "text": text, "markup": method.reply_markup})
                 if isinstance(method.reply_markup, ReplyKeyboardMarkup):
                     self.keyboard_owners[method.chat_id] = message_id
             else:
                 message_id = method.message_id or 1
             return Message(
-                message_id=message_id, date=datetime.now(), chat=Chat(id=method.chat_id, type="private"), text=method.text
+                message_id=message_id, date=datetime.now(), chat=Chat(id=method.chat_id, type="private"), text=text
             ).as_(bot)
         raise NotImplementedError(method)
 

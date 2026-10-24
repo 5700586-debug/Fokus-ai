@@ -4,6 +4,16 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Production tezlik tekshiruvi — 2026-10-25 (Asia/Tashkent)
+
+- PR #58 merge qilingan: `e38312f76fe95e27c6be7fedb6705f496539959c`; Render `fokus-ai-singapore`, deploy `dep-dbeh8uuq1p3s73e9aicg` LIVE (2026-10-25 01:27:50 +05). Health HTTP 200. Eski instance SIGTERM 01:28:50; undan keyingi tekshirilgan loglarda yangi xato yo'q.
+- Cheksiz probe shutdown kutishi qaytarilgan (`c237611`); 5 s task / 30 s thread kutishi va ma'lum cheklov saqlangan. Boshqa shutdown tuzatishi rejalashtirilmagan.
+- `DB_STARTUP_PROBE outcome=ok`: 7 iliq sample, min/median/max 64.7/64.8/65.0 ms; birinchi execute 130.2 ms; pool 0.0 ms; rollback 64.7 ms. Bu sof tarmoq RTT'si emas. Median 70 ms chegaradan past: kelishilgan region tahlili sharti bajarilmadi.
+- Muhammadiy ikki marta bosgandan keyingi `mystars_handler`: 01:30:04 +05 — total 3068 ms, SQL 17, db 1779 ms, pool 5, rollback 5 / 63 ms, Telegram 1279 ms; 01:30:12 +05 — total 2548 ms, SQL 17, db 1719 ms, pool 5, rollback 5 / 63 ms, Telegram 823 ms. Ikkalasi outcome=ok.
+- Oldingi production: total 3825–4067 ms, SQL 20, db 3012–3062 ms, pool 14. Yangi o'lchovda SQL 17, pool 5; db 1719–1779 ms. Turli chaqiruvlar: Telegram kutishi ham o'zgaradi; bu nazoratli benchmark emas.
+- Tezlik ishi YOPILMAGAN: ikkala sample ham 1500 ms'dan yuqori, hatto kelishilgan 1500–2500 ms oraliqning yuqorisida. >2500 ms uchun alohida qaror hali belgilanmagan; yangi PR/region ko'chirish avtomatik boshlanmaydi.
+- Asosiy navbat saqlanadi: Fiks kelishuvi → Oylik baholarim → oy boshidan hisob → solishtirish. Keyingi ish Muhammadiy bilan kelishilgan doirada; cheksiz tezlik takomillashtirish yo'q.
+
 ## Birlashtirish tekshiruvi — 2026-10-21 (Asia/Tashkent)
 
 - Muhammadiy keyingi qadamni davom ettirishga ruxsat berdi: PR #53 main'ga merge qilindi (`1ccddc1`); PR #54 shu main bilan birlashtirilmoqda. Konflikt faqat ushbu hujjatda bo'ldi, ikkala bo'lim saqlandi.

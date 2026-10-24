@@ -177,8 +177,8 @@ async def shutdown(holder: list, timeout: float = 5.0, thread_timeout: float = 3
     ``asyncio.to_thread`` ichidagi DB ishini TO'XTATMAYDI, shuning uchun (2) ``thread_timeout`` — oqim HAQIQATAN tugab,
     ulanish ``finally``da pool'ga qaytganini bildiruvchi ``done`` belgisini kutish (event loop to'silmaydi). Faqat shundan
     keyin ``holder`` tozalanadi va chaqiruvchi pool'ni yopadi. ``thread_timeout`` o'tib ham oqim tugamagan bo'lsa (juda
-    kam holat) bitta xavfsiz ogohlantirish yoziladi, lekin kutish DAVOM ETADI: pool oqim ulanishni qaytarmaguncha
-    yopilmaydi (kutish muddati o'tgani oqim to'xtagani degani emas). ``shutdown`` o'zi bekor qilinsa, tozalash baribir oxirigacha bajariladi va
+    kam holat) bu haqda bitta xavfsiz qator yoziladi va to'xtash davom etadi — oqim shu paytda ishlayotgan bo'lishi mumkin
+    ("to'xtadi" deb hisoblanmaydi). ``shutdown`` o'zi bekor qilinsa, tozalash baribir oxirigacha bajariladi va
     ``CancelledError`` qayta ko'tariladi."""
     cancelled = False
     for entry in list(holder):
@@ -207,10 +207,7 @@ async def shutdown(holder: list, timeout: float = 5.0, thread_timeout: float = 3
                 entry.done.set()  # oqim umuman ishga tushmagan (masalan, task birinchi qadamdan oldin bekor bo'lgan)
             finished = await _wait_thread(entry.done, thread_timeout)
             if not finished:
-                # Kutish muddati o'tdi, lekin oqim hamon DB ishida: pool uning ostidan yopilmasligi uchun KUTISH DAVOM ETADI
-                # (chegarasiz; DB ishi psycopg2/server tomonidan cheklanadi). Faqat bitta xavfsiz ogohlantirish yoziladi.
-                print("DB_STARTUP_PROBE outcome=waiting stage=shutdown samples=0", flush=True)
-                await _wait_thread(entry.done, float("inf"))
+                print("DB_STARTUP_PROBE outcome=error stage=shutdown samples=0", flush=True)
         except asyncio.CancelledError:
             cancelled = True
     holder.clear()

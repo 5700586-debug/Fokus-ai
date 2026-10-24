@@ -27,20 +27,19 @@ async def test_role_test_button_does_nothing_for_ordinary_user(bot_dp, monkeypat
     assert sent == []
 
 
-async def test_founder_sees_role_test_button_in_both_environments(bot_dp, monkeypatch):
-    """Preview endi Founderga production botda ham ko'rinadi — ko'rinish
-    ``ENVIRONMENT``ga emas, faqat Founder ID'ga bog'langan."""
+async def test_founder_menu_hides_role_test_button_in_both_environments(bot_dp, monkeypatch):
+    """Muhammadiy qarori: Founder menyusida faqat asosiy ish tugmalari qoladi."""
     main, bot = bot_dp
 
     assert main.ENVIRONMENT != "test"
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
-    assert "🧪 Rol testi" in buttons
+    assert "🧪 Rol testi" not in buttons
 
     monkeypatch.setattr(main, "ENVIRONMENT", "test")
     sent = await send(main.dp, bot, FOUNDER_ID, text="/start")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
-    assert "🧪 Rol testi" in buttons
+    assert "🧪 Rol testi" not in buttons
 
 
 async def test_non_founder_never_sees_role_test_button(bot_dp, monkeypatch):

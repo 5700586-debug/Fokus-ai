@@ -651,8 +651,6 @@ def build_menu(user_id: int) -> ReplyKeyboardMarkup:
     """
     if get_role(user_id) == "founder":
         rows = _paired_keyboard_rows(_FOUNDER_MENU_LABELS)
-        if _sandbox_enabled(user_id):
-            rows.append([KeyboardButton(text=_ROLE_TEST_ENTRY_TEXT)])
         return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
 
     rows = []

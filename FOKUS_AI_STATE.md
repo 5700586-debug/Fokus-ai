@@ -4,6 +4,14 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Founder menyusi: Rol testi tugmasi — 2026-10-25
+
+- Muhammadiy so'rovi: Founder menyusidagi “🧪 Rol testi” tugmasi olib tashlanadi.
+- Branch `fix/remove-founder-role-test-button`, base `af5cf85`; merge/deploy yo'q.
+- `main.py` → `build_menu`: tugmani qo'shuvchi ikki qator olib tashlandi. Qolgan asosiy 7 tugma va persistent klaviatura saqlangan. Bu menyu o'zgarishi; eski preview handlerlari yoki DB o'chirilmagan.
+- Mavjud tegishli testlar: Founder /start menyusi, 7 tugma, persistent klaviatura, barcha muhitlarda Rol testi tugmasi yashirilishi, boshqa rollar menyusi — 5 passed. Oldingi Founder menyusi nomuvofiqligi bartaraf etildi. Full suite/PostgreSQL ishlatilmadi (SQL/DB o'zgarishi yo'q).
+- Keyingi qadam: Muhammadiy tasdig'idan so'ng merge/deploy, Founder /start bilan klaviaturani yangilaydi.
+
 ## PR #59 production natijasi — 2026-10-25 (Asia/Tashkent)
 
 - PR #59 merge: `4783cc78a4fd7b55d862a29d5689f9dd061ea89f`; Render deploy `dep-dbehg215efls73b28mdg` LIVE. Health HTTP 200. Eski instance SIGTERM 01:43:59 +05; undan keyingi tekshirilgan loglarda yangi xato yo'q.

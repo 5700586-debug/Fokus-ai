@@ -203,14 +203,14 @@ class PgConnection:
 
         translated, _stripped_fk = _translate_statement(sql)
         cursor = self._conn.cursor()
-        with latency_probe.time_db_query():
+        with latency_probe.db_execute():
             cursor.execute(translated, params)
 
         lastrowid = None
         table_match = _INSERT_TABLE_RE.match(sql.strip())
         if table_match and table_match.group(1).lower() in _SERIAL_PK_TABLES:
             lastval_cursor = self._conn.cursor()
-            with latency_probe.time_db_query():
+            with latency_probe.db_execute():
                 lastval_cursor.execute("SELECT lastval() AS lastval")
             row = lastval_cursor.fetchone()
             lastrowid = row["lastval"] if row else None
@@ -244,7 +244,7 @@ class PgConnection:
     def commit(self) -> None:
         from services import latency_probe
 
-        with latency_probe.time_db_query():
+        with latency_probe.db_finish():
             self._conn.commit()
 
     def close(self) -> None:
@@ -254,6 +254,8 @@ class PgConnection:
         if self._closed:
             return
         self._closed = True
+
+        from services import latency_probe
 
         conn = self._conn
         try:
@@ -273,7 +275,8 @@ class PgConnection:
                 # chaqirilmagan har qanday o'zgarish shu yerda bekor
                 # qilinadi (mavjud xatti-harakat: chaqiruvchi kod
                 # tranzaksiyani xohlasa ANIQ ``commit()`` chaqiradi).
-                conn.rollback()
+                with latency_probe.db_finish(legacy=False):
+                    conn.rollback()
             except Exception:  # noqa: BLE001
                 # Rollback o'zi yiqilsa (masalan server aloqani kutilmagan
                 # tarzda uzgan bo'lsa) -- ulanish ishonchsiz, tashlab

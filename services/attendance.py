@@ -216,6 +216,36 @@ def _pair_check_in_check_out(events: list[dict], check_in_date: str) -> float | 
     return duration
 
 
+def _worked_hours_from_records(
+    shift_date: str, shift: dict | None, next_shift: dict | None, events: list[dict]
+) -> float | None:
+    """Bitta LOGICAL shift sanasi uchun ishlangan soat -- DB'ga QAYTMAYDI, faqat berilgan yozuvlardan hisoblaydi.
+    ``events`` kamida ``[shift_date, shift_date+2)`` oralig'ini qamrab olishi kerak (oraliqdan tashqari yozuvlar
+    e'tiborga olinmaydi). ``shift``/``next_shift`` — shu va ertasi kun reja smenasi (yo'q bo'lsa ``None``)."""
+    if not _is_overnight_shift(shift):
+        return _pair_check_in_check_out([e for e in events if e["event_time"][:10] == shift_date], shift_date)
+
+    shift_day = date.fromisoformat(shift_date)
+    next_day = shift_day + timedelta(days=1)
+    tz = company_time.resolve_timezone()
+
+    if next_shift is not None and next_shift.get("status") == SHIFT_STATUS_WORK:
+        next_start = _parse_hhmm(next_shift.get("planned_start") or "")
+        if next_start is not None:
+            window_end = datetime(next_day.year, next_day.month, next_day.day, next_start[0], next_start[1], tzinfo=tz)
+        else:
+            window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=tz)
+    else:
+        window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=tz)
+
+    upper = (next_day + timedelta(days=1)).isoformat()
+    window_end_iso = window_end.isoformat()
+    relevant_events = [
+        e for e in events if shift_date <= e["event_time"] < upper and e["event_time"] <= window_end_iso
+    ]
+    return _pair_check_in_check_out(relevant_events, shift_date)
+
+
 def get_worked_hours_for_day(employee_id: int, shift_date: str) -> float | None:
     """``shift_date`` -- LOGICAL SHIFT sanasi (kalendar kuni emas).
     Kunduzgi/strukturasiz kun uchun eski xatti-harakat: check_in va
@@ -230,31 +260,14 @@ def get_worked_hours_for_day(employee_id: int, shift_date: str) -> float | None:
 
     if not _is_overnight_shift(shift):
         events = attendance_repo.list_events_for_date(employee_id, shift_date)
-        return _pair_check_in_check_out(events, shift_date)
+        return _worked_hours_from_records(shift_date, shift, None, events)
 
-    shift_day = date.fromisoformat(shift_date)
-    next_day = shift_day + timedelta(days=1)
+    next_day = date.fromisoformat(shift_date) + timedelta(days=1)
     next_shift = attendance_repo.get_shift_for_date(employee_id, next_day.isoformat())
-
-    if next_shift is not None and next_shift.get("status") == SHIFT_STATUS_WORK:
-        next_start = _parse_hhmm(next_shift.get("planned_start") or "")
-        if next_start is not None:
-            window_end = datetime(
-                next_day.year, next_day.month, next_day.day, next_start[0], next_start[1],
-                tzinfo=company_time.resolve_timezone(),
-            )
-        else:
-            window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=company_time.resolve_timezone())
-    else:
-        window_end = datetime(next_day.year, next_day.month, next_day.day, 23, 59, 59, tzinfo=company_time.resolve_timezone())
-
     events = attendance_repo.list_events_for_range(
         employee_id, shift_date, (next_day + timedelta(days=1)).isoformat()
     )
-    window_end_iso = window_end.isoformat()
-    relevant_events = [e for e in events if e["event_time"] <= window_end_iso]
-
-    return _pair_check_in_check_out(relevant_events, shift_date)
+    return _worked_hours_from_records(shift_date, shift, next_shift, events)
 
 
 def _month_to_date_range(profile: dict) -> tuple[date, date] | None:
@@ -520,27 +533,7 @@ def _shift_duration_hours(planned_start: str, planned_end: str) -> float:
     return duration_minutes / 60.0
 
 
-def get_month_to_date_planned_hours(employee_id: int) -> dict | None:
-    """Oy boshidan (yoki ``hire_date``dan, qaysi biri keyinroq bo'lsa)
-    bugungacha strukturali ``employee_scheduled_shifts``dan reja soat.
-    Xodim topilmasa ``None``. Diapazondagi HAR BIR sana uchun aniq
-    ``work``/``off`` yozuvi bo'lishi SHART -- birortasi yo'q (UNKNOWN,
-    OFF deb taxmin qilinmaydi) bo'lsa ``planned_hours`` ``None`` va
-    ``missing_days_count`` shu kunlar sonini ko'rsatadi."""
-    profile = employees.get_profile(employee_id)
-    if profile is None:
-        return None
-
-    date_range = _month_to_date_range(profile)
-    if date_range is None:
-        return {"planned_hours": None, "missing_days_count": 0, "range_start": None, "range_end": None}
-
-    range_start, range_end = date_range
-    shifts = attendance_repo.get_schedule_for_range(
-        employee_id, range_start.isoformat(), (range_end + timedelta(days=1)).isoformat()
-    )
-    shifts_by_date = {shift["shift_date"]: shift for shift in shifts}
-
+def _planned_from_shifts(range_start: date, range_end: date, shifts_by_date: dict) -> dict:
     total_hours = 0.0
     missing_days_count = 0
     current = range_start
@@ -552,27 +545,52 @@ def get_month_to_date_planned_hours(employee_id: int) -> dict | None:
             total_hours += _shift_duration_hours(shift["planned_start"], shift["planned_end"])
         current += timedelta(days=1)
 
-    planned_hours = None if missing_days_count > 0 else total_hours
-
     return {
-        "planned_hours": planned_hours,
+        "planned_hours": None if missing_days_count > 0 else total_hours,
         "missing_days_count": missing_days_count,
         "range_start": range_start.isoformat(),
         "range_end": range_end.isoformat(),
     }
 
 
-def get_month_to_date_hours(employee_id: int) -> dict | None:
+def get_month_to_date_planned_hours(employee_id: int, profile: dict | None = None) -> dict | None:
+    """Oy boshidan (yoki ``hire_date``dan, qaysi biri keyinroq bo'lsa)
+    bugungacha strukturali ``employee_scheduled_shifts``dan reja soat.
+    Xodim topilmasa ``None``. Diapazondagi HAR BIR sana uchun aniq
+    ``work``/``off`` yozuvi bo'lishi SHART -- birortasi yo'q (UNKNOWN,
+    OFF deb taxmin qilinmaydi) bo'lsa ``planned_hours`` ``None`` va
+    ``missing_days_count`` shu kunlar sonini ko'rsatadi. ``profile``
+    berilsa qayta o'qilmaydi."""
+    profile = profile if profile is not None else employees.get_profile(employee_id)
+    if profile is None:
+        return None
+
+    date_range = _month_to_date_range(profile)
+    if date_range is None:
+        return {"planned_hours": None, "missing_days_count": 0, "range_start": None, "range_end": None}
+
+    range_start, range_end = date_range
+    shifts = attendance_repo.get_schedule_for_range(
+        employee_id, range_start.isoformat(), (range_end + timedelta(days=1)).isoformat()
+    )
+    return _planned_from_shifts(range_start, range_end, {shift["shift_date"]: shift for shift in shifts})
+
+
+def get_month_to_date_hours(employee_id: int, profile: dict | None = None) -> dict | None:
     """Oy boshidan (yoki ``hire_date``dan, qaysi biri keyinroq bo'lsa)
     bugungacha REJA va HAQIQIY ishlangan soat. Xodim topilmasa ``None``.
 
-    ``planned_hours`` endi FAQAT strukturali ``employee_scheduled_shifts``
-    manbasidan (``get_month_to_date_planned_hours``) keladi -- eski
-    ``employees.work_schedule`` erkin matni fallback sifatida umuman
+    ``planned_hours`` FAQAT strukturali ``employee_scheduled_shifts``
+    manbasidan keladi -- eski ``employees.work_schedule`` erkin matni
     ISHLATILMAYDI. ``actual_hours`` faqat to'liq va valid (check_in+
     check_out mavjud, interval musbat) kunlarning yig'indisi -- eski
-    tarixga umuman tegilmaydi, faqat o'qiladi."""
-    profile = employees.get_profile(employee_id)
+    tarixga umuman tegilmaydi, faqat o'qiladi.
+
+    DB so'rovlari kunlar soniga bog'liq EMAS: profil (berilmasa) 1 ta, reja smenalari butun diapazon uchun
+    1 ta (tun smenasining ertasi kuni uchun +1 kun bilan), davomat voqealari butun diapazon uchun 1 ta
+    (oxirgi kunning tun smenasi chiqishi uchun +1 kun bilan). Har kun hisobi olingan yozuvlardan bajariladi,
+    tun smenasi qoidalari (ertangi smena oynasi) ``get_worked_hours_for_day`` bilan bir xil kod orqali."""
+    profile = profile if profile is not None else employees.get_profile(employee_id)
     if profile is None:
         return None
 
@@ -584,19 +602,22 @@ def get_month_to_date_hours(employee_id: int) -> dict | None:
         }
 
     range_start, range_end = date_range
+    fetch_end = (range_end + timedelta(days=2)).isoformat()  # ertasi kun smenasi va chiqish voqealari ham kerak
+    shifts = attendance_repo.get_schedule_for_range(employee_id, range_start.isoformat(), fetch_end)
+    shifts_by_date = {shift["shift_date"]: shift for shift in shifts}
+    events = attendance_repo.list_events_for_range(employee_id, range_start.isoformat(), fetch_end)
 
-    planned = get_month_to_date_planned_hours(employee_id)
+    planned = _planned_from_shifts(range_start, range_end, shifts_by_date)
 
-    # Har bir LOGICAL shift sanasi bo'yicha (kalendar kuni bo'yicha
-    # emas) -- shuning uchun tun smenasining check_out'i keyingi
-    # kalendar kuniga tushsa ham, o'sha smena FAQAT o'zining haqiqiy
-    # boshlanish sanasida (bir marta) hisoblanadi, keyingi oy/kunga
-    # "yangi" smena sifatida sizib chiqmaydi.
+    # Har bir LOGICAL shift sanasi bo'yicha (kalendar kuni bo'yicha emas) -- tun smenasi faqat o'zining boshlanish
+    # sanasida (bir marta) hisoblanadi, keyingi oy/kunga "yangi" smena sifatida sizib chiqmaydi.
     actual_hours = 0.0
     worked_days_count = 0
     current = range_start
     while current <= range_end:
-        worked = get_worked_hours_for_day(employee_id, current.isoformat())
+        day = current.isoformat()
+        next_shift = shifts_by_date.get((current + timedelta(days=1)).isoformat())
+        worked = _worked_hours_from_records(day, shifts_by_date.get(day), next_shift, events)
         if worked is not None:
             actual_hours += worked
             worked_days_count += 1

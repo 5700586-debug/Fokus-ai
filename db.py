@@ -213,6 +213,41 @@ def _ensure_postgres_bigint_identity_columns(conn) -> None:
         )
 
 
+class _MeasuredSqliteConnection(sqlite3.Connection):
+    """Lokal/test SQLite: ``HANDLER_METRICS`` uchun SQL chaqiruvlarini sanaydi (xatti-harakat o'zgarmaydi).
+    ``executemany``/``executescript`` bitta chaqiruv hisoblanadi; commit/rollback faqat vaqtga qo'shiladi."""
+
+    def execute(self, *args, **kwargs):
+        from services import latency_probe
+
+        with latency_probe.db_execute():
+            return super().execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        from services import latency_probe
+
+        with latency_probe.db_execute():
+            return super().executemany(*args, **kwargs)
+
+    def executescript(self, *args, **kwargs):
+        from services import latency_probe
+
+        with latency_probe.db_execute():
+            return super().executescript(*args, **kwargs)
+
+    def commit(self):
+        from services import latency_probe
+
+        with latency_probe.db_finish(legacy=False):
+            return super().commit()
+
+    def rollback(self):
+        from services import latency_probe
+
+        with latency_probe.db_finish(legacy=False):
+            return super().rollback()
+
+
 def get_connection():
     if _DATABASE_URL:
         from db_postgres import PgConnection
@@ -229,12 +264,16 @@ def get_connection():
             )
             raise
 
-    conn = sqlite3.connect(_DB_FILE)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    from services import latency_probe
+
+    latency_probe.note_pool_acquire()  # SQLite'da pool yo'q: har bir ulanish ochilishi "olish" deb sanaladi
+    conn = sqlite3.connect(_DB_FILE, factory=_MeasuredSqliteConnection)
+    # PRAGMA'lar ulanish sozlamasi (SQL so'rov emas) — o'lchovga kirmasligi uchun asosiy sinfning execute'i orqali.
+    sqlite3.Connection.execute(conn, "PRAGMA journal_mode=WAL")
+    sqlite3.Connection.execute(conn, "PRAGMA foreign_keys=ON")
     # Boshqa ulanish faylni qisqa vaqt band qilib turgan bo'lsa ham darhol
     # "database is locked" xatosi bilan yiqilmasdan, biroz kutib qayta urinsin.
-    conn.execute("PRAGMA busy_timeout=5000")
+    sqlite3.Connection.execute(conn, "PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn
 

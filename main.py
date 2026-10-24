@@ -403,6 +403,32 @@ class _LatencyProbeMiddleware(BaseMiddleware):
 
 
 dp.update.outer_middleware(_LatencyProbeMiddleware())
+
+
+class _HandlerMetricsMiddleware(BaseMiddleware):
+    """``dp.message``/``dp.callback_query`` outer middleware: har bir ishlov berilgan handler uchun bitta
+    ``HANDLER_METRICS`` qatori (qarang ``services/latency_probe.measure_handler``)."""
+
+    def __init__(self, kind: str) -> None:
+        self._kind = kind
+
+    async def __call__(self, handler, event, data: dict):
+        return await latency_probe.measure_handler(self._kind, handler, event, data)
+
+
+dp.message.outer_middleware(_HandlerMetricsMiddleware("message"))
+dp.callback_query.outer_middleware(_HandlerMetricsMiddleware("callback"))
+
+
+class _HandlerNameMiddleware(BaseMiddleware):
+    """INNER middleware: filtrlar handlerni tanlagach statik funksiya nomini o'lchovga yozadi."""
+
+    async def __call__(self, handler, event, data: dict):
+        return await latency_probe.name_handler(handler, event, data)
+
+
+dp.message.middleware(_HandlerNameMiddleware())
+dp.callback_query.middleware(_HandlerNameMiddleware())
 dp.update.outer_middleware(_SandboxPreviewMiddleware())
 dp.update.outer_middleware(_ClearStaleStateMiddleware())
 
@@ -2012,6 +2038,7 @@ async def error_handler(event: ErrorEvent, bot: Bot) -> None:
 async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     bot.session.middleware(menu_screens.session_middleware)
+    bot.session.middleware(latency_probe.telegram_request_middleware)
     scheduler = inventory_bot.start_scheduler(bot)
     calibration_scheduler = calibration_bot.start_scheduler(bot)
     discipline_scheduler = discipline_bot.start_scheduler(bot)

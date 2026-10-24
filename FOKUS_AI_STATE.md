@@ -7,10 +7,10 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 ## Founder menyusi: Rol testi tugmasi — 2026-10-25
 
 - Muhammadiy so'rovi: Founder menyusidagi “🧪 Rol testi” tugmasi olib tashlanadi.
-- Branch `fix/remove-founder-role-test-button`, base `af5cf85`; merge/deploy yo'q.
+- PR #60 merge qilingan: `7680ca62d51a8dc4ed53d925610d46cdd61204f8`; Render deploy `dep-dbehjqmk1f9s73fbrrmg` LIVE, 2026-10-25 01:51:02 +05.
 - `main.py` → `build_menu`: tugmani qo'shuvchi ikki qator olib tashlandi. Qolgan asosiy 7 tugma va persistent klaviatura saqlangan. Bu menyu o'zgarishi; eski preview handlerlari yoki DB o'chirilmagan.
 - Mavjud tegishli testlar: Founder /start menyusi, 7 tugma, persistent klaviatura, barcha muhitlarda Rol testi tugmasi yashirilishi, boshqa rollar menyusi — 5 passed. Oldingi Founder menyusi nomuvofiqligi bartaraf etildi. Full suite/PostgreSQL ishlatilmadi (SQL/DB o'zgarishi yo'q).
-- Keyingi qadam: Muhammadiy tasdig'idan so'ng merge/deploy, Founder /start bilan klaviaturani yangilaydi.
+- Keyingi qadam: Founder /start bilan klaviaturani yangilaydi; haqiqiy telefonda tugma yo'qligi tasdig'i kutiladi.
 
 ## PR #59 production natijasi — 2026-10-25 (Asia/Tashkent)
 

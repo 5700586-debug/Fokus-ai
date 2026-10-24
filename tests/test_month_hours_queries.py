@@ -221,3 +221,22 @@ def test_dashboard_reads_far_fewer_rows_and_matches_legacy_view_model(monkeypatc
     assert new["points"] == old["points"]
     print(f"dashboard 31 kun: yangi sql={new_queries} pool={new_pools}; eski sql={old_queries} pool={old_pools}")
     assert new_queries < old_queries / 4 and new_queries <= 12
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_mystars_handler_reports_constant_query_count_in_handler_metrics(bot_dp, monkeypatch, capsys, anyio_backend):
+    from tests.bot_harness import send
+
+    main, bot = bot_dp
+    _today(monkeypatch, "2026-03-31")
+    user = _employee()
+    _seed(user, date(2026, 3, 1), date(2026, 4, 2))
+
+    await send(main.dp, bot, user, text="/mystars")
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("HANDLER_METRICS ")]
+    print(lines)
+    assert len(lines) == 1 and "handler=mystars_handler" in lines[0]
+    queries = int(lines[0].split("db_queries=")[1].split()[0])
+    assert queries <= 16  # 31 kunlik davrda ham kunlar soniga bog'liq emas (eski: ~150)

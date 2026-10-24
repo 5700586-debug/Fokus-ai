@@ -279,8 +279,12 @@ def _employees_keyboard(branch: str, *, exclude_user_id: int | None = None) -> I
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _simple_employee_card_text(profile: dict, work_date: str | None = None) -> str:
-    """``work_date`` — nazoratchining FAOL ish kuni (yarim tundan keyin ham davom etayotgan kun); berilmasa bugun."""
+_UNSET = object()
+
+
+def _simple_employee_card_text(profile: dict, work_date: str | None = None, time_bonus=_UNSET) -> str:
+    """``work_date`` — nazoratchining FAOL ish kuni (yarim tundan keyin ham davom etayotgan kun); berilmasa bugun.
+    ``time_bonus`` — vaqt bonusi holati (berilmasa o'qiladi); chaqiruvchi bir render ichida bir marta o'qib uzatadi."""
     today = company_time.today().isoformat()
     work_date = work_date or today
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
@@ -303,7 +307,8 @@ def _simple_employee_card_text(profile: dict, work_date: str | None = None) -> s
         lines.append("📌 Doimiy vazifalar: Ma'lumot yo'q")
 
     lines.append("")
-    time_bonus = time_bonus_service.get_today_status(profile["user_id"])
+    if time_bonus is _UNSET:
+        time_bonus = time_bonus_service.get_today_status(profile["user_id"])
     if time_bonus is None:
         lines.append("🕒 Bugungi vaqt bonusi: hali tasdiqlanmagan")
     else:
@@ -1099,16 +1104,23 @@ def register(dp: Dispatcher, openai_client) -> None:
             work_date=nazoratchi_day.active_day(actor_id, company_time.now()).work_date,
         )
 
-    def _card_text(profile: dict, actor_id: int) -> str:
-        return _simple_employee_card_text(profile, nazoratchi_day.active_day(actor_id, company_time.now()).work_date)
+    def _render_card(profile: dict, actor_id: int, *, show_time_bonus_button: bool | None = None) -> tuple[str, InlineKeyboardMarkup]:
+        """Bitta karta chizilishi: faol ish kuni va vaqt bonusi holati BIR marta hisoblanadi; matn ham, baho tugmalari
+        ham aynan shu ``work_date``dan yaratiladi. ``show_time_bonus_button=None`` — holatdan olinadi."""
+        work_date = nazoratchi_day.active_day(actor_id, company_time.now()).work_date
+        time_bonus = time_bonus_service.get_today_status(profile["user_id"])
+        show_button = (time_bonus is None) if show_time_bonus_button is None else show_time_bonus_button
+        text = _simple_employee_card_text(profile, work_date, time_bonus)
+        keyboard = _employee_card_keyboard(
+            profile.get("branch"), profile["user_id"], show_time_bonus_button=show_button, work_date=work_date
+        )
+        return text, keyboard
 
     async def _render_employee_card(callback: CallbackQuery, profile: dict) -> None:
         user_id = profile["user_id"]
         if callback.message:
-            await callback.message.edit_text(
-                _card_text(profile, callback.from_user.id),
-                reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
-            )
+            text, keyboard = _render_card(profile, callback.from_user.id)
+            await callback.message.edit_text(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data.startswith(_CB_EMPLOYEE_PREFIX))
     async def employee_pick(callback: CallbackQuery) -> None:
@@ -1139,10 +1151,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.answer("✅ Vaqt bonusi tasdiqlandi." if granted else "ℹ️ Bugun uchun allaqachon tasdiqlangan.")
 
         if callback.message:
-            await callback.message.edit_text(
-                _card_text(profile, callback.from_user.id),
-                reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=False),
-            )
+            text, keyboard = _render_card(profile, callback.from_user.id, show_time_bonus_button=False)
+            await callback.message.edit_text(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data.startswith(_CB_GRADE_PREFIX))
     async def grade_pick(callback: CallbackQuery) -> None:
@@ -1200,12 +1210,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
 
         if callback.message:
-            await callback.message.edit_text(
-                _card_text(profile, callback.from_user.id),
-                reply_markup=_card_keyboard(
-                    profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None
-                ),
-            )
+            text, keyboard = _render_card(profile, callback.from_user.id)
+            await callback.message.edit_text(text, reply_markup=keyboard)
 
     # --------------------------------------------------------- ball ayirish --
 

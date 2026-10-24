@@ -163,8 +163,9 @@ async def session_middleware(make_request, bot: Bot, method):
     capture = _capture.get()
     if (
         capture is not None and capture.kind == "screen"
-        and isinstance(method, SendMessage) and method.chat_id == capture.chat_id and capture.chat_id > 0
-        and method.reply_markup is None and not _is_denial(method.text)
+        and (isinstance(method, SendMessage) or (isinstance(method, SendPhoto) and method.caption))
+        and method.chat_id == capture.chat_id and capture.chat_id > 0
+        and method.reply_markup is None and not _is_denial(getattr(method, "text", None) or getattr(method, "caption", None))
     ):
         markup = _keyboard_for(capture.chat_id)
         if markup is not None:
@@ -230,33 +231,41 @@ async def _commit(bot: Bot, capture: _Capture) -> None:
             return
 
         key = screen_key(chat_id)
-        old_rows = []
-        for old_key in (key, flow_key(chat_id)):  # eski ekranlar + tashlab ketilgan oqimning vaqtinchalik savollari
-            try:
-                old_rows += repo.pop_messages(WORKFLOW, old_key)
-            except Exception as error:  # noqa: BLE001
-                logger.error("Menyu ekranlari ro'yxatini olib bo'lmadi (chat=%s): %r", chat_id, error)
+        target_key = key if capture.kind != "flow" else flow_key(chat_id)
+        tracked_ids = [screen.message_id for screen in capture.screens] if capture.kind in ("screen", "flow") else []
+        try:
+            old_rows = repo.replace_menu_messages(
+                WORKFLOW, (key, flow_key(chat_id)), target_key, chat_id, tracked_ids,
+                protected_id=protected, protect_all=protect_all,
+            )
+        except Exception as error:  # noqa: BLE001
+            # Failed exchange rolls back: leave the old messages and their keyboard alone.
+            logger.error("Menyu kuzatuvini almashtirib bo'lmadi (chat=%s): %r", chat_id, error)
+            return
 
-        for row in old_rows:
-            if row["message_id"] in new_ids or row["message_id"] == capture.tap_message_id:
-                continue
-            if protect_all or (protected is not None and row["message_id"] == protected):
-                _track_id(key, row["chat_id"], row["message_id"])  # saqlanadi va kuzatuvda qoladi
-                continue
-            await _remove(bot, row["chat_id"], row["message_id"])  # o'chmasa eskirgan deb belgilanadi
-
-        if capture.kind in ("screen", "flow"):  # "keep" (muhim karta) kuzatilmaydi
-            target_key = key if capture.kind == "screen" else flow_key(chat_id)
-            for screen in capture.screens:
-                chat_cleanup.track(WORKFLOW, target_key, screen)
-        # Joriy menyu tanlash matni ham o'chadi; o'chmasa keyingi almashishda qayta uriniladi.
-        if not await _remove_tap(bot, chat_id, capture.tap_message_id):
-            _track_id(key, chat_id, capture.tap_message_id)
+        old_ids = {row["message_id"] for row in old_rows} - new_ids - {capture.tap_message_id}
+        await _remove_batch(bot, chat_id, sorted(old_ids), capture.tap_message_id, key)
 
         _latest_tap[chat_id] = capture.tap_message_id
         _latest_tap.move_to_end(chat_id)
         while len(_latest_tap) > _MAX_CHATS:
             _latest_tap.popitem(last=False)
+
+
+async def _remove_batch(bot: Bot, chat_id: int, old_ids: list[int], tap_id: int, key: str) -> None:
+    """Telegram accepts at most 100 IDs. On failure keep the individual fallback semantics."""
+    ids = list(dict.fromkeys([*old_ids, tap_id]))
+    for offset in range(0, len(ids), 100):
+        chunk = ids[offset:offset + 100]
+        try:
+            await bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+        except Exception:  # noqa: BLE001
+            for mid in chunk:
+                if mid == tap_id:
+                    if not await _remove_tap(bot, chat_id, mid):
+                        _track_id(key, chat_id, mid)
+                else:
+                    await _remove(bot, chat_id, mid)
 
 
 async def _remove_tap(bot: Bot, chat_id: int, message_id: int) -> bool:

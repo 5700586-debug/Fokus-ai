@@ -4,6 +4,16 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Menyu qatnovlarini qisqartirish — tayyorlanmoqda (2026-10-25)
+
+- Branch `fix/menu-latency-final`, base `c19ab9a`; merge/deploy yo'q. Maqsad: “Yulduzlarim” 1500 ms dan tez; production'da hali isbotlanmagan.
+- Menyu kuzatuvi bir atomik tranzaksiyada: ikki kalitdan DELETE RETURNING + yangi ekranlar uchun bitta CTE INSERT; tracking ID kerak bo'lmagani uchun ichki lastval qatnovi yo'q. Boshqa workflow/chat, himoyalangan klaviatura egasi va restartdan keyingi noma'lum egalar saqlanadi. Xatoda tranzaksiya rollback bo'ladi, eski ekranlar o'chirilmaydi.
+- Telegram o'chirishlari 100 tadan oshmagan deleteMessages guruhlariga birlashtirildi; xatoda avvalgi individual delete/inline/stale/tap retry himoyasi saqlangan. Eski chat tarixi skanerlanmaydi.
+- Suratli Yulduzlarim matni 1024 UTF-16 birlikdan oshmasa, surat+caption bitta xabar; uzun tarixda eski ikki xabar, foto xatosida to'liq matn fallback. Reply-klaviatura captionli menyu suratida ham qayta yuboriladi.
+- Lokal haqiqiy middleware testi: suratli Yulduzlarim <=11 execute / 2 pool olish, bitta send + bitta batch delete. Oldingi production: 17 execute / 5 pool, suratli takroriy ekran 2 send va 3 delete. SQLite vaqti production tezligi emas.
+- SQLite targeted: 130 passed, 1 failed (Founder “Rol testi” testi — oldindan mavjud); undan torroq menyu/dashboard/cleanup to'plami 80 passed. PostgreSQL targeted CI natijasi hali kutilmoqda; full suite ishlatilmadi.
+- Keyingi qadam: PostgreSQL targeted tekshiruv, Muhammadiy tasdig'idan keyin deploy, ikki real Yulduzlarim o'lchovi. 1500 ms maqsad faqat production o'lchov bilan yopiladi.
+
 ## Production tezlik tekshiruvi — 2026-10-25 (Asia/Tashkent)
 
 - PR #58 merge qilingan: `e38312f76fe95e27c6be7fedb6705f496539959c`; Render `fokus-ai-singapore`, deploy `dep-dbeh8uuq1p3s73e9aicg` LIVE (2026-10-25 01:27:50 +05). Health HTTP 200. Eski instance SIGTERM 01:28:50; undan keyingi tekshirilgan loglarda yangi xato yo'q.

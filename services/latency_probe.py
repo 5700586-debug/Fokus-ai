@@ -208,9 +208,9 @@ def end_update() -> None:
 # yuritadi, bitta o'lchovni ikki marta qo'shmaydi.
 #
 # Ma'nolari (HECH QAYERDA "tugma bosilgandan beri" EMAS):
-#   total_ms       — handlerga KIRISHDAN (marshrutlash/filtrlar mos kelib, ``dp.message``/``dp.callback_query``
-#                    outer middleware ishga tushgan payt) handler QAYTGUNIGACHA. Telegram'dan kelish vaqti,
-#                    FSM/event-isolation navbati va filtr tekshiruvi KIRMAYDI.
+#   total_ms       — ``dp.message``/``dp.callback_query`` outer middleware'ga KIRISHDAN (update-darajasidagi
+#                    middleware'lar va FSM/event-isolation navbatidan KEYIN) qaytguncha: filtrlar, handler va menyu
+#                    tozalash kiradi. Telegram'dan kelish va FSM navbati KIRMAYDI. Handler mos kelmasa qator yo'q.
 #   db_queries     — bajarilgan SQL ``execute`` chaqiruvlari soni. ``executemany`` va ``executescript`` BITTA
 #                    chaqiruv hisoblanadi. Postgres'da ``INSERT``dan keyingi ichki ``SELECT lastval()`` ham
 #                    haqiqiy tarmoq qatnovi bo'lgani uchun alohida sanaladi. commit/rollback SONGA QO'SHILMAYDI.
@@ -232,6 +232,7 @@ class _Metrics:
     pool_acquires: int = 0
     pool_total: float = 0.0
     telegram_total: float = 0.0
+    handler: str | None = None  # haqiqiy mos handler nomi (inner middleware o'rnatadi)
 
 
 _metrics: ContextVar["_Metrics | None"] = ContextVar("fokus_handler_metrics", default=None)
@@ -312,10 +313,25 @@ def _handler_name(data: dict) -> str:
         return "unknown"
 
 
+async def name_handler(handler, event, data: dict):
+    """INNER middleware (``dp.message.middleware``): filtrlar handlerni tanlagandan KEYIN ishlaydi, shuning uchun
+    ``data["handler"]`` haqiqiy mos handler (outer middleware'da u hali Dispatcher'ning ``_listen_update``i bo'ladi).
+    Faqat statik funksiya nomini yozadi."""
+    try:
+        metrics = _metrics.get()
+        if metrics is not None:
+            metrics.handler = _handler_name(data)
+    except Exception:  # noqa: BLE001
+        pass
+    return await handler(event, data)
+
+
 async def measure_handler(kind: str, handler, event, data: dict):
-    """``dp.message``/``dp.callback_query`` outer middleware ichida chaqiriladi: handler tugagach bitta
-    ``HANDLER_METRICS`` qatori. O'lchov xatosi oqimni buzmaydi; handler istisnosi o'zgarishsiz qayta ko'tariladi.
-    ContextVar ``finally``da tiklanadi."""
+    """``dp.message``/``dp.callback_query`` OUTER middleware: hisoblagichlarni boshlaydi; handler tugagach (agar
+    haqiqiy handler mos kelgan bo'lsa — ``name_handler`` nomni yozgan) bitta ``HANDLER_METRICS`` qatori yozadi.
+    ``total_ms`` outer middleware'ga kirishdan (update-darajasidagi middleware'lar va FSM navbatidan KEYIN)
+    qaytguncha: marshrutlash/filtrlar, handler va menyu tozalash kiradi. Handler mos kelmasa qator yozilmaydi.
+    O'lchov xatosi oqimni buzmaydi; handler istisnosi o'zgarishsiz qayta ko'tariladi; ContextVar ``finally``da tiklanadi."""
     try:
         from config import HANDLER_METRICS_ENABLED
 
@@ -336,14 +352,15 @@ async def measure_handler(kind: str, handler, event, data: dict):
         raise
     finally:
         try:
-            print(
-                "HANDLER_METRICS "
-                f"handler={_handler_name(data)} kind={kind} total_ms={_ms(time.monotonic() - started)} "
-                f"db_queries={metrics.db_queries} db_ms={_ms(metrics.db_total)} "
-                f"pool_acquires={metrics.pool_acquires} pool_ms={_ms(metrics.pool_total)} "
-                f"telegram_ms={_ms(metrics.telegram_total)} outcome={outcome}",
-                flush=True,
-            )
+            if metrics.handler is not None:
+                print(
+                    "HANDLER_METRICS "
+                    f"handler={metrics.handler} kind={kind} total_ms={_ms(time.monotonic() - started)} "
+                    f"db_queries={metrics.db_queries} db_ms={_ms(metrics.db_total)} "
+                    f"pool_acquires={metrics.pool_acquires} pool_ms={_ms(metrics.pool_total)} "
+                    f"telegram_ms={_ms(metrics.telegram_total)} outcome={outcome}",
+                    flush=True,
+                )
         except Exception:  # noqa: BLE001
             pass
         try:

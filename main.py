@@ -418,6 +418,17 @@ class _HandlerMetricsMiddleware(BaseMiddleware):
 
 dp.message.outer_middleware(_HandlerMetricsMiddleware("message"))
 dp.callback_query.outer_middleware(_HandlerMetricsMiddleware("callback"))
+
+
+class _HandlerNameMiddleware(BaseMiddleware):
+    """INNER middleware: filtrlar handlerni tanlagach statik funksiya nomini o'lchovga yozadi."""
+
+    async def __call__(self, handler, event, data: dict):
+        return await latency_probe.name_handler(handler, event, data)
+
+
+dp.message.middleware(_HandlerNameMiddleware())
+dp.callback_query.middleware(_HandlerNameMiddleware())
 dp.update.outer_middleware(_SandboxPreviewMiddleware())
 dp.update.outer_middleware(_ClearStaleStateMiddleware())
 

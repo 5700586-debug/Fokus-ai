@@ -244,3 +244,24 @@ async def test_task_cancelled_before_first_step_does_not_hang_shutdown(monkeypat
     await asyncio.wait_for(db_startup_probe.shutdown(holder, timeout=0.05), 3)
 
     assert holder == []
+
+
+async def test_pool_stays_open_even_after_the_thread_wait_timeout_until_the_connection_is_returned(monkeypatch, capsys):
+    gate, events, holder, conn = await _start_gated(monkeypatch)
+    try:
+        async def main_finally():
+            await db_startup_probe.shutdown(holder, timeout=0.05, thread_timeout=0.2)  # ikkala kutish muddati qisqa
+            events.append("pool_closed")
+
+        closing = asyncio.create_task(main_finally())
+        await asyncio.sleep(0.8)  # task timeout'i VA oqim kutish muddati o'tib ketdi, DB ishi hamon ketmoqda
+
+        assert not closing.done() and "pool_closed" not in events and not holder[0].done.is_set()
+        assert "outcome=waiting stage=shutdown" in capsys.readouterr().out  # bitta xavfsiz ogohlantirish
+
+        gate.set()  # DB ishi tugadi, ulanish qaytadi
+        await asyncio.wait_for(closing, 5)
+
+        assert events == ["connection_returned", "pool_closed"] and holder == [] and conn.closed
+    finally:
+        gate.set()

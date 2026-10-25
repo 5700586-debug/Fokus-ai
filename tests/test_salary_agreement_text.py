@@ -18,7 +18,7 @@ SAMPLE = (
     "Yusufov Sultonxon — Saturn Charhiy\nTarif: 3\nFiks: 1 800 000\nOyiga: 28 kun\nKuniga: 11 soat\n"
     "Natija bonusi: 700 000\nBoshlanishi: 01.10.2026"
 )
-EXPECTED = {"tariff": 3, "fixed_salary": 1_800_000, "work_days": 28, "daily_minutes": 660, "result_bonus_cap": 700_000, "effective_from": "2026-10-01"}
+EXPECTED = {"tariff": 3, "fixed_salary": 1_800_000, "work_days": 28, "daily_minutes": 660, "effective_from": "2026-10-01"}
 
 
 @pytest.fixture
@@ -57,11 +57,12 @@ async def _pick(main, bot, user_id):
 def _values(text):
     result = sat.parse_text(text)
     assert not result.problems, result.problems
-    return {k: v for k, v in result.values.items() if k != "employee"}, result.values.get("employee")
+    return {k: v for k, v in result.values.items() if k not in ("employee", "result_bonus_cap", "bonus_none")}, result.values.get("employee")
 
 
 def test_sample_text_is_exact_and_old_name_removed():
-    assert bot_module.SAMPLE == "\n".join(SAMPLE.split("\n")[1:])  # tanlangan xodimdan keyin namuna — faqat hisob ma'lumotlari
+    assert bot_module.SAMPLE == "Tarif: 3\nFiks: 2 500 000\nOyiga: 28 kun\nKuniga: 10 soat\nBoshlanishi: 01.10.2026"
+    assert "onus" not in bot_module.SAMPLE and "700" not in bot_module.SAMPLE
     import inspect
 
     assert "Eshmat" not in inspect.getsource(bot_module) and "Shermatov" not in inspect.getsource(bot_module)
@@ -95,7 +96,6 @@ def test_common_spelling_mistakes_and_formats():
 def test_ambiguous_amount_and_date_are_asked_not_guessed():
     result = sat.parse_text("Fiks: 1800\nNatija bonusi: 700\nBoshlanishi: 01.10\nOyiga: 28 kun")
     assert "fixed_salary" not in result.values and "fixed_salary" in result.problems
-    assert "result_bonus_cap" not in result.values and "result_bonus_cap" in result.problems
     assert "effective_from" not in result.values and result.values["work_days"] == 28
 
 
@@ -127,7 +127,7 @@ async def test_list_does_not_pick_employee_or_create_agreement_and_nothing_saved
     assert "Yusufov Sultonxon" in _text(prompt) and "Tarif: 3" in _text(prompt)
     card = await send(main.dp, bot, FOUNDER_ID, text=SAMPLE.replace("Yusufov Sultonxon", "Юсуфов Султонхон").replace("Saturn Charhiy", "Сатурн Чархий"))
     text = _text(card)
-    assert "Yusufov Sultonxon" in text and "1 800 000" in text and "700 000" in text and "kafolatlangan to‘lov emas" in text
+    assert "Yusufov Sultonxon" in text and "1 800 000" in text and "700 000" not in text and "Natija bonusi" not in text
     assert any(b.startswith("sagr:save:") for b in _buttons(card))
     assert _count("salary_agreements") == 0 and _count("salary_agreement_consents") == 0
     assert not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]  # xodimga hech narsa ketmagan
@@ -193,7 +193,7 @@ async def test_reordered_text_makes_card_without_extra_questions(bot_dp):
     card = await send(main.dp, bot, FOUNDER_ID, text=_compose("end"))
     text = _text(card)
     assert "Yusufov Sultonxon" in text and B1 in text and "1 800 000" in text and "28 kun" in text
-    assert "11 soat" in text and "700 000" in text and "01.10.2026" in text
+    assert "11 soat" in text and "700 000" not in text and "01.10.2026" in text
     assert any(b.startswith("sagr:save:") for b in _buttons(card))
     assert _count("salary_agreements") == 0 and _count("salary_agreement_consents") == 0
     assert not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]
@@ -209,6 +209,6 @@ async def test_short_amount_answer_completes_card_and_keeps_other_data(bot_dp):
     card = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
     out = _text(card)
     assert "Yusufov Sultonxon" in out and "1 800 000" in out and "28 kun" in out and "11 soat" in out
-    assert "700 000" in out and "01.10.2026" in out and "Tarif: 3" in out
+    assert "700 000" not in out and "01.10.2026" in out and "Tarif: 3" in out
     assert any(b.startswith("sagr:save:") for b in _buttons(card))
     assert _count("salary_agreements") == 0 and not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]

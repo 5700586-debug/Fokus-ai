@@ -13,7 +13,7 @@ pytestmark = pytest.mark.anyio
 
 A, B, C, D, E = 893001, 893002, 893003, 893004, 893005
 B1, B2 = RECRUITING_BRANCH_NAMES[0], RECRUITING_BRANCH_NAMES[1]
-TERMS = "Tarif: 3\nFiks: 1 800 000\nOyiga: 28 kun\nKuniga: 11 soat\nNatija bonusi: 700 000\nBoshlanishi: 01.10.2026"
+TERMS = "Tarif: 3\nFiks: 2 500 000\nOyiga: 28 kun\nKuniga: 10 soat\nBoshlanishi: 01.10.2026"
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ async def test_new_for_existing_creates_new_version_keeps_history_and_cancel_kee
     prompt = await _cb(main, bot, f"sagr:new:{B}")
     assert "Karimov Bobur" in _text(prompt) and "Tarif: 3" in _text(prompt)
     card = await send(main.dp, bot, FOUNDER_ID, text=TERMS.replace("01.10.2026", "01.06.2027"))
-    assert "Karimov Bobur" in _text(card) and "1 800 000" in _text(card)
+    assert "Karimov Bobur" in _text(card) and "2 500 000" in _text(card)
     assert sa.list_history(B) == old_rows and _to(bot, B) == []  # tasdiqlashgacha yozuv/xabar yo'q
     save = next(d for d in _buttons(card) if d.startswith("sagr:save:"))
     await _cb(main, bot, "sagr:cancel")
@@ -149,7 +149,7 @@ async def test_new_for_existing_creates_new_version_keeps_history_and_cancel_kee
     card = await send(main.dp, bot, FOUNDER_ID, text=TERMS.replace("01.10.2026", "01.06.2027"))
     saved = await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
     history = sa.list_history(B)
-    assert len(history) == 2 and history[0] == old_rows[0] and history[1]["fixed_salary"] == 1_800_000
+    assert len(history) == 2 and history[0] == old_rows[0] and history[1]["fixed_salary"] == 2_500_000
     assert _to(bot, B) and "Xodim tasdig'i kutilmoqda" in _text(saved)
     assert _count("salary_agreement_consents") == 2
 
@@ -159,12 +159,12 @@ async def test_selected_employee_is_not_replaced_by_name_in_text_and_other_data_
     _seed()
     await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
     await _cb(main, bot, f"sagr:new:{A}")
-    asked = await send(main.dp, bot, FOUNDER_ID, text=f"Karimov Bobur — {B2}\n" + TERMS.replace("1 800 000", "1800"))
+    asked = await send(main.dp, bot, FOUNDER_ID, text=f"Karimov Bobur — {B2}\n" + TERMS.replace("2 500 000", "2500"))
     assert "Fiks oylik qancha" in _text(asked)
-    card = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
+    card = await send(main.dp, bot, FOUNDER_ID, text="2,5 mln")
     out = _text(card)
-    assert "Yusufov Sultonxon" in out and "Karimov" not in out and "1 800 000" in out
-    assert "28 kun" in out and "11 soat" in out and "700 000" in out and "01.10.2026" in out
+    assert "Yusufov Sultonxon" in out and "Karimov" not in out and "2 500 000" in out
+    assert "28 kun" in out and "10 soat" in out and "700 000" not in out and "01.10.2026" in out
     await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
     assert [r["employee_id"] for r in sa.list_history(A)] == [A] and sa.list_history(B)[0]["fixed_salary"] == 2_000_000
 
@@ -229,7 +229,7 @@ async def test_start_removes_old_reply_keyboard_and_collecting_is_not_active_whi
     _seed()
     sent = await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
     assert isinstance(sent[0].reply_markup, ReplyKeyboardRemove) and "xodimni tanlang" in _text(sent)
-    for text in ("Tarif 3", "Fiks 1 800 000", "Yusufov Sultonxon"):
+    for text in ("Tarif 3", "Fiks 2 500 000", "Yusufov Sultonxon"):
         reaction = await send(main.dp, bot, FOUNDER_ID, text=text)
         assert _no_agreement_reaction(reaction), text
     assert sa.list_history(A) == []
@@ -244,7 +244,7 @@ async def test_stale_navigation_buttons_are_not_read_as_agreement_text(bot_dp, s
     await _cb(main, bot, f"sagr:new:{A}")
     reaction = await send(main.dp, bot, FOUNDER_ID, text=stale)
     assert _no_agreement_reaction(reaction) and "xodimni tanlang" in _text(reaction)
-    follow = await send(main.dp, bot, FOUNDER_ID, text="Fiks 1 800 000")
+    follow = await send(main.dp, bot, FOUNDER_ID, text="Fiks 2 500 000")
     assert _no_agreement_reaction(follow)  # qoralama bekor, kiritish davom etmaydi
     await _cb(main, bot, old_save)
     assert _nothing_written_or_sent(bot)
@@ -280,7 +280,7 @@ async def test_leaving_to_other_menu_clears_draft(bot_dp):
     _seed()
     old_save = await _draft(main, bot)
     await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
-    reaction = await send(main.dp, bot, FOUNDER_ID, text="Fiks 1 800 000")
+    reaction = await send(main.dp, bot, FOUNDER_ID, text="Fiks 2 500 000")
     assert _no_agreement_reaction(reaction)
     await _cb(main, bot, old_save)
     assert _nothing_written_or_sent(bot)
@@ -313,17 +313,17 @@ async def _pick_and_send(main, bot, text, user_id=A):
     return await send(main.dp, bot, FOUNDER_ID, text=text)
 
 
-@pytest.mark.parametrize("line", ["💵 Fiks: 1 800 000", "• Fiks: 1 800 000", "— Fiks 1 800 000", "✅ fiks: 1.800.000"])
+@pytest.mark.parametrize("line", ["💵 Fiks: 2 500 000", "• Fiks: 2 500 000", "— Fiks 2 500 000", "✅ fiks: 2.500.000"])
 async def test_symbol_prefixed_input_is_not_navigation_and_keeps_draft(bot_dp, line):
     main, bot = bot_dp
     _seed()
-    asked = await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    asked = await _pick_and_send(main, bot, TERMS.replace("Fiks: 2 500 000\n", ""))
     assert "Fiks oylik qancha" in _text(asked)
     card = await send(main.dp, bot, FOUNDER_ID, text=line)
     out = _text(card)
-    assert "xodimni tanlang" not in out and "1 800 000" in out and "Yusufov" in out
+    assert "xodimni tanlang" not in out and "2 500 000" in out and "Yusufov" in out
     assert any(d.startswith("sagr:save:") for d in _buttons(card))
-    assert "28 kun" in out and "700 000" in out  # oldingi maydonlar saqlangan
+    assert "28 kun" in out and "700 000" not in out  # oldingi maydonlar saqlangan
     assert sa.list_history(A) == []
 
 
@@ -339,13 +339,13 @@ async def test_bullet_tariff_line_is_input(bot_dp):
 async def test_not_understood_reply_keeps_draft_and_short_answer_continues(bot_dp):
     main, bot = bot_dp
     _seed()
-    await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    await _pick_and_send(main, bot, TERMS.replace("Fiks: 2 500 000\n", ""))
     again = await send(main.dp, bot, FOUNDER_ID, text="🤷 bilmayman")
     assert "Fiks oylik qancha" in _text(again) and "xodimni tanlang" not in _text(again)
-    card = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
+    card = await send(main.dp, bot, FOUNDER_ID, text="2,5 mln")
     out = _text(card)
     assert any(d.startswith("sagr:save:") for d in _buttons(card))
-    assert "Yusufov" in out and "1 800 000" in out and "28 kun" in out and "11 soat" in out and "700 000" in out
+    assert "Yusufov" in out and "2 500 000" in out and "28 kun" in out and "10 soat" in out and "700 000" not in out
 
 
 async def test_page_button_from_old_message_clears_draft_and_token(bot_dp):
@@ -363,9 +363,9 @@ async def test_page_button_from_old_message_clears_draft_and_token(bot_dp):
 async def test_page_button_during_collecting_clears_draft(bot_dp):
     main, bot = bot_dp
     _seed()
-    await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    await _pick_and_send(main, bot, TERMS.replace("Fiks: 2 500 000\n", ""))
     await _cb(main, bot, "sagr:pg:0")
-    reaction = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
+    reaction = await send(main.dp, bot, FOUNDER_ID, text="2 500 000")
     assert _no_agreement_reaction(reaction) and sa.list_history(A) == []
 
 
@@ -376,9 +376,91 @@ async def test_exact_navigation_texts_still_leave_the_draft(bot_dp, stale):
     old_save = await _draft(main, bot)
     await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
     await _cb(main, bot, f"sagr:new:{A}")
-    await send(main.dp, bot, FOUNDER_ID, text=TERMS.replace("Fiks: 1 800 000\n", ""))
+    await send(main.dp, bot, FOUNDER_ID, text=TERMS.replace("Fiks: 2 500 000\n", ""))
     await send(main.dp, bot, FOUNDER_ID, text=stale)
-    follow = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
+    follow = await send(main.dp, bot, FOUNDER_ID, text="2 500 000")
     assert _no_agreement_reaction(follow)
     await _cb(main, bot, old_save)
     assert _nothing_written_or_sent(bot)
+
+
+# ------------------------------------------------ natija bonusi olib tashlandi --
+
+NOTE = "Oylik bonus: 140 ⭐ — 700 000 so'mgacha ishlab topishingiz mumkin. 1 ⭐ = 5 000 so'm."
+
+
+async def test_pick_then_five_fields_card_has_no_bonus_and_nothing_saved_or_sent(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    prompt = await _pick_and_send_prompt(main, bot)
+    assert "Natija bonusi" not in prompt and "700" not in prompt and "eng ko'pi" not in prompt
+    card = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    out = _text(card)
+    assert "Yusufov" in out and "Tarif: 3" in out and "2 500 000" in out and "28 kun" in out and "10 soat" in out and "01.10.2026" in out
+    assert "onus" not in out and "⭐" not in out and "700" not in out
+    assert any(d.startswith("sagr:save:") for d in _buttons(card))
+    assert sa.list_history(A) == [] and _to(bot, A) == [] and _count("salary_agreement_consents") == 1
+
+
+async def _pick_and_send_prompt(main, bot):
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    return _text(await _cb(main, bot, f"sagr:new:{A}"))
+
+
+async def test_bonus_text_in_input_is_ignored_and_saved_value_is_null_and_employee_gets_exact_note(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    card = await send(main.dp, bot, FOUNDER_ID, text=TERMS + "\nNatija bonusi: 700 000")
+    assert "onus" not in _text(card) and "700" not in _text(card)
+    saved = await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
+    row = sa.list_history(A)[0]
+    assert row["result_bonus_cap"] is None and row["fixed_salary"] == 2_500_000 and row["daily_minutes"] == 600
+    employee_msgs = _to(bot, A)
+    assert employee_msgs and NOTE in _text(employee_msgs)
+    assert NOTE not in _text([m for m in bot.sent if getattr(m, "chat_id", None) == FOUNDER_ID])
+    mine = await send(main.dp, bot, A, text="/mykelishuv")
+    assert NOTE in _text(mine)
+    shown = await _cb(main, bot, f"sagr:show:{A}")  # Founder ko'rinishida bonus matni yo'q
+    assert NOTE not in _text(shown) and "700 000" not in _text(shown)
+
+
+@pytest.mark.parametrize("line", ["Fiks oylik 2.500.000", "Oylik fiks: 2 500 000", "Fiks: 2500000"])
+async def test_three_fixed_spellings_read_as_same_amount(bot_dp, line):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    text = f"Tarif: 3\n{line}\nOyiga: 28 kun\nKuniga: 10 soat\nBoshlanishi: 01.10.2026"
+    card = await send(main.dp, bot, FOUNDER_ID, text=text)
+    assert "2 500 000" in _text(card) and any(d.startswith("sagr:save:") for d in _buttons(card))
+
+
+async def test_long_labels_and_days_are_not_taken_as_amount(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    text = "Oylik ish kunlari 28 kun\nKunlik ish soati 10 soat\nAmal qilish sanasi 01.10.2026\nFiks oylik 2.500.000\nAmaldagi kelishuv 3"
+    asked = await send(main.dp, bot, FOUNDER_ID, text=text)
+    out = _text(asked)
+    assert "Tarif raqami" in out and "⚠️" not in out  # faqat tarif so'raladi; boshqa maydon xatosi ko'rsatilmaydi
+    card = await send(main.dp, bot, FOUNDER_ID, text="3")
+    c = _text(card)
+    assert "2 500 000" in c and "28 kun" in c and "10 soat" in c and "01.10.2026" in c and "Tarif: 3" in c
+
+
+async def test_each_question_shows_only_its_own_field_error(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    asked = await send(main.dp, bot, FOUNDER_ID, text="Fiks: 2500\nOyiga: 40 kun\nKuniga: 10 soat\nTarif: 3")
+    out = _text(asked)
+    assert "Aniq yozing" in out and "1 dan 31 gacha" not in out and "Fiks oylik qancha" in out
+    asked = await send(main.dp, bot, FOUNDER_ID, text="2,5 mln")
+    out = _text(asked)
+    assert "1 dan 31 gacha" in out and "Aniq yozing" not in out and "Oyiga necha ish kuni" in out
+    asked = await send(main.dp, bot, FOUNDER_ID, text="28")
+    assert "sanadan boshlanadi" in _text(asked) and "⚠️" not in _text(asked)

@@ -279,12 +279,18 @@ def mark_delivery(agreement_id: int, ok: bool) -> None:
     repo.set_delivery(agreement_id, DELIVERY_SENT if ok else DELIVERY_FAILED, _now_iso())
 
 
-def consent_status_text(agreement: dict) -> str:
-    """Xodim va Founder uchun aniq holat. Rozilik jadvalida qatori yo'q (eski) kelishuvga rozilik TALAB QILINMAGAN."""
-    consent = repo.get_consent(agreement["id"])
+_UNSET = object()
+
+
+def consent_status_text(agreement: dict, consent=_UNSET, issue=_UNSET) -> str:
+    """Xodim va Founder uchun aniq holat. Rozilik jadvalida qatori yo'q (eski) kelishuvga rozilik TALAB QILINMAGAN.
+    ``consent``/``issue`` oldindan o'qilgan bo'lsa (``employee_cards``) qayta so'ralmaydi."""
+    if consent is _UNSET:
+        consent = repo.get_consent(agreement["id"])
     if consent is None:
         return "Rozilik talab qilinmagan (eski kelishuv)"
-    issue = repo.get_issue_for_agreement(agreement["id"])
+    if issue is _UNSET:
+        issue = repo.get_issue_for_agreement(agreement["id"])
     question = ""
     if issue is not None:
         question = "\n❓ Xodim savol bergan: " + (
@@ -307,6 +313,29 @@ def record_consent(agreement_id: int, user_id: int) -> str:
     if not is_live(agreement):
         return CONSENT_SUPERSEDED
     return CONSENT_RECORDED if repo.record_consent(agreement_id, user_id, _now_iso()) else CONSENT_ALREADY
+
+
+def employee_cards(employee_id: int) -> list[dict]:
+    """``/mykelishuv`` uchun: amaldagi (bo'lsa) va har kelajak sanadagi oxirgi kelishuv — tartib va qoidalar ``get_current``/
+    ``get_all_upcoming`` bilan bir xil, lekin 3 ta so'rov bilan (kartalar soniga bog'liq emas). Har element:
+    ``agreement``, ``kind`` (current|upcoming), ``consent``, ``issue``, ``pending`` (rozilik qatori bor, tasdiqlanmagan;
+    ko'rsatilgan kartalar doim 'jonli'). Faqat o'qish; callbacklar baribir bazadan yangidan tekshiradi."""
+    agreements, consents, issues = repo.employee_snapshot(employee_id)
+    today = company_time.today().isoformat()
+    past = [a for a in agreements if a["effective_from"] <= today]
+    current = max(past, key=lambda a: (a["effective_from"], a["id"])) if past else None
+    winners: dict[str, dict] = {}
+    for a in agreements:
+        if a["effective_from"] > today and (a["effective_from"] not in winners or a["id"] > winners[a["effective_from"]]["id"]):
+            winners[a["effective_from"]] = a
+    ordered = ([(current, "current")] if current else []) + [(winners[d], "upcoming") for d in sorted(winners)]
+    return [
+        {
+            "agreement": a, "kind": kind, "consent": consents.get(a["id"]), "issue": issues.get(a["id"]),
+            "pending": consents.get(a["id"]) is not None and not consents[a["id"]]["consented_at"],
+        }
+        for a, kind in ordered
+    ]
 
 
 def is_live(agreement: dict) -> bool:

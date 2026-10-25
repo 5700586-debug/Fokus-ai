@@ -190,14 +190,20 @@ def _employee_list(page: int) -> tuple[str, InlineKeyboardMarkup]:
     return text, _kb(*rows)
 
 
+def _card_status(agreement: dict, kind: str) -> str:
+    if kind == "current":
+        return "🟢 Amaldagi kelishuv"
+    return f"⏭ Kelajakdagi kelishuv ({sa.format_date(agreement['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"
+
+
 def _agreement_cards(employee_id: int) -> list[tuple[dict, str]]:
     """Amaldagi va barcha kelajak kelishuvlar (har biri o'z kartasi uchun)."""
     cards = []
     current = sa.get_current(employee_id)
     if current is not None:
-        cards.append((current, "🟢 Amaldagi kelishuv"))
+        cards.append((current, _card_status(current, "current")))
     for item in sa.get_all_upcoming(employee_id):
-        cards.append((item, f"⏭ Kelajakdagi kelishuv ({sa.format_date(item['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
+        cards.append((item, _card_status(item, "upcoming")))
     return cards
 
 
@@ -638,21 +644,19 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             await message.answer("Oylik kelishuvi faqat shaxsiy chatda ko'rsatiladi.")
             return
         user_id = message.from_user.id
-        profile = employees.get_profile(user_id)
+        profile = employees.get_profile(user_id, include_contacts=False)
         if not sa.can_view(user_id, user_id, profile.get("branch") if profile else None):
             return
-        current, upcoming = sa.get_current(user_id), sa.get_all_upcoming(user_id)
-        if current is None and not upcoming:
+        cards = sa.employee_cards(user_id)  # kelishuv + rozilik + savol bir marta o'qiladi
+        if not cards:
             salary = discipline.get_salary(user_id)
             await message.answer("\n".join(sa.view_lines(user_id, salary["fixed_salary"])))
             return
-        cards = _agreement_cards(user_id)
-        for agreement, status in cards:
-            # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
-            text = f"{_employee_text(agreement, user_id, status, bonus_note=sa.get_consent(agreement['id']) is not None)}\n\nHolat: {sa.consent_status_text(agreement)}"
-            markup = (
-                _consent_kb(agreement["id"], with_question=sa.issue_for_agreement(agreement["id"]) is None)
-                if sa.pending_consent(agreement)
-                else None
-            )
+        for card in cards:
+            agreement = card["agreement"]
+            status = _card_status(agreement, card["kind"])
+            # Tugmalar aynan shu kartaning kelishuviga bog'langan; boshqa kelishuvga rozilik yozilmaydi.
+            status_text = sa.consent_status_text(agreement, card["consent"], card["issue"])
+            text = f"{_employee_text(agreement, user_id, status, bonus_note=card['consent'] is not None)}\n\nHolat: {status_text}"
+            markup = _consent_kb(agreement["id"], with_question=card["issue"] is None) if card["pending"] else None
             await message.answer(text, reply_markup=markup)

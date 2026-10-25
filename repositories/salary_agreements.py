@@ -272,3 +272,28 @@ def employee_ids_with_agreements() -> set[int]:
     finally:
         conn.close()
     return {row["employee_id"] for row in rows}
+
+
+def employee_snapshot(employee_id: int) -> tuple[list[dict], dict[int, dict], dict[int, dict]]:
+    """Bitta ulanishda xodimning barcha kelishuvlari, rozilik qatorlari (agreement_id bo'yicha) va savollari (agreement_id
+    bo'yicha) — ``/mykelishuv`` har karta uchun alohida so'ramasligi uchun. Faqat o'qish."""
+    conn = get_connection()
+    try:
+        agreements = [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM salary_agreements WHERE employee_id = ? ORDER BY effective_from, id", (employee_id,)
+            ).fetchall()
+        ]
+        consents = {
+            r["agreement_id"]: dict(r) for r in conn.execute(
+                "SELECT * FROM salary_agreement_consents WHERE employee_id = ?", (employee_id,)
+            ).fetchall()
+        }
+        issues = {
+            r["agreement_id"]: dict(r) for r in conn.execute(
+                "SELECT * FROM salary_agreement_issues WHERE employee_id = ?", (employee_id,)
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    return agreements, consents, issues

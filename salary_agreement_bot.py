@@ -11,7 +11,7 @@ from aiogram import Dispatcher, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
 import company_time
 import employees
@@ -52,6 +52,7 @@ _ORDER = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "e
 
 class AgreementStates(StatesGroup):
     collecting = State()
+    confirming = State()  # tekshirish kartasi ko'rsatilgan; menyuga chiqish shu holatni tozalaydi (eski Saqlash rad etiladi)
 
 
 def _kb(*rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
@@ -60,7 +61,8 @@ def _kb(*rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
     )
 
 
-_CANCEL_ROW = [("❌ Bekor qilish", "sagr:cancel")]
+_CANCEL_ROW = [("⬅️ Xodimlar", "sagr:list"), ("❌ Bekor qilish", "sagr:cancel")]
+_HOME_ROW = [("🏠 Menyu", "sagr:home")]
 
 
 def _full_name(profile: dict) -> str:
@@ -182,7 +184,7 @@ def _employee_list(page: int) -> tuple[str, InlineKeyboardMarkup]:
         nav.append(("➡️", f"sagr:pg:{page + 1}"))
     if nav:
         rows.append(nav)
-    rows.append(_CANCEL_ROW)
+    rows.append(_HOME_ROW)
     text = _LIST_HEADER + (f"\n\nSahifa {page + 1}/{pages}" if pages > 1 else "")
     if not ordered:
         text += "\n\nTasdiqlangan xodim topilmadi."
@@ -205,7 +207,7 @@ def _private(event) -> bool:
     return event.from_user is not None and chat.type == "private"
 
 
-def register(dp: Dispatcher) -> None:
+def register(dp: Dispatcher, menu_builder=None) -> None:
     async def _allowed(event) -> bool:
         """Har qadamda: faqat shaxsiy chat va mavjud ``ACTION_SET_SALARY`` (Founder)."""
         if not _private(event):
@@ -227,7 +229,7 @@ def register(dp: Dispatcher) -> None:
         if key is None:
             token = secrets.token_hex(8)  # har karta yangi token: eski karta tugmalari yaroqsiz
             await state.update_data(ag_token=token, ag_ask=None)
-            await state.set_state(None)
+            await state.set_state(AgreementStates.confirming)
             text = _card_text(ag)
             markup = _kb(
                 [("✅ Saqlash va xodimga yuborish", f"sagr:save:{token}")],
@@ -245,23 +247,6 @@ def register(dp: Dispatcher) -> None:
         text = (note + "\n\n" if note else "") + (data.get("ag_problem_text") or "") + _ASK[key]
         await _reply(target, text, _kb(*rows), edit=edit)
 
-    async def _resolve_employee(target, state: FSMContext, name: str, branch_hint: str | None) -> str | None:
-        """Qaytadi: Founderga ko'rsatiladigan izoh (yoki ``None`` — aniq topildi)."""
-        data = await state.get_data()
-        ag = dict(data.get("ag", {}))
-        candidates, exact = sat.find_employees(name, branch_hint)
-        if exact:
-            profile = candidates[0]
-            ag.update(employee_id=profile["user_id"], employee_name=_full_name(profile), branch=profile["branch"])
-            await state.update_data(ag=ag, ag_cands=[])
-            return None
-        await state.update_data(ag_cands=[c["user_id"] for c in candidates])
-        if not candidates:
-            return "Bunday tasdiqlangan xodim topilmadi. Yangi xodim yaratilmaydi — ism-familiyani qayta yozing."
-        rows = [[(f"{_full_name(c)} — {c['branch']}", f"sagr:pick:{c['user_id']}")] for c in candidates[:8]]
-        await target.answer("Qaysi xodim? Tanlang:", reply_markup=_kb(*rows, _CANCEL_ROW))
-        return ""
-
     async def _ingest(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         ask = data.get("ag_ask")
@@ -271,7 +256,7 @@ def register(dp: Dispatcher) -> None:
             parsed.values.update(bare.values)
             parsed.problems.update(bare.problems)
         ag = dict(data.get("ag", {}))
-        employee = parsed.values.pop("employee", None)
+        parsed.values.pop("employee", None)  # xodim faqat ro'yxatdan tanlanadi; matndagi ism uni almashtirmaydi
         bonus_none = parsed.values.pop("bonus_none", False)
         for key, value in parsed.values.items():
             ag[key] = value
@@ -284,12 +269,6 @@ def register(dp: Dispatcher) -> None:
 
         problem_lines = [text for key, text in parsed.problems.items()]
         await state.update_data(ag_problem_text=("⚠️ " + " ".join(problem_lines) + "\n\n") if problem_lines else "")
-        if employee and not data.get("ag_locked"):  # ro'yxatdan tanlangan xodim matndagi ism bilan almashmaydi
-            outcome = await _resolve_employee(message, state, employee["name"], employee["branch_hint"])
-            if outcome == "":
-                return
-            if outcome:
-                await state.update_data(ag_problem_text=f"⚠️ {outcome}\n\n")
         await _next_step(message, state)
 
     @dp.message(Command("kelishuv"))
@@ -297,12 +276,30 @@ def register(dp: Dispatcher) -> None:
     async def agreement_start(message: Message, state: FSMContext) -> None:
         if not await _allowed(message):
             return
-        await state.clear()
-        # Ro'yxatdan tanlanmasa ham to'liq matn (ism bilan) yozish mumkin (eski yo'l saqlangan).
-        await state.set_state(AgreementStates.collecting)
-        await state.update_data(ag={}, ag_ask=None, ag_token=None, ag_cands=[], ag_problem_text="", ag_locked=False)
+        await state.clear()  # ro'yxat paytida shartlarni yig'ish holati faol emas; draft/token yo'q
+        # Eski pastki klaviatura (masalan "⬅️ Filial") olib tashlanadi; inline klaviatura bilan bir xabarda bo'lmaydi.
+        await message.answer("💵 Oylik kelishuvi", reply_markup=ReplyKeyboardRemove())
         text, markup = _employee_list(0)
         await message.answer(text, reply_markup=markup)
+
+    @dp.callback_query(F.data.in_({"sagr:list", "sagr:cancel"}))
+    async def agreement_back_to_list(callback: CallbackQuery, state: FSMContext) -> None:
+        """"⬅️ Xodimlar" va "❌ Bekor qilish": draft/token tozalanadi, xodimlar ro'yxati ochiladi. Hech narsa yozilmaydi."""
+        if not await _allowed(callback):
+            return
+        await state.clear()
+        text, markup = _employee_list(0)
+        await callback.answer("Bekor qilindi." if callback.data == "sagr:cancel" else None)
+        await callback.message.edit_text(text, reply_markup=markup)
+
+    @dp.callback_query(F.data == "sagr:home")
+    async def agreement_home(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _allowed(callback):
+            return
+        await state.clear()
+        await callback.answer()
+        markup = menu_builder(callback.from_user.id) if menu_builder else None
+        await callback.message.answer("🏠 Asosiy menyu.", reply_markup=markup)
 
     @dp.callback_query(F.data.startswith("sagr:pg:"))
     async def agreement_page(callback: CallbackQuery) -> None:
@@ -336,7 +333,7 @@ def register(dp: Dispatcher) -> None:
         await state.clear()
         await state.set_state(AgreementStates.collecting)
         ag = {"employee_id": profile["user_id"], "employee_name": _full_name(profile), "branch": profile.get("branch")}
-        await state.update_data(ag=ag, ag_ask=None, ag_token=None, ag_cands=[], ag_problem_text="", ag_locked=True)
+        await state.update_data(ag=ag, ag_ask=None, ag_token=None, ag_problem_text="")
         await callback.answer()
         await callback.message.edit_text(
             f"👤 Xodim: {ag['employee_name']} — {ag['branch'] or 'Filial biriktirilmagan'}\n\n"
@@ -369,26 +366,14 @@ def register(dp: Dispatcher) -> None:
     async def agreement_text(message: Message, state: FSMContext) -> None:
         if not await _allowed(message):
             return
+        # Haqiqiy kiritish harf/raqam bilan boshlanadi; emoji/belgi bilan boshlangan matn (eski "⬅️ Filial", "⬅️ Orqaga",
+        # "📍 ..." va h.k. pastki klaviatura tugmalari) navigatsiya: draft bekor, ro'yxatga qaytish — parserga tushmaydi.
+        if not (message.text or "").lstrip()[:1].isalnum():
+            await state.clear()
+            text, markup = _employee_list(0)
+            await message.answer(text, reply_markup=markup)
+            return
         await _ingest(message, state)
-
-    @dp.callback_query(F.data.startswith("sagr:pick:"))
-    async def agreement_pick(callback: CallbackQuery, state: FSMContext) -> None:
-        if not await _allowed(callback):
-            return
-        data = await state.get_data()
-        try:
-            picked = int(callback.data.split(":")[2])
-        except ValueError:
-            picked = None
-        profile = employees.get_profile(picked) if picked in data.get("ag_cands", []) else None
-        if profile is None or profile.get("status") != "approved":
-            await callback.answer("Tugma eskirgan.", show_alert=True)
-            return
-        ag = dict(data["ag"])
-        ag.update(employee_id=profile["user_id"], employee_name=_full_name(profile), branch=profile["branch"])
-        await state.update_data(ag=ag, ag_cands=[])
-        await callback.answer()
-        await _next_step(callback, state, edit=True)
 
     @dp.callback_query(F.data == "sagr:today")
     async def agreement_today(callback: CallbackQuery, state: FSMContext) -> None:
@@ -431,14 +416,6 @@ def register(dp: Dispatcher) -> None:
             reply_markup=_kb(_CANCEL_ROW),
         )
 
-    @dp.callback_query(F.data == "sagr:cancel")
-    async def agreement_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-        if not await _allowed(callback):
-            return
-        await state.clear()
-        await callback.answer()
-        await callback.message.edit_text("❌ Bekor qilindi. Hech narsa saqlanmadi va xodimga yuborilmadi.")
-
     async def _send_to_employee(bot, agreement: dict) -> bool:
         employee_id = agreement["employee_id"]
         try:
@@ -470,7 +447,7 @@ def register(dp: Dispatcher) -> None:
         token = callback.data.split(":", 2)[2]
         ag = data.get("ag", {})
         if (
-            not data.get("ag_token") or token != data["ag_token"] or await state.get_state() is not None
+            not data.get("ag_token") or token != data["ag_token"] or await state.get_state() != AgreementStates.confirming.state
             or _missing(ag) is not None
         ):
             await callback.answer("Karta eskirgan yoki allaqachon ishlatilgan.", show_alert=True)

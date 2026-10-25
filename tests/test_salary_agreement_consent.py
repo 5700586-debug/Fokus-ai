@@ -52,8 +52,16 @@ async def _cb(main, bot, data, user=FOUNDER_ID):
     return await send_callback(main.dp, bot, user, data=data, target_chat_id=user)
 
 
-async def _to_card(main, bot, text=SAMPLE):
+async def _select(main, bot, text):
+    """Ro'yxatdan xodimni tanlaydi (matndagi ism qatori faqat xodimni aniqlash uchun)."""
+    employee = sat.parse_text(text).values["employee"]
+    found, _ = sat.find_employees(employee["name"], employee["branch_hint"])
     await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await send_callback(main.dp, bot, FOUNDER_ID, data=f"sagr:new:{found[0]['user_id']}", target_chat_id=FOUNDER_ID)
+
+
+async def _to_card(main, bot, text=SAMPLE):
+    await _select(main, bot, text)
     return await send(main.dp, bot, FOUNDER_ID, text=text)
 
 
@@ -154,30 +162,11 @@ async def test_missing_parts_are_asked_and_clear_data_not_reasked(bot_dp):
     assert "700 000" in _text(sent) and _save_btn(sent)
 
 
-async def test_namesake_and_branch_mismatch_ask_to_choose_and_unknown_not_created(bot_dp):
-    main, bot = bot_dp
-    _employee(EMP, branch=B1)
-    _employee(EMP2, branch=B2)
-    sent = await _to_card(main, bot, SAMPLE.replace(f"— {B1}", ""))
-    assert f"sagr:pick:{EMP}" in _buttons(sent) and f"sagr:pick:{EMP2}" in _buttons(sent)
-    sent = await _cb(main, bot, f"sagr:pick:{EMP2}")
-    assert B2 in _text(sent) and _save_btn(sent)
-
-    sent = await _to_card(main, bot, SAMPLE.replace(B1, B2).replace("Ali Valiyev", "Sodiq Nomalum"))
-    assert "topilmadi" in _text(sent) and employees.get_profile(0) is None
-    assert _rows() == []
-
-    only = 891010
-    _employee(only, surname="Yagonov", ism="Vali", branch=B1)
-    sent = await _to_card(main, bot, SAMPLE.replace("Ali Valiyev", "Vali Yagonov").replace(B1, B2))
-    assert f"sagr:pick:{only}" in _buttons(sent)  # filial mos kelmadi — tanlash so'raladi
-
-
 async def test_only_founder_can_start_or_save(bot_dp):
     main, bot = bot_dp
     _employee(EMP)
     sent = await send(main.dp, bot, EMP, text="/kelishuv")
-    assert "Namuna" not in _text(sent) and "Fiks:" not in _text(sent)
+    assert "Namuna" not in _text(sent) and "Fiks:" not in _text(sent) and not _buttons(sent)
     card = await _to_card(main, bot)
     await _cb(main, bot, _save_btn(card), user=EMP)
     assert _rows() == []

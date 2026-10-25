@@ -160,7 +160,7 @@ async def test_selected_employee_is_not_replaced_by_name_in_text_and_other_data_
     await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
     await _cb(main, bot, f"sagr:new:{A}")
     asked = await send(main.dp, bot, FOUNDER_ID, text=f"Karimov Bobur — {B2}\n" + TERMS.replace("1 800 000", "1800"))
-    assert "Fiks oylik qancha" in _text(asked) and not any(d.startswith("sagr:pick") for d in _buttons(asked))
+    assert "Fiks oylik qancha" in _text(asked)
     card = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
     out = _text(card)
     assert "Yusufov Sultonxon" in out and "Karimov" not in out and "1 800 000" in out
@@ -201,3 +201,104 @@ async def test_unauthorized_and_unapproved_are_rejected(bot_dp):
     employees.offboard_profile(A)  # tanlangandan keyin xodim endi tasdiqlanmagan
     gone = await _cb(main, bot, f"sagr:new:{A}")
     assert "Tarif:" not in _text(gone) and sa.list_history(A) == []
+
+
+# ------------------------------------------------------- navigatsiya --
+
+
+def _no_agreement_reaction(sent):
+    text = _text(sent)
+    return not any(d.startswith("sagr:save:") for d in _buttons(sent)) and "Tarif raqami" not in text and "Qaysi xodim" not in text and "Fiks oylik qancha" not in text
+
+
+async def _draft(main, bot, user_id=A):
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{user_id}")
+    card = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    return next(d for d in _buttons(card) if d.startswith("sagr:save:"))
+
+
+def _nothing_written_or_sent(bot):
+    return sa.list_history(A) == [] and _to(bot, A) == []
+
+
+async def test_start_removes_old_reply_keyboard_and_collecting_is_not_active_while_list_shown(bot_dp):
+    from aiogram.types import ReplyKeyboardRemove
+
+    main, bot = bot_dp
+    _seed()
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    assert isinstance(sent[0].reply_markup, ReplyKeyboardRemove) and "xodimni tanlang" in _text(sent)
+    for text in ("Tarif 3", "Fiks 1 800 000", "Yusufov Sultonxon"):
+        reaction = await send(main.dp, bot, FOUNDER_ID, text=text)
+        assert _no_agreement_reaction(reaction), text
+    assert sa.list_history(A) == []
+
+
+@pytest.mark.parametrize("stale", ["⬅️ Filial", "⬅️ Orqaga", "⬅️ Do'konlar", "📍 " + B1, "💰 Smenalar"])
+async def test_stale_navigation_buttons_are_not_read_as_agreement_text(bot_dp, stale):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    reaction = await send(main.dp, bot, FOUNDER_ID, text=stale)
+    assert _no_agreement_reaction(reaction) and "xodimni tanlang" in _text(reaction)
+    follow = await send(main.dp, bot, FOUNDER_ID, text="Fiks 1 800 000")
+    assert _no_agreement_reaction(follow)  # qoralama bekor, kiritish davom etmaydi
+    await _cb(main, bot, old_save)
+    assert _nothing_written_or_sent(bot)
+
+
+async def test_xodimlar_button_voids_draft_and_token_and_returns_to_list(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)
+    back = await _cb(main, bot, "sagr:list")
+    assert "xodimni tanlang" in _text(back) and f"sagr:new:{A}" in _buttons(back)
+    await _cb(main, bot, old_save)
+    reaction = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    assert _no_agreement_reaction(reaction) and _nothing_written_or_sent(bot)
+    prompt = await _cb(main, bot, f"sagr:new:{A}")  # qayta kirish toza boshlanadi
+    assert "Tarif: 3" in _text(prompt)
+    card = await send(main.dp, bot, FOUNDER_ID, text="Fiks 2 000 000")
+    assert "Tarif raqami" in _text(card)  # eski draft ma'lumotlari qolmagan
+
+
+async def test_cancel_clears_draft_and_opens_list(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)
+    cancelled = await _cb(main, bot, "sagr:cancel")
+    assert "xodimni tanlang" in _text(cancelled)
+    await _cb(main, bot, old_save)
+    assert _no_agreement_reaction(await send(main.dp, bot, FOUNDER_ID, text=TERMS)) and _nothing_written_or_sent(bot)
+
+
+async def test_leaving_to_other_menu_clears_draft(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)
+    await send(main.dp, bot, FOUNDER_ID, text="🏬 Do'konlar")
+    reaction = await send(main.dp, bot, FOUNDER_ID, text="Fiks 1 800 000")
+    assert _no_agreement_reaction(reaction)
+    await _cb(main, bot, old_save)
+    assert _nothing_written_or_sent(bot)
+    again = await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    assert "xodimni tanlang" in _text(again)
+
+
+async def test_home_button_returns_menu_and_clears_state(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    sent = await _cb(main, bot, "sagr:home")
+    assert "Asosiy menyu" in _text(sent) and _nothing_written_or_sent(bot)
+
+
+async def test_navigation_from_non_founder_is_rejected(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await _cb(main, bot, "sagr:list", user=A)
+    await _cb(main, bot, "sagr:cancel", user=A)
+    assert "xodimni tanlang" not in _text(_to(bot, A))

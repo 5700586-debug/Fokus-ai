@@ -49,6 +49,11 @@ def _count(table):
         conn.close()
 
 
+async def _pick(main, bot, user_id):
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    return await send_callback(main.dp, bot, FOUNDER_ID, data=f"sagr:new:{user_id}", target_chat_id=FOUNDER_ID)
+
+
 def _values(text):
     result = sat.parse_text(text)
     assert not result.problems, result.problems
@@ -112,12 +117,14 @@ def test_similar_and_misspelled_names_offer_candidates_never_pick_alone(temp_db)
     assert [p["user_id"] for p in found] == [EMP3] and exact
 
 
-async def test_sample_does_not_pick_employee_or_create_agreement_and_nothing_saved_before_confirm(bot_dp):
+async def test_list_does_not_pick_employee_or_create_agreement_and_nothing_saved_before_confirm(bot_dp):
     main, bot = bot_dp
     _employee(EMP)
     sent = await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
     assert "xodimni tanlang" in _text(sent) and not any(b.startswith("sagr:save:") for b in _buttons(sent))
     assert _count("salary_agreements") == 0
+    prompt = await _pick(main, bot, EMP)
+    assert "Yusufov Sultonxon" in _text(prompt) and "Tarif: 3" in _text(prompt)
     card = await send(main.dp, bot, FOUNDER_ID, text=SAMPLE.replace("Yusufov Sultonxon", "Юсуфов Султонхон").replace("Saturn Charhiy", "Сатурн Чархий"))
     text = _text(card)
     assert "Yusufov Sultonxon" in text and "1 800 000" in text and "700 000" in text and "kafolatlangan to‘lov emas" in text
@@ -126,18 +133,15 @@ async def test_sample_does_not_pick_employee_or_create_agreement_and_nothing_sav
     assert not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]  # xodimga hech narsa ketmagan
 
 
-async def test_misspelled_name_asks_to_choose_and_ambiguous_amount_asks_only_that(bot_dp):
+async def test_ambiguous_amount_is_asked_then_short_answer_completes_card(bot_dp):
     main, bot = bot_dp
     _employee(EMP)
-    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
-    sent = await send(main.dp, bot, FOUNDER_ID, text=SAMPLE.replace("Yusufov Sultonxon", "Yusufof Sultanxon").replace("1 800 000", "1800"))
-    assert f"sagr:pick:{EMP}" in _buttons(sent)
-    assert _count("salary_agreements") == 0
-    sent = await send_callback(main.dp, bot, FOUNDER_ID, data=f"sagr:pick:{EMP}", target_chat_id=FOUNDER_ID)
-    assert "Fiks oylik qancha" in _text(sent) and "1800" in _text(sent)
-    assert not any(b.startswith("sagr:save:") for b in _buttons(sent))
-    sent = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
-    assert any(b.startswith("sagr:save:") for b in _buttons(sent)) and "1 800 000" in _text(sent)
+    await _pick(main, bot, EMP)
+    asked = await send(main.dp, bot, FOUNDER_ID, text=SAMPLE.replace("1 800 000", "1800"))
+    assert "Fiks oylik qancha" in _text(asked) and "1800" in _text(asked)
+    assert not any(b.startswith("sagr:save:") for b in _buttons(asked))
+    card = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
+    assert any(b.startswith("sagr:save:") for b in _buttons(card)) and "1 800 000" in _text(card)
     assert _count("salary_agreements") == 0
 
 
@@ -182,10 +186,10 @@ def test_label_lines_with_typos_never_become_the_name():
     assert sat.norm(sat.parse_text("Sanaev Bek", name_words=2).values["employee"]["name"]) == "sanaev bek"
 
 
-async def test_reordered_text_resolves_employee_and_makes_card_without_extra_questions(bot_dp):
+async def test_reordered_text_makes_card_without_extra_questions(bot_dp):
     main, bot = bot_dp
     _employee(EMP)
-    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _pick(main, bot, EMP)
     card = await send(main.dp, bot, FOUNDER_ID, text=_compose("end"))
     text = _text(card)
     assert "Yusufov Sultonxon" in text and B1 in text and "1 800 000" in text and "28 kun" in text
@@ -195,20 +199,10 @@ async def test_reordered_text_resolves_employee_and_makes_card_without_extra_que
     assert not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]
 
 
-async def test_ambiguous_name_still_asks_when_name_is_not_first(bot_dp):
-    main, bot = bot_dp
-    _employee(EMP, branch=B1)
-    _employee(EMP2, branch=B2)
-    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
-    sent = await send(main.dp, bot, FOUNDER_ID, text=_compose("end").replace(f" — {B1}", ""))
-    assert {f"sagr:pick:{EMP}", f"sagr:pick:{EMP2}"} <= set(_buttons(sent))
-    assert _count("salary_agreements") == 0
-
-
 async def test_short_amount_answer_completes_card_and_keeps_other_data(bot_dp):
     main, bot = bot_dp
     _employee(EMP)
-    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _pick(main, bot, EMP)
     text = _compose("middle").replace("Fiks 1 800 000", "Fiks 1800")
     asked = await send(main.dp, bot, FOUNDER_ID, text=text)
     assert "Fiks oylik qancha" in _text(asked) and not any(b.startswith("sagr:save:") for b in _buttons(asked))

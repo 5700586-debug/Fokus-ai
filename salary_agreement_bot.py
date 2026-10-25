@@ -96,12 +96,13 @@ def _card_text(data: dict) -> str:
 BONUS_NOTE = "Oylik bonus: 140 ⭐ — 700 000 so'mgacha ishlab topishingiz mumkin. 1 ⭐ = 5 000 so'm."
 
 
-def _employee_text(agreement: dict, employee_id: int, title: str = "💵 Oylik kelishuvi", bonus_note: bool = False) -> str:
-    """``bonus_note`` — faqat xodimga tasdiqlash uchun ko'rsatiladigan matn (hisoblash qoidasi/DB qiymati emas)."""
-    version = sa.version_number(employee_id, agreement["id"])
+def _employee_text(agreement: dict, employee_id: int, status: str | None = None, bonus_note: bool = False) -> str:
+    """Sarlavha doim "💵 Oylik kelishuvi" (versiya raqami ko'rsatilmaydi); ``status`` — amaldagi/kelajak farqi.
+    ``bonus_note`` — faqat xodimga tasdiqlash uchun ko'rsatiladigan matn (hisoblash qoidasi/DB qiymati emas)."""
     return "\n".join(
         [
-            f"{title} (versiya {version})",
+            "💵 Oylik kelishuvi",
+            *([status] if status else []),
             f"💵 Fiks oylik: {sa.format_money(agreement['fixed_salary'])}",
             *sa.agreement_lines(agreement, show_bonus_cap=not bonus_note),  # bonus haqida faqat BONUS_NOTE
             *(["", BONUS_NOTE] if bonus_note else []),
@@ -194,7 +195,7 @@ def _agreement_cards(employee_id: int) -> list[tuple[dict, str]]:
     cards = []
     current = sa.get_current(employee_id)
     if current is not None:
-        cards.append((current, "💵 Amaldagi kelishuv"))
+        cards.append((current, "🟢 Amaldagi kelishuv"))
     for item in sa.get_all_upcoming(employee_id):
         cards.append((item, f"⏭ Kelajakdagi kelishuv ({sa.format_date(item['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
     return cards
@@ -352,8 +353,8 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             await callback.message.answer("Bu xodimda hali kelishuv yo'q.")
             return
         await callback.message.answer(f"👤 {_full_name(profile)} — {profile.get('branch') or 'Filial biriktirilmagan'}")
-        for index, (agreement, title) in enumerate(cards):
-            text = f"{_employee_text(agreement, profile['user_id'], title)}\n\nHolat: {sa.consent_status_text(agreement)}"
+        for index, (agreement, status) in enumerate(cards):
+            text = f"{_employee_text(agreement, profile['user_id'], status)}\n\nHolat: {sa.consent_status_text(agreement)}"
             markup = _kb([("🔄 Yangi kelishuv", f"sagr:new:{profile['user_id']}")]) if index == len(cards) - 1 else None
             await callback.message.answer(text, reply_markup=markup)
 
@@ -464,7 +465,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             return
         agreement = sa.get_agreement(int(callback.data.split(":")[2]))
         if agreement is None or not sa.pending_consent(agreement):
-            await callback.answer("Bu versiya eskirgan yoki tasdiqlangan.", show_alert=True)
+            await callback.answer("Bu kelishuv eskirgan yoki tasdiqlangan.", show_alert=True)
             return
         sent = await _send_to_employee(callback.bot, agreement)
         text, markup = _delivery_report(sent, agreement)
@@ -492,7 +493,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             try:
                 await callback.bot.send_message(
                     FOUNDER_ID,
-                    f"✅ {_full_name(profile)} oylik kelishuvga (versiya {sa.version_number(agreement['employee_id'], agreement_id)}) rozilik berdi.",
+                    f"✅ {_full_name(profile)} oylik kelishuvga rozilik berdi.",
                 )
             except Exception as error:  # noqa: BLE001
                 logger.warning("Founderga rozilik xabari ketmadi: %s", type(error).__name__)
@@ -500,7 +501,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         messages = {
             sa.CONSENT_ALREADY: "Bu kelishuv allaqachon tasdiqlangan.",
             sa.CONSENT_NOT_OWNER: "Bu tugma siz uchun emas.",
-            sa.CONSENT_SUPERSEDED: "Bu kelishuv yangilangan. Yangi versiyani «💵 Oylik kelishuvim» orqali oching.",
+            sa.CONSENT_SUPERSEDED: "Bu kelishuv yangilangan. Yangi kelishuvni «💵 Oylik kelishuvim» orqali oching.",
             sa.CONSENT_UNKNOWN: "Kelishuv topilmadi.",
         }
         await callback.answer(messages[outcome], show_alert=True)
@@ -514,7 +515,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
                 "❓ Xodim oylik kelishuvini tushunmadi",
                 f"👤 Xodim: {_full_name(profile)}",
                 f"🏬 Filial: {issue.get('branch') or '-'}",
-                f"📄 Kelishuv versiyasi: {sa.version_number(issue['employee_id'], agreement['id'])}",
+                f"📌 Amal qilish sanasi: {sa.format_date(agreement['effective_from'])}",
                 f"👔 Mas'ul: filial rahbari{' — ' + names if names else ' (belgilanmagan — Founder)'}",
                 f"⏰ Muddat: bugun, {sa.format_date(issue['due_date'])}",
             ]
@@ -562,7 +563,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             sa.ISSUE_ALREADY: "Savolingiz allaqachon yuborilgan.",
             sa.ISSUE_CONSENTED: "Siz bu kelishuvga allaqachon rozilik bergansiz.",
             sa.CONSENT_NOT_OWNER: "Bu tugma siz uchun emas.",
-            sa.CONSENT_SUPERSEDED: "Bu kelishuv yangilangan. Yangi versiyani «💵 Oylik kelishuvim» orqali oching.",
+            sa.CONSENT_SUPERSEDED: "Bu kelishuv yangilangan. Yangi kelishuvni «💵 Oylik kelishuvim» orqali oching.",
             sa.CONSENT_UNKNOWN: "Kelishuv topilmadi.",
         }
         await callback.answer(messages[outcome], show_alert=True)
@@ -646,9 +647,9 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             await message.answer("\n".join(sa.view_lines(user_id, salary["fixed_salary"])))
             return
         cards = _agreement_cards(user_id)
-        for agreement, title in cards:
+        for agreement, status in cards:
             # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
-            text = f"{_employee_text(agreement, user_id, title, bonus_note=sa.get_consent(agreement['id']) is not None)}\n\nHolat: {sa.consent_status_text(agreement)}"
+            text = f"{_employee_text(agreement, user_id, status, bonus_note=sa.get_consent(agreement['id']) is not None)}\n\nHolat: {sa.consent_status_text(agreement)}"
             markup = (
                 _consent_kb(agreement["id"], with_question=sa.issue_for_agreement(agreement["id"]) is None)
                 if sa.pending_consent(agreement)

@@ -947,7 +947,14 @@ cash_close_review.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
-salary_agreement_bot.register(dp, build_menu)
+salary_agreement_bot.register(
+    dp,
+    build_menu,
+    lambda: {
+        _BRANCH_BACK_TEXT, _STORE_CARD_BACK_TEXT, _STORE_SUBVIEW_BACK_TEXT, _STORE_CARD_SHIFTS_TEXT,
+        *_BRANCH_BUTTON_TEXT_TO_NAME,
+    },
+)
 supplier_chat_bot.register(dp, openai_client)
 saturn_group_bot.register(dp, openai_client)
 recruiting_bot.register(dp, openai_client)

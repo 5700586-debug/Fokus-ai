@@ -207,7 +207,8 @@ def _private(event) -> bool:
     return event.from_user is not None and chat.type == "private"
 
 
-def register(dp: Dispatcher, menu_builder=None) -> None:
+def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
+    """``nav_texts`` — eski pastki klaviatura tugmalarining ANIQ matnlarini qaytaruvchi funksiya (main.py beradi)."""
     async def _allowed(event) -> bool:
         """Har qadamda: faqat shaxsiy chat va mavjud ``ACTION_SET_SALARY`` (Founder)."""
         if not _private(event):
@@ -302,9 +303,10 @@ def register(dp: Dispatcher, menu_builder=None) -> None:
         await callback.message.answer("🏠 Asosiy menyu.", reply_markup=markup)
 
     @dp.callback_query(F.data.startswith("sagr:pg:"))
-    async def agreement_page(callback: CallbackQuery) -> None:
+    async def agreement_page(callback: CallbackQuery, state: FSMContext) -> None:
         if not await _allowed(callback):
             return
+        await state.clear()  # ro'yxatga qaytish: draft/token tozalanadi, collecting/confirming faol qolmaydi
         try:
             page = int(callback.data.split(":")[2])
         except ValueError:
@@ -366,9 +368,9 @@ def register(dp: Dispatcher, menu_builder=None) -> None:
     async def agreement_text(message: Message, state: FSMContext) -> None:
         if not await _allowed(message):
             return
-        # Haqiqiy kiritish harf/raqam bilan boshlanadi; emoji/belgi bilan boshlangan matn (eski "⬅️ Filial", "⬅️ Orqaga",
-        # "📍 ..." va h.k. pastki klaviatura tugmalari) navigatsiya: draft bekor, ro'yxatga qaytish — parserga tushmaydi.
-        if not (message.text or "").lstrip()[:1].isalnum():
+        # Faqat mavjud ANIQ menyu/ortga tugmalari ("⬅️ Filial" va h.k.) navigatsiya: draft bekor, ro'yxatga qaytish.
+        # Boshqa matn (emoji/belgi bilan boshlangani ham) kiritish: tushunilmasa draft saqlanadi va qisqa qayta so'raladi.
+        if (message.text or "").strip() in (nav_texts() if nav_texts else ()):
             await state.clear()
             text, markup = _employee_list(0)
             await message.answer(text, reply_markup=markup)

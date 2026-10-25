@@ -302,3 +302,83 @@ async def test_navigation_from_non_founder_is_rejected(bot_dp):
     await _cb(main, bot, "sagr:list", user=A)
     await _cb(main, bot, "sagr:cancel", user=A)
     assert "xodimni tanlang" not in _text(_to(bot, A))
+
+
+# ------------------------------------------- navigatsiya himoyasi: qolgan ikki xato --
+
+
+async def _pick_and_send(main, bot, text, user_id=A):
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{user_id}")
+    return await send(main.dp, bot, FOUNDER_ID, text=text)
+
+
+@pytest.mark.parametrize("line", ["💵 Fiks: 1 800 000", "• Fiks: 1 800 000", "— Fiks 1 800 000", "✅ fiks: 1.800.000"])
+async def test_symbol_prefixed_input_is_not_navigation_and_keeps_draft(bot_dp, line):
+    main, bot = bot_dp
+    _seed()
+    asked = await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    assert "Fiks oylik qancha" in _text(asked)
+    card = await send(main.dp, bot, FOUNDER_ID, text=line)
+    out = _text(card)
+    assert "xodimni tanlang" not in out and "1 800 000" in out and "Yusufov" in out
+    assert any(d.startswith("sagr:save:") for d in _buttons(card))
+    assert "28 kun" in out and "700 000" in out  # oldingi maydonlar saqlangan
+    assert sa.list_history(A) == []
+
+
+async def test_bullet_tariff_line_is_input(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    asked = await _pick_and_send(main, bot, TERMS.replace("Tarif: 3\n", ""))
+    assert "Tarif raqami" in _text(asked)
+    card = await send(main.dp, bot, FOUNDER_ID, text="• Tarif: 3")
+    assert any(d.startswith("sagr:save:") for d in _buttons(card)) and "Tarif: 3" in _text(card)
+
+
+async def test_not_understood_reply_keeps_draft_and_short_answer_continues(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    again = await send(main.dp, bot, FOUNDER_ID, text="🤷 bilmayman")
+    assert "Fiks oylik qancha" in _text(again) and "xodimni tanlang" not in _text(again)
+    card = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
+    out = _text(card)
+    assert any(d.startswith("sagr:save:") for d in _buttons(card))
+    assert "Yusufov" in out and "1 800 000" in out and "28 kun" in out and "11 soat" in out and "700 000" in out
+
+
+async def test_page_button_from_old_message_clears_draft_and_token(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)  # tekshirish kartasi (confirming)
+    listing = await _cb(main, bot, "sagr:pg:0")  # oldingi xabardagi sahifa tugmasi
+    assert "xodimni tanlang" in _text(listing)
+    await _cb(main, bot, old_save)
+    assert _nothing_written_or_sent(bot)
+    reaction = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    assert _no_agreement_reaction(reaction)
+
+
+async def test_page_button_during_collecting_clears_draft(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await _pick_and_send(main, bot, TERMS.replace("Fiks: 1 800 000\n", ""))
+    await _cb(main, bot, "sagr:pg:0")
+    reaction = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
+    assert _no_agreement_reaction(reaction) and sa.list_history(A) == []
+
+
+@pytest.mark.parametrize("stale", ["⬅️ Filial", "⬅️ Orqaga", "⬅️ Do'konlar", "💰 Smenalar", "📍 " + B1, "🔙 Orqaga", "❌ Bekor qilish"])
+async def test_exact_navigation_texts_still_leave_the_draft(bot_dp, stale):
+    main, bot = bot_dp
+    _seed()
+    old_save = await _draft(main, bot)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    await send(main.dp, bot, FOUNDER_ID, text=TERMS.replace("Fiks: 1 800 000\n", ""))
+    await send(main.dp, bot, FOUNDER_ID, text=stale)
+    follow = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
+    assert _no_agreement_reaction(follow)
+    await _cb(main, bot, old_save)
+    assert _nothing_written_or_sent(bot)

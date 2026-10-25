@@ -464,3 +464,59 @@ async def test_each_question_shows_only_its_own_field_error(bot_dp):
     assert "1 dan 31 gacha" in out and "Aniq yozing" not in out and "Oyiga necha ish kuni" in out
     asked = await send(main.dp, bot, FOUNDER_ID, text="28")
     assert "sanadan boshlanadi" in _text(asked) and "⚠️" not in _text(asked)
+
+
+# ------------------------------------------ bonus matni takrorlanmasin --
+
+OLD_CAP_LINE = "Natija bonusi"
+
+
+def _old_agreement(employee_id=A, cap=500_000):
+    result = sa.save_agreement(employee_id, 2_000_000, 26, 600, "2026-01-01", FOUNDER_ID, "old-cap", tariff=2, result_bonus_cap=cap, with_consent=True)
+    return result.agreement["id"]
+
+
+async def test_old_agreement_with_cap_shows_only_the_fixed_note_once(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    agreement_id = _old_agreement()
+    before = sa.list_history(A)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:resend:{agreement_id}")  # qayta yuborish = xodimga tasdiqlash xabari
+    employee_text = _text(_to(bot, A))
+    assert employee_text.count(NOTE) == 1 and OLD_CAP_LINE not in employee_text and "500 000" not in employee_text
+    assert "2 000 000" in employee_text and "26 kun" in employee_text
+    mine = await send(main.dp, bot, A, text="/mykelishuv")
+    assert _text(mine).count(NOTE) == 1 and OLD_CAP_LINE not in _text(mine) and "500 000" not in _text(mine)
+    # DB qiymati va tarix o'zgarmagan
+    assert sa.list_history(A) == before and before[0]["result_bonus_cap"] == 500_000
+
+
+async def test_new_agreement_note_exactly_once_on_send_resend_and_view(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    card = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    assert "onus" not in _text(card) and "⭐" not in _text(card)
+    await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
+    assert _text(_to(bot, A)).count(NOTE) == 1
+    agreement_id = sa.list_history(A)[0]["id"]
+    bot.sent = []
+    await _cb(main, bot, f"sagr:resend:{agreement_id}")
+    assert _text(_to(bot, A)).count(NOTE) == 1 and OLD_CAP_LINE not in _text(_to(bot, A))
+    mine = await send(main.dp, bot, A, text="/mykelishuv")
+    assert _text(mine).count(NOTE) == 1 and OLD_CAP_LINE not in _text(mine)
+    assert sa.list_history(A)[0]["result_bonus_cap"] is None
+
+
+async def test_founder_questions_and_card_have_no_bonus_even_for_employee_with_old_cap(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    _old_agreement(cap=450_000)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    prompt = await _cb(main, bot, f"sagr:new:{A}")
+    asked = await send(main.dp, bot, FOUNDER_ID, text="Tarif: 3\nOyiga: 28 kun")
+    card = await send(main.dp, bot, FOUNDER_ID, text="Fiks: 2 500 000\nKuniga: 10 soat\nBoshlanishi: 01.10.2026")
+    for sent in (prompt, asked, card):
+        assert "onus" not in _text(sent) and NOTE not in _text(sent) and "450 000" not in _text(sent)

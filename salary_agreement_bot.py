@@ -103,7 +103,7 @@ def _employee_text(agreement: dict, employee_id: int, title: str = "💵 Oylik k
         [
             f"{title} (versiya {version})",
             f"💵 Fiks oylik: {sa.format_money(agreement['fixed_salary'])}",
-            *sa.agreement_lines(agreement),
+            *sa.agreement_lines(agreement, show_bonus_cap=not bonus_note),  # bonus haqida faqat BONUS_NOTE
             *(["", BONUS_NOTE] if bonus_note else []),
         ]
     )

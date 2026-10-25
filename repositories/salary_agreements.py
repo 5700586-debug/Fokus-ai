@@ -53,6 +53,25 @@ def upcoming_agreement(employee_id: int, after_date: str, conn=None) -> dict | N
     return dict(row) if row else None
 
 
+def upcoming_agreements(employee_id: int, after_date: str) -> list[dict]:
+    """Barcha kelajak kelishuvlari, sana bo'yicha o'sish tartibida; bir sanada faqat oxirgi kiritilgani."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM salary_agreements WHERE employee_id = ? AND effective_from > ? "
+            "ORDER BY effective_from ASC, id DESC",
+            (employee_id, after_date),
+        ).fetchall()
+    finally:
+        conn.close()
+    result, seen = [], set()
+    for row in rows:
+        if row["effective_from"] not in seen:
+            seen.add(row["effective_from"])
+            result.append(dict(row))
+    return result
+
+
 def list_agreements(employee_id: int) -> list[dict]:
     conn = get_connection()
     try:

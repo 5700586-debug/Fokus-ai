@@ -196,6 +196,10 @@ def get_upcoming(employee_id: int) -> dict | None:
     return repo.upcoming_agreement(employee_id, company_time.today().isoformat())
 
 
+def get_all_upcoming(employee_id: int) -> list[dict]:
+    return repo.upcoming_agreements(employee_id, company_time.today().isoformat())
+
+
 def list_history(employee_id: int) -> list[dict]:
     return repo.list_agreements(employee_id)
 
@@ -302,11 +306,11 @@ def record_consent(agreement_id: int, user_id: int) -> str:
 
 
 def is_live(agreement: dict) -> bool:
-    """Versiya hali almashtirilmagan: bugungi AMALDAGI kelishuv yoki eng yaqin KELAJAKDAGI kelishuv. Almashtirilgan
+    """Versiya hali almashtirilmagan: bugungi AMALDAGI kelishuv yoki har bir kelajak sanadagi oxirgi kiritilgan kelishuv. Almashtirilgan
     (yangi versiya o'rnini olgan) versiyaga rozilik/savol yozilmaydi; amaldagi paytda kelajak versiya uni bekor qilmaydi."""
     employee_id = agreement["employee_id"]
-    current, upcoming = get_current(employee_id), get_upcoming(employee_id)
-    return agreement["id"] in {item["id"] for item in (current, upcoming) if item is not None}
+    live = [get_current(employee_id), *get_all_upcoming(employee_id)]
+    return agreement["id"] in {item["id"] for item in live if item is not None}
 
 
 def pending_consent(agreement: dict) -> bool:
@@ -316,7 +320,7 @@ def pending_consent(agreement: dict) -> bool:
 
 
 def latest_pending_consent_id(employee_id: int) -> int | None:
-    for item in (get_current(employee_id), get_upcoming(employee_id)):
+    for item in (get_current(employee_id), *get_all_upcoming(employee_id)):
         if item is not None and pending_consent(item):
             return item["id"]
     return None

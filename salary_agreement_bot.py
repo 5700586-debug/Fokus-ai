@@ -559,16 +559,16 @@ def register(dp: Dispatcher) -> None:
         profile = employees.get_profile(user_id)
         if not sa.can_view(user_id, user_id, profile.get("branch") if profile else None):
             return
-        current, upcoming = sa.get_current(user_id), sa.get_upcoming(user_id)
-        if current is None and upcoming is None:
+        current, upcoming = sa.get_current(user_id), sa.get_all_upcoming(user_id)
+        if current is None and not upcoming:
             salary = discipline.get_salary(user_id)
             await message.answer("\n".join(sa.view_lines(user_id, salary["fixed_salary"])))
             return
         cards = []
         if current is not None:
             cards.append((current, "💵 Amaldagi kelishuv"))
-        if upcoming is not None:
-            cards.append((upcoming, f"⏭ Kelajakdagi kelishuv ({sa.format_date(upcoming['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
+        for item in upcoming:
+            cards.append((item, f"⏭ Kelajakdagi kelishuv ({sa.format_date(item['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
         for agreement, title in cards:
             # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
             text = f"{_employee_text(agreement, user_id, title)}\n\nHolat: {sa.consent_status_text(agreement)}"

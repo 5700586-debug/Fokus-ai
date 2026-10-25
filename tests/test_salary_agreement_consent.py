@@ -542,3 +542,85 @@ async def test_replaced_versions_buttons_are_rejected(bot_dp):
     assert consent[future_old]["consented_at"] is None and _issues() == []
     cards = await send(main.dp, bot, EMP, text="/mykelishuv")
     assert [_buttons([c])[0] for c in cards] == [f"sagr:ok:{first}", f"sagr:ok:{future_new}"]
+
+
+# ------------------------------------------------ bir nechta kelajak kelishuvi --
+
+
+def _future_dates():
+    from datetime import date, timedelta
+
+    import company_time
+
+    today = company_time.today()
+    first, second = date(2026, 11, 1), date(2026, 12, 1)
+    if first <= today:
+        first, second = today + timedelta(days=30), today + timedelta(days=60)
+    return first, second
+
+
+async def _three_versions(main, bot):
+    import company_time
+
+    first, second = _future_dates()
+    today = company_time.today().strftime("%d.%m.%Y")
+    cur = await _saved(main, bot, SAMPLE.replace("01.10.2026", today))
+    f1 = await _saved(main, bot, SAMPLE.replace("01.10.2026", first.strftime("%d.%m.%Y")).replace("1.800.000", "2.000.000").replace("28 ish", "26 ish"))
+    f2 = await _saved(main, bot, SAMPLE.replace("01.10.2026", second.strftime("%d.%m.%Y")).replace("1.800.000", "2.300.000").replace("11 soat", "10 soat"))
+    return cur, f1, f2, first, second
+
+
+async def test_multiple_future_agreements_each_card_matches_its_own_version(bot_dp):
+    from services import discipline
+
+    main, bot = bot_dp
+    _employee(EMP)
+    cur, f1, f2, first, second = await _three_versions(main, bot)
+    assert discipline.get_salary(EMP)["fixed_salary"] == 1_800_000  # kelajak kelishuvi bugungi fiksni o'zgartirmaydi
+    cards = await send(main.dp, bot, EMP, text="/mykelishuv")
+    assert len(cards) == 3
+    expect = [
+        (cur, "1 800 000", "28 kun", "11 soat", None),
+        (f1, "2 000 000", "26 kun", "11 soat", first),
+        (f2, "2 300 000", "28 kun", "10 soat", second),
+    ]
+    for card, (agreement_id, money, days, hours, start) in zip(cards, expect):
+        assert money in card.text and days in card.text and hours in card.text
+        if start:
+            assert start.strftime("%d.%m.%Y") in card.text and "Kelajakdagi kelishuv" in card.text
+        assert _buttons([card]) == [f"sagr:ok:{agreement_id}", f"sagr:no:{agreement_id}"]
+        amounts = [x for x in ("1 800 000", "2 000 000", "2 300 000") if x in card.text]
+        assert amounts == [money]  # karta boshqa versiya summasini ko'rsatmaydi
+
+
+async def test_far_future_version_can_be_confirmed_and_does_not_confirm_others(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    cur, f1, f2, *_ = await _three_versions(main, bot)
+    await _cb(main, bot, f"sagr:ok:{f2}", user=EMP)  # "eskirgan" deb noto'g'ri rad etilmasligi kerak
+    consent = {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}
+    assert consent[f2]["consented_by"] == EMP
+    assert consent[cur]["consented_at"] is None and consent[f1]["consented_at"] is None
+    await _cb(main, bot, f"sagr:ok:{f2}", user=EMP)  # takroriy
+    await _cb(main, bot, f"sagr:ok:{f1}", user=EMP)
+    consent = {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}
+    assert consent[f1]["consented_by"] == EMP and consent[cur]["consented_at"] is None
+    assert len(consent) == 3 and len(_rows()) == 3
+    await _cb(main, bot, f"sagr:no:{cur}", user=EMP)
+    await _cb(main, bot, f"sagr:no:{cur}", user=EMP)
+    assert [i["agreement_id"] for i in _issues()] == [cur]
+
+
+async def test_new_version_on_same_date_rejects_old_button_only_for_that_date(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    cur, f1, f2, first, second = await _three_versions(main, bot)
+    f2_new = await _saved(main, bot, SAMPLE.replace("01.10.2026", second.strftime("%d.%m.%Y")).replace("1.800.000", "2.400.000"))
+    await _cb(main, bot, f"sagr:ok:{f2}", user=EMP)
+    await _cb(main, bot, f"sagr:no:{f2}", user=EMP)
+    consent = {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}
+    assert consent[f2]["consented_at"] is None and _issues() == []
+    cards = await send(main.dp, bot, EMP, text="/mykelishuv")
+    assert [_buttons([c])[0] for c in cards] == [f"sagr:ok:{cur}", f"sagr:ok:{f1}", f"sagr:ok:{f2_new}"]
+    await _cb(main, bot, f"sagr:ok:{f1}", user=EMP)  # boshqa sanadagi versiya hamon yaroqli
+    assert {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}[f1]["consented_by"] == EMP

@@ -296,15 +296,30 @@ def record_consent(agreement_id: int, user_id: int) -> str:
         return CONSENT_UNKNOWN
     if agreement["employee_id"] != user_id:
         return CONSENT_NOT_OWNER
-    if repo.has_newer_versioned_agreement(user_id, agreement_id):
+    if not is_live(agreement):
         return CONSENT_SUPERSEDED
     return CONSENT_RECORDED if repo.record_consent(agreement_id, user_id, _now_iso()) else CONSENT_ALREADY
 
 
+def is_live(agreement: dict) -> bool:
+    """Versiya hali almashtirilmagan: bugungi AMALDAGI kelishuv yoki eng yaqin KELAJAKDAGI kelishuv. Almashtirilgan
+    (yangi versiya o'rnini olgan) versiyaga rozilik/savol yozilmaydi; amaldagi paytda kelajak versiya uni bekor qilmaydi."""
+    employee_id = agreement["employee_id"]
+    current, upcoming = get_current(employee_id), get_upcoming(employee_id)
+    return agreement["id"] in {item["id"] for item in (current, upcoming) if item is not None}
+
+
+def pending_consent(agreement: dict) -> bool:
+    """Shu versiya uchun rozilik qatori bor, hali tasdiqlanmagan va versiya almashtirilmagan."""
+    consent = repo.get_consent(agreement["id"])
+    return consent is not None and not consent["consented_at"] and is_live(agreement)
+
+
 def latest_pending_consent_id(employee_id: int) -> int | None:
-    latest = repo.latest_consent_agreement_id(employee_id)
-    consent = repo.get_consent(latest) if latest is not None else None
-    return latest if consent is not None and not consent["consented_at"] else None
+    for item in (get_current(employee_id), get_upcoming(employee_id)):
+        if item is not None and pending_consent(item):
+            return item["id"]
+    return None
 
 
 def version_number(employee_id: int, agreement_id: int) -> int:
@@ -371,7 +386,7 @@ def ask_not_understood(agreement_id: int, user_id: int) -> tuple[str, dict | Non
         return CONSENT_UNKNOWN, None
     if agreement["employee_id"] != user_id:
         return CONSENT_NOT_OWNER, None
-    if repo.has_newer_versioned_agreement(user_id, agreement_id):
+    if not is_live(agreement):
         return CONSENT_SUPERSEDED, None
     if consent["consented_at"]:
         return ISSUE_CONSENTED, None

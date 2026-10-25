@@ -464,3 +464,81 @@ async def test_end_of_day_reminder_once_via_existing_scheduler_and_today_problem
     import inspect
 
     assert "salary_agreement_issue_reminder" in inspect.getsource(start_scheduler)
+
+
+# ------------------------------------------- addel_boshligi / amaldagi + kelajak --
+
+ADDEL = 891013
+
+
+def _future(days=30):
+    from datetime import timedelta
+
+    import company_time
+
+    return (company_time.today() + timedelta(days=days)).strftime("%d.%m.%Y")
+
+
+async def test_addel_boshligi_is_denied_and_not_notified_savdo_boshligi_own_branch_only(bot_dp):
+    from services import permissions
+
+    main, bot = bot_dp
+    _employee(EMP)
+    _managers()
+    _employee(ADDEL, surname="Addelov", ism="Ravshan", branch=B1, role="addel_boshligi")
+    assert not permissions.has_permission(ADDEL, permissions.ACTION_VIEW_BRANCH_AGREEMENT)
+    assert permissions.has_permission(MGR1, permissions.ACTION_VIEW_BRANCH_AGREEMENT)
+    assert sa.can_view(MGR1, EMP, B1) and not sa.can_view(MGR2, EMP, B1) and not sa.can_view(ADDEL, EMP, B1)
+    assert sa.can_view(FOUNDER_ID, EMP, B1)
+    assert sa.branch_managers(B1) == [MGR1] and sa.branch_managers(B2) == [MGR2]
+    agreement_id = await _saved(main, bot)
+    denied = await _cb(main, bot, f"sagr:view:{agreement_id}", user=ADDEL)
+    assert "1 800 000" not in _text(denied)
+    await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)
+    assert _to(bot, ADDEL) == [] and _to(bot, MGR2) == [] and _to(bot, MGR1) and _to(bot, FOUNDER_ID)
+    await _cb(main, bot, f"sagr:res:{_issues()[0]['id']}:explained", user=ADDEL)
+    assert _issues()[0]["status"] == "open"
+    listing = await send(main.dp, bot, ADDEL, text="/filialkelishuv")
+    assert not _buttons(listing)
+
+
+async def test_mykelishuv_current_and_future_cards_bind_buttons_to_their_own_version(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    today = __import__("company_time").today().strftime("%d.%m.%Y")
+    current_id = await _saved(main, bot, SAMPLE.replace("01.10.2026", today))
+    future_id = await _saved(main, bot, SAMPLE.replace("01.10.2026", _future()).replace("1.800.000", "2.500.000"))
+    cards = await send(main.dp, bot, EMP, text="/mykelishuv")
+    assert len(cards) == 2
+    now_card, next_card = cards
+    assert "Amaldagi kelishuv" in now_card.text and "1 800 000" in now_card.text and "2 500 000" not in now_card.text
+    assert "Kelajakdagi kelishuv" in next_card.text and "2 500 000" in next_card.text and _future() in next_card.text
+    assert "1 800 000" not in next_card.text
+    assert _buttons([now_card]) == [f"sagr:ok:{current_id}", f"sagr:no:{current_id}"]
+    assert _buttons([next_card]) == [f"sagr:ok:{future_id}", f"sagr:no:{future_id}"]
+
+    await _cb(main, bot, f"sagr:ok:{current_id}", user=EMP)
+    consent = {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}
+    assert consent[current_id]["consented_at"] and consent[future_id]["consented_at"] is None
+    await _cb(main, bot, f"sagr:ok:{current_id}", user=EMP)  # takroriy
+    await _cb(main, bot, f"sagr:no:{future_id}", user=EMP)
+    issues = _issues()
+    assert len(issues) == 1 and issues[0]["agreement_id"] == future_id
+    again = await send(main.dp, bot, EMP, text="/mykelishuv")
+    assert _buttons([again[0]]) == [] and _buttons([again[1]]) == [f"sagr:ok:{future_id}"]
+    await _cb(main, bot, f"sagr:ok:{future_id}", user=EMP)
+    assert all(r["consented_at"] for r in _rows("salary_agreement_consents"))
+
+
+async def test_replaced_versions_buttons_are_rejected(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    first = await _saved(main, bot)
+    future_old = await _saved(main, bot, SAMPLE.replace("01.10.2026", _future()))
+    future_new = await _saved(main, bot, SAMPLE.replace("01.10.2026", _future()).replace("1.800.000", "2.700.000"))
+    await _cb(main, bot, f"sagr:ok:{future_old}", user=EMP)  # shu sanadagi yangiroq versiya o'rnini olgan
+    await _cb(main, bot, f"sagr:no:{future_old}", user=EMP)
+    consent = {r["agreement_id"]: r for r in _rows("salary_agreement_consents")}
+    assert consent[future_old]["consented_at"] is None and _issues() == []
+    cards = await send(main.dp, bot, EMP, text="/mykelishuv")
+    assert [_buttons([c])[0] for c in cards] == [f"sagr:ok:{first}", f"sagr:ok:{future_new}"]

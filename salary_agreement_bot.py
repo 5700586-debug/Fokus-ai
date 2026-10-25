@@ -98,11 +98,11 @@ def _card_text(data: dict) -> str:
     )
 
 
-def _employee_text(agreement: dict, employee_id: int) -> str:
+def _employee_text(agreement: dict, employee_id: int, title: str = "💵 Oylik kelishuvi") -> str:
     version = sa.version_number(employee_id, agreement["id"])
     return "\n".join(
         [
-            f"💵 Oylik kelishuvi (versiya {version})",
+            f"{title} (versiya {version})",
             f"💵 Fiks oylik: {sa.format_money(agreement['fixed_salary'])}",
             *sa.agreement_lines(agreement),
         ]
@@ -382,7 +382,7 @@ def register(dp: Dispatcher) -> None:
         if not await _allowed(callback):
             return
         agreement = sa.get_agreement(int(callback.data.split(":")[2]))
-        if agreement is None or sa.latest_pending_consent_id(agreement["employee_id"]) != agreement["id"]:
+        if agreement is None or not sa.pending_consent(agreement):
             await callback.answer("Bu versiya eskirgan yoki tasdiqlangan.", show_alert=True)
             return
         sent = await _send_to_employee(callback.bot, agreement)
@@ -559,11 +559,22 @@ def register(dp: Dispatcher) -> None:
         profile = employees.get_profile(user_id)
         if not sa.can_view(user_id, user_id, profile.get("branch") if profile else None):
             return
-        salary = discipline.get_salary(user_id)
-        lines = sa.view_lines(user_id, salary["fixed_salary"])
-        current = sa.get_current(user_id)
-        pending_id = sa.latest_pending_consent_id(user_id)
-        if current is not None or pending_id is not None:
-            latest = sa.get_agreement(pending_id) if pending_id else current
-            lines += ["", f"Holat: {sa.consent_status_text(latest)}"]
-        await message.answer("\n".join(lines), reply_markup=_consent_kb(pending_id, with_question=sa.issue_for_agreement(pending_id) is None) if pending_id else None)
+        current, upcoming = sa.get_current(user_id), sa.get_upcoming(user_id)
+        if current is None and upcoming is None:
+            salary = discipline.get_salary(user_id)
+            await message.answer("\n".join(sa.view_lines(user_id, salary["fixed_salary"])))
+            return
+        cards = []
+        if current is not None:
+            cards.append((current, "💵 Amaldagi kelishuv"))
+        if upcoming is not None:
+            cards.append((upcoming, f"⏭ Kelajakdagi kelishuv ({sa.format_date(upcoming['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
+        for agreement, title in cards:
+            # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
+            text = f"{_employee_text(agreement, user_id, title)}\n\nHolat: {sa.consent_status_text(agreement)}"
+            markup = (
+                _consent_kb(agreement["id"], with_question=sa.issue_for_agreement(agreement["id"]) is None)
+                if sa.pending_consent(agreement)
+                else None
+            )
+            await message.answer(text, reply_markup=markup)

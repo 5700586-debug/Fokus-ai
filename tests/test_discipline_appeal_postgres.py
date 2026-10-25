@@ -63,7 +63,7 @@ def pg(pg_schema, temp_db, monkeypatch):
     conn.autocommit = True
     try:
         conn.cursor().execute(
-            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit, nazoratchi_branch_sessions, daily_evaluations, daily_evaluation_history, salary_agreements RESTART IDENTITY CASCADE"
+            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit, nazoratchi_branch_sessions, daily_evaluations, daily_evaluation_history, salary_agreements, salary_agreement_consents RESTART IDENTITY CASCADE"
         )
     finally:
         conn.close()
@@ -472,3 +472,46 @@ def test_legacy_fixed_salary_rejects_invalid_amounts_and_changes_nothing_on_post
 
     assert (_agreements(EMPLOYEE), _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}")) == before
     assert discipline.get_salary(EMPLOYEE)["bonus_bank"] == 50
+
+
+def test_agreement_consent_versions_and_parallel_consent_on_postgres(pg):
+    from datetime import date
+
+    from services import salary_agreement as sa
+
+    today = date.today().isoformat()
+    first = sa.save_agreement(EMPLOYEE, 1_800_000, 28, 660, today, FOUNDER, "pgc-1", tariff=3, result_bonus_cap=700_000, with_consent=True)
+    again = sa.save_agreement(EMPLOYEE, 1_800_000, 28, 660, today, FOUNDER, "pgc-1", tariff=3, result_bonus_cap=700_000, with_consent=True)
+    assert first.created and not again.created
+    agreement_id = first.agreement["id"]
+    assert first.agreement["tariff"] == 3 and first.agreement["result_bonus_cap"] == 700_000
+    assert sa.record_consent(agreement_id, FOUNDER) == sa.CONSENT_NOT_OWNER
+
+    def consent():
+        return sa.record_consent(agreement_id, EMPLOYEE)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        outcomes = [future.result() for future in [pool.submit(consent) for _ in range(4)]]
+    assert outcomes.count(sa.CONSENT_RECORDED) == 1 and outcomes.count(sa.CONSENT_ALREADY) == 3
+    assert _scalar(f"SELECT COUNT(*) FROM salary_agreement_consents WHERE agreement_id = {agreement_id}") == 1
+    assert _scalar(f"SELECT consented_by FROM salary_agreement_consents WHERE agreement_id = {agreement_id}") == EMPLOYEE
+
+    second = sa.save_agreement(EMPLOYEE, 2_000_000, 28, 660, today, FOUNDER, "pgc-2", tariff=3, with_consent=True)
+    assert sa.record_consent(agreement_id, EMPLOYEE) == sa.CONSENT_SUPERSEDED  # eski versiya tugmasi yangi versiyaga tegmaydi
+    assert sa.latest_pending_consent_id(EMPLOYEE) == second.agreement["id"]
+    assert sa.version_number(EMPLOYEE, second.agreement["id"]) == 2
+    assert _scalar("SELECT COUNT(*) FROM salary_agreements") == 2  # tarix saqlangan
+
+
+def test_consent_schema_is_idempotent_and_bigint_on_postgres(pg):
+    db.init_db()
+    db.init_db()
+    assert _scalar(
+        "SELECT data_type FROM information_schema.columns WHERE table_name = 'salary_agreement_consents' AND column_name = 'consented_by'"
+    ) == "bigint"
+    assert _scalar(
+        "SELECT data_type FROM information_schema.columns WHERE table_name = 'salary_agreement_consents' AND column_name = 'employee_id'"
+    ) == "bigint"
+    assert _scalar(
+        "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'salary_agreements' AND column_name IN ('tariff', 'result_bonus_cap')"
+    ) == 2

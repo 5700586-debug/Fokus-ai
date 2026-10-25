@@ -1,0 +1,200 @@
+"""Oylik kelishuvi matnini (erkin yozuv) aniq maydonlarga ajratish va xodimni mavjud tasdiqlangan xodimlar orasidan topish.
+
+Faqat deterministik qoidalar (AI/pullik integratsiya yo'q). Tushunilmagan yoki ikki xil o'qilishi mumkin bo'lgan qism HECH
+QACHON taxmin qilinmaydi — ``ParseResult.problems``da qoladi va Founderdan so'raladi."""
+
+import re
+from dataclasses import dataclass, field
+from datetime import date
+
+import employees
+from config import RECRUITING_BRANCH_NAMES
+from services import salary_agreement as sa
+
+FIELDS = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "effective_from", "result_bonus_cap")
+_AMOUNT = r"(\d[\d\s .,]*?)\s*(mln|million|milyon|ming|min|k|m)?\b"
+_APOS = re.compile(r"['‘’`ʻʼ]")
+
+
+@dataclass
+class ParseResult:
+    values: dict = field(default_factory=dict)  # FIELDS ichidan; employee uchun {"name", "branch_hint"}
+    problems: dict = field(default_factory=dict)  # field -> foydalanuvchiga savol
+
+
+def norm(text: str) -> str:
+    return re.sub(r"\s+", " ", _APOS.sub("", (text or "").lower())).strip()
+
+
+class Ambiguous(ValueError):
+    pass
+
+
+def parse_amount(text: str) -> int:
+    """"1.800.000", "1 800 000", "1800000", "1,8 mln", "700 ming" -> so'm. Birligi yo'q kichik son (masalan "700")
+    ikki xil o'qiladi (700 ming / 1 million kabi) — ``Ambiguous``."""
+    raw = norm(text)
+    raw = re.sub(r"\b(som|sum|so'm|somgacha|gacha|oyiga|oyda)\b|som\w*", "", raw).strip()
+    match = re.fullmatch(_AMOUNT, raw)
+    if not match:
+        raise sa.ValidationError("Summani tushunmadim.")
+    number, unit = match.group(1).strip(), match.group(2)
+    if unit:
+        scale = 1_000_000 if unit in ("mln", "million", "milyon", "m") else 1000
+        if not re.fullmatch(r"\d+([.,]\d+)?", number.replace(" ", "")):
+            raise sa.ValidationError("Summani tushunmadim.")
+        value = round(float(number.replace(" ", "").replace(",", ".")) * scale)
+        sa.validate_salary_amount(value)
+        return value
+    compact = re.sub(r"[\s ]", "", number)
+    if re.search(r"[.,]", compact):
+        return sa.parse_salary(compact)
+    if not compact.isdigit():
+        raise sa.ValidationError("Summani tushunmadim.")
+    if int(compact) < 10_000:
+        raise Ambiguous(f"«{compact}» qancha so'm? Aniq yozing: «{compact} ming» yoki «{compact} million».")
+    return sa.parse_salary(compact)
+
+
+def _grab(label_pattern: str, text: str) -> str | None:
+    match = re.search(label_pattern + r"[^\S\n]*[:=\-–—]?[^\S\n]*([^\n;]*)", text, re.I)
+    return match.group(1).strip() if match else None
+
+
+def _set_amount(result: ParseResult, key: str, raw: str | None) -> None:
+    if raw is None:
+        return
+    try:
+        result.values[key] = parse_amount(raw)
+    except Ambiguous as error:
+        result.problems[key] = str(error)
+    except sa.ValidationError:
+        result.problems[key] = "Summani tushunmadim. Masalan: 1 800 000 yoki 1,8 mln."
+
+
+def parse_text(text: str, today: date | None = None, name_words: int = 2) -> ParseResult:
+    result = ParseResult()
+    lowered = _APOS.sub("", text or "")
+    lines = [line.strip() for line in lowered.splitlines() if line.strip()]
+
+    # Birinchi yorliqsiz qator: "Ism Familiya — Filial"
+    for line in lines:
+        if not re.search(r"(?i)\b(tarif|fiks|oyiga|kuniga|kelishuv|natija|bonus)\w*\s*[:=]", line) and not re.search(r"\d{4}", line):
+            parts = re.split(r"\s+[—–-]\s+|\s*[—–]\s*", line, maxsplit=1)
+            name = parts[0].strip(" :,.")
+            if name and len(name.split()) >= name_words and not any(ch.isdigit() for ch in name):
+                result.values["employee"] = {"name": name, "branch_hint": parts[1].strip() if len(parts) > 1 else None}
+            break
+
+    tariff = _grab(r"\btarif\w*", lowered)
+    if tariff is not None:
+        match = re.match(r"(\d+)", tariff)
+        if match and int(match.group(1)) in sa.TARIFFS:
+            result.values["tariff"] = int(match.group(1))
+        else:
+            result.problems["tariff"] = "Tarifni 1, 2 yoki 3 deb yozing."
+
+    _set_amount(result, "fixed_salary", _grab(r"\bfiks\w*", lowered))
+    bonus = _grab(r"\bnatija\s*bonus\w*", lowered)
+    if bonus is not None:
+        if re.fullmatch(r"(yoq|yo'q|yo‘q|0|belgilanmagan)", norm(bonus)):
+            result.values["result_bonus_cap"] = None
+            result.values["bonus_none"] = True
+        else:
+            _set_amount(result, "result_bonus_cap", bonus)
+
+    days = re.search(r"(?<![\d.\-/])(\d{1,2})[^\S\n]*(?:ta[^\S\n]*)?(?:ish[^\S\n]*)?kun\w*", lowered, re.I)
+    if days:
+        try:
+            result.values["work_days"] = sa.parse_days(days.group(1))
+        except sa.ValidationError as error:
+            result.problems["work_days"] = str(error)
+    else:
+        label = re.search(r"\boyiga\s*[:=\-]?\s*(\d{1,2})\s*(?=$|[\n,;.])", lowered, re.I | re.M)
+        if label:
+            try:
+                result.values["work_days"] = sa.parse_days(label.group(1))
+            except sa.ValidationError as error:
+                result.problems["work_days"] = str(error)
+
+    hours = re.search(r"(?:kuniga\s*[:=\-]?\s*)?(\d{1,2}(?:[.,:]\d{1,2})?)\s*soat", lowered, re.I)
+    if hours:
+        try:
+            result.values["daily_minutes"] = sa.parse_daily_minutes(hours.group(1))
+        except sa.ValidationError as error:
+            result.problems["daily_minutes"] = str(error)
+
+    date_match = re.search(r"\b(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}-\d{2}-\d{2})\b", lowered)
+    if date_match:
+        raw = date_match.group(1)
+        if re.match(r"\d{1,2}[/-]", raw):
+            raw = raw.replace("/", ".").replace("-", ".")
+        try:
+            result.values["effective_from"] = sa.parse_effective_date(raw, today)
+        except sa.ValidationError as error:
+            result.problems["effective_from"] = str(error)
+    return result
+
+
+def parse_bare(field_key: str, text: str, today: date | None = None) -> ParseResult:
+    """So'ralgan bitta maydonga qisqa javob ("1,8 mln", "28", "11", "01.10.2026", "3")."""
+    result = ParseResult()
+    raw = (text or "").strip()
+    try:
+        if field_key in ("fixed_salary", "result_bonus_cap"):
+            if field_key == "result_bonus_cap" and norm(raw) in ("yoq", "yoq", "0", "bonus yoq"):
+                result.values["bonus_none"] = True
+                result.values[field_key] = None
+            else:
+                result.values[field_key] = parse_amount(raw)
+        elif field_key == "work_days":
+            result.values[field_key] = sa.parse_days(re.sub(r"(?i)\s*(ta\s*)?(ish\s*)?kun\w*", "", raw).strip())
+        elif field_key == "daily_minutes":
+            result.values[field_key] = sa.parse_daily_minutes(raw)
+        elif field_key == "effective_from":
+            result.values[field_key] = sa.parse_effective_date(raw.replace("/", "."), today)
+        elif field_key == "tariff":
+            if raw.isdigit() and int(raw) in sa.TARIFFS:
+                result.values[field_key] = int(raw)
+            else:
+                result.problems[field_key] = "Tarifni 1, 2 yoki 3 deb yozing."
+        elif field_key == "employee":
+            parts = re.split(r"\s+[—–-]\s+", _APOS.sub("", raw), maxsplit=1)
+            result.values[field_key] = {"name": parts[0].strip(), "branch_hint": parts[1].strip() if len(parts) > 1 else None}
+    except Ambiguous as error:
+        result.problems[field_key] = str(error)
+    except sa.ValidationError as error:
+        result.problems[field_key] = str(error)
+    return result
+
+
+# ----------------------------------------------------------- xodimni topish --
+
+
+def _tokens(*parts) -> set[str]:
+    return {t for part in parts if part for t in norm(part).replace("-", " ").split()}
+
+
+def _branch_matches(hint: str | None) -> list[str]:
+    if not hint:
+        return []
+    h = norm(hint)
+    return [b for b in RECRUITING_BRANCH_NAMES if norm(b) == h] or [b for b in RECRUITING_BRANCH_NAMES if h in norm(b)]
+
+
+def find_employees(name: str, branch_hint: str | None = None) -> tuple[list[dict], bool]:
+    """(nomzodlar, aniq) — faqat tasdiqlangan xodimlar. ``aniq`` — bitta nomzod va filial ko'rsatmasi (bo'lsa) unga mos;
+    aks holda Founder tanlaydi. Yangi xodim HECH QACHON yaratilmaydi."""
+    want = _tokens(name)
+    if not want:
+        return [], False
+    found = []
+    for branch in RECRUITING_BRANCH_NAMES:
+        for profile in employees.list_approved_by_branch(branch):
+            if want <= _tokens(profile.get("familiya"), profile.get("ism"), profile.get("otasining_ismi")):
+                found.append(profile)
+    if len(found) != 1:
+        return found, False
+    hint_branches = _branch_matches(branch_hint)
+    exact = not branch_hint or (hint_branches and found[0]["branch"] in hint_branches)
+    return found, bool(exact)

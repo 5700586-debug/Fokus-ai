@@ -18,6 +18,7 @@ from repositories import salary_agreements as repo
 MAX_SALARY = 2_000_000_000  # Postgres INTEGER chegarasidan past
 SOURCE_AGREEMENT = "agreement"
 SOURCE_LEGACY = "legacy_setsalary"
+TARIFFS = (1, 2, 3)  # tarif faqat belgi; 1-2 qoidalari hali tasdiqlanmagan, fiks har doim qo'lda
 
 
 class ValidationError(ValueError):
@@ -123,7 +124,8 @@ def _now_iso() -> str:
 
 def _write(
     employee_id: int, fixed_salary: int, work_days: int | None, daily_minutes: int | None, effective_from: str,
-    created_by: int, source: str, request_token: str | None,
+    created_by: int, source: str, request_token: str | None, tariff: int | None = None,
+    result_bonus_cap: int | None = None, with_consent: bool = False,
 ) -> SaveResult:
     """Kelishuv qatori + (amaldagi bo'lsa) ``salaries.fixed_salary`` sinxroni BITTA tranzaksiyada. Xatoda hammasi bekor;
     takroriy ``request_token`` hech narsa yozmaydi."""
@@ -137,10 +139,13 @@ def _write(
                 "employee_id": employee_id, "fixed_salary": fixed_salary, "work_days": work_days,
                 "daily_minutes": daily_minutes, "effective_from": effective_from, "created_by": created_by,
                 "created_at": now, "source": source, "request_token": request_token,
+                "tariff": tariff, "result_bonus_cap": result_bonus_cap,
             },
         )
         if agreement_id is None:
             return SaveResult(False, None)
+        if with_consent:
+            repo.insert_consent_row(conn, agreement_id, employee_id)
         current = repo.current_agreement(employee_id, today, conn=conn)
         if current is not None:  # kelajak sanali kelishuv bo'lsa joriy fiks o'zgarmaydi
             repo.mirror_fixed_salary(conn, employee_id, current["fixed_salary"], created_by, now)
@@ -159,12 +164,20 @@ def _write(
 
 def save_agreement(
     employee_id: int, fixed_salary: int, work_days: int, daily_minutes: int, effective_from: str,
-    created_by: int, request_token: str,
+    created_by: int, request_token: str, *, tariff: int | None = None, result_bonus_cap: int | None = None,
+    with_consent: bool = False,
 ) -> SaveResult:
     validate_agreement(fixed_salary, work_days, daily_minutes, effective_from)
+    if tariff is not None and (not isinstance(tariff, int) or isinstance(tariff, bool) or tariff not in TARIFFS):
+        raise ValidationError("Tarif noto'g'ri.")
+    if result_bonus_cap is not None:
+        validate_salary_amount(result_bonus_cap)
     if not request_token:
         raise ValidationError("Saqlash tokeni yo'q.")
-    return _write(employee_id, fixed_salary, work_days, daily_minutes, effective_from, created_by, SOURCE_AGREEMENT, request_token)
+    return _write(
+        employee_id, fixed_salary, work_days, daily_minutes, effective_from, created_by, SOURCE_AGREEMENT, request_token,
+        tariff, result_bonus_cap, with_consent,
+    )
 
 
 def save_legacy_fixed_salary(employee_id: int, fixed_salary: int, updated_by: int) -> SaveResult:
@@ -208,7 +221,13 @@ def format_date(iso_date: str) -> str:
 
 def agreement_lines(agreement: dict) -> list[str]:
     days = agreement.get("work_days")
-    return [
+    extra = []
+    if agreement.get("tariff") is not None:
+        extra.append(f"🏷 Tarif: {agreement['tariff']}")
+    if agreement.get("tariff") is not None or agreement.get("result_bonus_cap") is not None:
+        cap = agreement.get("result_bonus_cap")
+        extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha' if cap else 'Belgilanmagan'}")
+    return extra + [
         f"📅 Oylik ish kunlari: {str(days) + ' kun' if days is not None else 'Kiritilmagan'}",
         f"🕒 Kunlik ish soati: {format_minutes(agreement.get('daily_minutes'))}",
         f"📌 Amal qilish sanasi: {format_date(agreement['effective_from'])}",
@@ -234,3 +253,71 @@ def view_lines(employee_id: int, legacy_fixed: int) -> list[str]:
             *agreement_lines(upcoming),
         ]
     return lines
+
+
+# ------------------------------------------------------------ rozilik --
+
+DELIVERY_PENDING, DELIVERY_SENT, DELIVERY_FAILED = "pending", "sent", "failed"
+CONSENT_RECORDED, CONSENT_ALREADY, CONSENT_NOT_OWNER, CONSENT_SUPERSEDED, CONSENT_UNKNOWN = (
+    "recorded", "already", "not_owner", "superseded", "unknown",
+)
+
+
+def get_consent(agreement_id: int) -> dict | None:
+    return repo.get_consent(agreement_id)
+
+
+def mark_delivery(agreement_id: int, ok: bool) -> None:
+    repo.set_delivery(agreement_id, DELIVERY_SENT if ok else DELIVERY_FAILED, _now_iso())
+
+
+def consent_status_text(agreement: dict) -> str:
+    """Xodim va Founder uchun aniq holat. Rozilik jadvalida qatori yo'q (eski) kelishuvga rozilik TALAB QILINMAGAN."""
+    consent = repo.get_consent(agreement["id"])
+    if consent is None:
+        return "Rozilik talab qilinmagan (eski kelishuv)"
+    if consent["consented_at"]:
+        return f"✅ Xodim roziligi olingan ({consent['consented_at'][:16].replace('T', ' ')} UTC)"
+    if consent["delivery_status"] == DELIVERY_FAILED:
+        return "⚠️ Xodimga yuborilmadi — xodim tasdig'i kutilmoqda"
+    return "⏳ Xodim tasdig'i kutilmoqda"
+
+
+def record_consent(agreement_id: int, user_id: int) -> str:
+    """Faqat kelishuv egasi, faqat aynan shu versiya (yangi versiya chiqqan bo'lsa eskisi tasdiqlanmaydi)."""
+    agreement = repo.get_agreement(agreement_id)
+    if agreement is None or repo.get_consent(agreement_id) is None:
+        return CONSENT_UNKNOWN
+    if agreement["employee_id"] != user_id:
+        return CONSENT_NOT_OWNER
+    if repo.has_newer_versioned_agreement(user_id, agreement_id):
+        return CONSENT_SUPERSEDED
+    return CONSENT_RECORDED if repo.record_consent(agreement_id, user_id, _now_iso()) else CONSENT_ALREADY
+
+
+def latest_pending_consent_id(employee_id: int) -> int | None:
+    latest = repo.latest_consent_agreement_id(employee_id)
+    consent = repo.get_consent(latest) if latest is not None else None
+    return latest if consent is not None and not consent["consented_at"] else None
+
+
+def version_number(employee_id: int, agreement_id: int) -> int:
+    return repo.version_number(employee_id, agreement_id)
+
+
+def get_agreement(agreement_id: int) -> dict | None:
+    return repo.get_agreement(agreement_id)
+
+
+def can_view(viewer_id: int, employee_id: int, employee_branch: str | None) -> bool:
+    """Kelishuv va summalar: xodimning o'zi, Founder, yoki shu xodim filialiga haqiqatan vakolatli rahbar
+    (mavjud ``ACTION_LOOKUP_ANY_SALARY`` + ``can_access_branch``). Boshqa hamma — yo'q."""
+    from services import permissions
+
+    if viewer_id == employee_id:
+        return True
+    if permissions.get_role(viewer_id) == "founder":
+        return True
+    return permissions.has_permission(viewer_id, permissions.ACTION_LOOKUP_ANY_SALARY) and permissions.can_access_branch(
+        viewer_id, employee_branch
+    )

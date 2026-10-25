@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS salary_agreements (
 
 CREATE INDEX IF NOT EXISTS idx_salary_agreements_employee ON salary_agreements (employee_id, effective_from);
 
+-- Xodim roziligi har kelishuv VERSIYASI (agreement_id) uchun alohida; maosh hisobiga ta'sir qilmaydi. Eski (rozilik
+-- talab qilinmagan) kelishuvlarda qator yo'q — ularga avtomatik rozilik yozilmaydi.
+CREATE TABLE IF NOT EXISTS salary_agreement_consents (
+    agreement_id INTEGER PRIMARY KEY,
+    employee_id INTEGER NOT NULL,
+    delivery_status TEXT NOT NULL DEFAULT 'pending',
+    delivery_at TEXT,
+    consented_by INTEGER,
+    consented_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS company_rules (
     rule_number INTEGER PRIMARY KEY,
     title TEXT NOT NULL,

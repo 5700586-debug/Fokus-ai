@@ -299,3 +299,168 @@ def test_additive_migration_is_safe_to_rerun(temp_db):
     finally:
         conn.close()
     assert {"tariff", "result_bonus_cap"} <= cols
+
+
+# ------------------------------------------------ "Tushunmadim" + rahbar --
+
+MGR1, MGR2 = 891011, 891012
+
+
+def _managers():
+    _employee(MGR1, surname="Rahbarov", ism="Bek", branch=B1, role="savdo_boshligi")
+    _employee(MGR2, surname="Boshqaev", ism="Sher", branch=B2, role="savdo_boshligi")
+
+
+def _to(bot, chat):
+    return [m for m in bot.sent if getattr(m, "chat_id", None) == chat]
+
+
+def _issues():
+    return _rows("salary_agreement_issues")
+
+
+async def test_employee_message_has_both_buttons(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    agreement_id = await _saved(main, bot)
+    assert {f"sagr:ok:{agreement_id}", f"sagr:no:{agreement_id}"} <= set(_buttons(_to(bot, EMP)))
+    texts = [b.text for m in _to(bot, EMP) for row in m.reply_markup.inline_keyboard for b in row]
+    assert texts == ["✅ Roziman", "❓ Tushunmadim"]
+
+
+async def test_not_understood_opens_one_issue_and_notifies_founder_and_own_branch_manager(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    _managers()
+    agreement_id = await _saved(main, bot)
+    await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)
+    issues = _issues()
+    assert len(issues) == 1 and issues[0]["agreement_id"] == agreement_id and issues[0]["status"] == "open"
+    assert issues[0]["branch"] == B1 and issues[0]["notified_count"] == 2
+    import company_time
+
+    assert issues[0]["due_date"] == company_time.today().isoformat()
+    for chat in (FOUNDER_ID, MGR1):
+        got = _text(_to(bot, chat))
+        assert "tushunmadi" in got and "filial rahbari" in got and "1 800 000" not in got
+    assert _to(bot, MGR2) == []
+    assert _rows("salary_agreement_consents")[0]["consented_at"] is None
+    before = len(bot.sent)
+    await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)  # takroriy
+    assert len(_issues()) == 1 and len([m for m in bot.sent[before:] if getattr(m, "chat_id", None) in (FOUNDER_ID, MGR1)]) == 0
+
+
+async def test_not_understood_rejects_stranger_old_and_consented(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    _employee(OTHER, surname="Boshqa", ism="Bek")
+    first = await _saved(main, bot)
+    await _cb(main, bot, f"sagr:no:{first}", user=OTHER)
+    assert _issues() == []
+    second = await _saved(main, bot, SAMPLE.replace("1.800.000", "2.000.000"))
+    await _cb(main, bot, f"sagr:no:{first}", user=EMP)  # eski versiya
+    assert _issues() == []
+    await _cb(main, bot, f"sagr:ok:{second}", user=EMP)
+    await _cb(main, bot, f"sagr:no:{second}", user=EMP)  # rozilikdan keyin
+    assert _issues() == []
+
+
+async def test_each_version_has_its_own_issue_and_resolution_does_not_consent(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    _managers()
+    first = await _saved(main, bot)
+    await _cb(main, bot, f"sagr:no:{first}", user=EMP)
+    issue_id = _issues()[0]["id"]
+    await _cb(main, bot, f"sagr:res:{issue_id}:explained", user=MGR1)
+    issue = _issues()[0]
+    assert issue["status"] == "resolved" and issue["outcome"] == "explained" and issue["resolved_by"] == MGR1
+    assert _rows("salary_agreement_consents")[0]["consented_at"] is None  # hal qilindi != rozilik
+    await _cb(main, bot, f"sagr:res:{issue_id}:disagreed", user=FOUNDER_ID)  # takroriy
+    assert _issues()[0]["outcome"] == "explained"
+    second = await _saved(main, bot, SAMPLE.replace("1.800.000", "2.000.000"))
+    await _cb(main, bot, f"sagr:no:{second}", user=EMP)
+    assert len(_issues()) == 2 and _issues()[1]["status"] == "open" and _issues()[0]["status"] == "resolved"
+
+
+async def test_only_founder_or_own_branch_manager_can_resolve(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    _managers()
+    agreement_id = await _saved(main, bot)
+    await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)
+    issue_id = _issues()[0]["id"]
+    for user in (EMP, MGR2):
+        await _cb(main, bot, f"sagr:res:{issue_id}:explained", user=user)
+        assert _issues()[0]["status"] == "open"
+    assert sa.record_consent(agreement_id, MGR1) == sa.CONSENT_NOT_OWNER  # rahbar xodim o'rniga rozilik bera olmaydi
+    await _cb(main, bot, f"sagr:ok:{agreement_id}", user=MGR1)
+    assert _rows("salary_agreement_consents")[0]["consented_at"] is None
+    await _cb(main, bot, f"sagr:res:{issue_id}:new_agreement", user=FOUNDER_ID)
+    assert _issues()[0]["outcome"] == "new_agreement"
+
+
+async def test_issue_delivery_failure_is_reported_to_employee(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _employee(EMP)
+    agreement_id = await _saved(main, bot)
+    original = bot.send_message
+
+    async def failing(chat_id, *args, **kwargs):
+        if chat_id == FOUNDER_ID:
+            raise RuntimeError("blocked")
+        return await original(chat_id, *args, **kwargs)
+
+    monkeypatch.setattr(bot, "send_message", failing)
+    sent = await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)
+    assert _issues()[0]["notified_count"] == 0 and _issues()[0]["status"] == "open"
+    assert "yetkazib bo'lmadi" in _text(sent) and "rahbarga yuborildi" not in _text(sent)
+
+
+async def test_view_permissions_own_branch_manager_yes_other_branch_no(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    _managers()
+    _employee(OTHER, surname="Boshqa", ism="Bek")
+    agreement_id = await _saved(main, bot)
+    assert sa.can_view(MGR1, EMP, B1) and not sa.can_view(MGR2, EMP, B1) and not sa.can_view(OTHER, EMP, B1)
+    ok = await _cb(main, bot, f"sagr:view:{agreement_id}", user=MGR1)
+    assert "1 800 000" in _text(ok)
+    for user in (MGR2, OTHER):
+        denied = await _cb(main, bot, f"sagr:view:{agreement_id}", user=user)
+        assert "1 800 000" not in _text(denied)
+    listing = await send(main.dp, bot, MGR1, text="/filialkelishuv")
+    assert f"sagr:view:{agreement_id}" in _buttons(listing)
+    empty = await send(main.dp, bot, MGR2, text="/filialkelishuv")
+    assert f"sagr:view:{agreement_id}" not in _buttons(empty)
+    from services import permissions
+
+    assert not permissions.has_permission(MGR1, permissions.ACTION_LOOKUP_ANY_SALARY)  # barcha oyliklar kengaytirilmagan
+
+
+async def test_end_of_day_reminder_once_via_existing_scheduler_and_today_problems(bot_dp):
+    from datetime import datetime
+
+    import company_time
+    import salary_agreement_bot
+    from services import founder_today_problems
+
+    main, bot = bot_dp
+    _employee(EMP)
+    agreement_id = await _saved(main, bot)
+    await _cb(main, bot, f"sagr:no:{agreement_id}", user=EMP)
+    assert founder_today_problems.build_today_problems_summary()["agreement_questions"]["total"] == 1
+    sent = await send(main.dp, bot, FOUNDER_ID, text="🚨 Bugungi muammolar")
+    assert "ochiq savollar" in _text(sent) and "1 800 000" not in _text(sent)
+    tz = company_time.resolve_timezone()
+    day = company_time.today()
+    bot.sent = []
+    assert await salary_agreement_bot.remind_open_issues(bot, datetime(day.year, day.month, day.day, 15, 0, tzinfo=tz)) == 0
+    assert await salary_agreement_bot.remind_open_issues(bot, datetime(day.year, day.month, day.day, 21, 30, tzinfo=tz)) == 1
+    assert await salary_agreement_bot.remind_open_issues(bot, datetime(day.year, day.month, day.day, 22, 0, tzinfo=tz)) == 0
+    assert len(_to(bot, FOUNDER_ID)) == 1 and "1 800 000" not in _text(_to(bot, FOUNDER_ID))
+    from discipline_bot import start_scheduler  # job mavjud scheduler'ga ulanganini tekshirish uchun manba matni
+
+    import inspect
+
+    assert "salary_agreement_issue_reminder" in inspect.getsource(start_scheduler)

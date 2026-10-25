@@ -79,6 +79,9 @@ ACTION_APPROVE_APPLICANT = "approve_applicant"
 ACTION_MANAGE_DISCIPLINE_RULES = "manage_discipline_rules"
 ACTION_SET_SALARY = "set_salary"
 ACTION_LOOKUP_ANY_SALARY = "lookup_any_salary"
+# Xodim oylik KELISHUVINI faqat O'Z filialidagi xodim uchun ochish (filial chegarasi ``can_access_branch`` bilan).
+# ``ACTION_LOOKUP_ANY_SALARY`` (barcha oyliklar) kengaytirilmagan.
+ACTION_VIEW_BRANCH_AGREEMENT = "view_branch_agreement"
 ACTION_DECIDE_APPEAL = "decide_appeal"
 ACTION_DECIDE_ATTENDANCE_PERMISSION = "decide_attendance_permission"
 
@@ -161,7 +164,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         ACTION_VIEW_SUPPLIER_RESULTS,
     },
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION, ACTION_RECORD_SUPPLIER_PURCHASE, ACTION_VIEW_SUPPLIER_RESULTS},
-    "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT},
+    "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT, ACTION_VIEW_BRANCH_AGREEMENT},
+    "addel_boshligi": {ACTION_VIEW_BRANCH_AGREEMENT},
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
     # Kassir faqat smenani boshlaydi/topshiradi; xarajatni rahbar/moliyachi kiritadi (ACTION_LOG_CASH_EXPENSE).
     "kassir": {ACTION_OPEN_CASH_SHIFT, ACTION_CLOSE_CASH_SHIFT},

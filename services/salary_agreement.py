@@ -276,11 +276,17 @@ def consent_status_text(agreement: dict) -> str:
     consent = repo.get_consent(agreement["id"])
     if consent is None:
         return "Rozilik talab qilinmagan (eski kelishuv)"
+    issue = repo.get_issue_for_agreement(agreement["id"])
+    question = ""
+    if issue is not None:
+        question = "\n❓ Xodim savol bergan: " + (
+            "hal qilingan (" + ISSUE_OUTCOMES.get(issue["outcome"], "-") + ")" if issue["status"] == "resolved" else "hal qilinmagan"
+        )
     if consent["consented_at"]:
-        return f"✅ Xodim roziligi olingan ({consent['consented_at'][:16].replace('T', ' ')} UTC)"
+        return f"✅ Xodim roziligi olingan ({consent['consented_at'][:16].replace('T', ' ')} UTC)" + question
     if consent["delivery_status"] == DELIVERY_FAILED:
-        return "⚠️ Xodimga yuborilmadi — xodim tasdig'i kutilmoqda"
-    return "⏳ Xodim tasdig'i kutilmoqda"
+        return "⚠️ Xodimga yuborilmadi — xodim tasdig'i kutilmoqda" + question
+    return "⏳ Xodim tasdig'i kutilmoqda" + question
 
 
 def record_consent(agreement_id: int, user_id: int) -> str:
@@ -310,14 +316,108 @@ def get_agreement(agreement_id: int) -> dict | None:
 
 
 def can_view(viewer_id: int, employee_id: int, employee_branch: str | None) -> bool:
-    """Kelishuv va summalar: xodimning o'zi, Founder, yoki shu xodim filialiga haqiqatan vakolatli rahbar
-    (mavjud ``ACTION_LOOKUP_ANY_SALARY`` + ``can_access_branch``). Boshqa hamma — yo'q."""
+    """Kelishuv va summalar: xodimning o'zi, Founder, yoki shu xodim filialiga biriktirilgan vakolatli rahbar
+    (``ACTION_VIEW_BRANCH_AGREEMENT`` + ``can_access_branch`` — rahbar rollari filiallararo emas, faqat O'Z filiali).
+    Boshqa hamma — yo'q. Har ochish/callbackda qayta chaqiriladi."""
     from services import permissions
 
     if viewer_id == employee_id:
         return True
     if permissions.get_role(viewer_id) == "founder":
         return True
-    return permissions.has_permission(viewer_id, permissions.ACTION_LOOKUP_ANY_SALARY) and permissions.can_access_branch(
+    return permissions.has_permission(viewer_id, permissions.ACTION_VIEW_BRANCH_AGREEMENT) and permissions.can_access_branch(
         viewer_id, employee_branch
     )
+
+
+def branch_managers(branch: str | None) -> list[int]:
+    """Shu filialning vakolatli rahbarlari (tasdiqlangan profil, o'z filiali shu)."""
+    import employees
+    from roles import list_users_by_role
+    from services import permissions
+
+    if not branch:
+        return []
+    found = []
+    for role_key, actions in permissions.ROLE_PERMISSIONS.items():
+        if permissions.ACTION_VIEW_BRANCH_AGREEMENT not in actions:
+            continue
+        for user_id in list_users_by_role(role_key):
+            profile = employees.get_profile(user_id, include_contacts=False)
+            if profile and profile.get("status") == "approved" and can_view(user_id, -1, branch):
+                found.append(user_id)
+    return found
+
+
+# ------------------------------------------------- "Tushunmadim" savollari --
+
+ISSUE_EXPLAINED, ISSUE_NEW_AGREEMENT, ISSUE_DISAGREED = "explained", "new_agreement", "disagreed"
+ISSUE_OUTCOMES = {
+    ISSUE_EXPLAINED: "tushuntirildi",
+    ISSUE_NEW_AGREEMENT: "yangi kelishuv",
+    ISSUE_DISAGREED: "kelishilmadi",
+}
+ISSUE_OPENED, ISSUE_ALREADY, ISSUE_CONSENTED = "opened", "already", "consented"
+
+
+def ask_not_understood(agreement_id: int, user_id: int) -> tuple[str, dict | None]:
+    """Xodim "❓ Tushunmadim"ni bosdi: faqat egasi, faqat joriy (eng yangi) versiya, rozilik berilmagan. Versiya uchun
+    bitta savol; takroriy bosish yangisini ochmaydi. Qaytadi: (natija, savol)."""
+    import employees
+
+    agreement = repo.get_agreement(agreement_id)
+    consent = repo.get_consent(agreement_id) if agreement else None
+    if agreement is None or consent is None:
+        return CONSENT_UNKNOWN, None
+    if agreement["employee_id"] != user_id:
+        return CONSENT_NOT_OWNER, None
+    if repo.has_newer_versioned_agreement(user_id, agreement_id):
+        return CONSENT_SUPERSEDED, None
+    if consent["consented_at"]:
+        return ISSUE_CONSENTED, None
+    profile = employees.get_profile(user_id, include_contacts=False) or {}
+    issue_id = repo.open_issue(
+        agreement_id, user_id, profile.get("branch"), company_time.today().isoformat(), _now_iso()
+    )
+    if issue_id is None:
+        return ISSUE_ALREADY, repo.get_issue_for_agreement(agreement_id)
+    return ISSUE_OPENED, repo.get_issue(issue_id)
+
+
+def can_manage_issue(user_id: int, issue: dict) -> bool:
+    return user_id != issue["employee_id"] and can_view(user_id, issue["employee_id"], issue["branch"])
+
+
+def resolve_issue(issue_id: int, user_id: int, outcome: str) -> str:
+    """Yopish: Founder yoki o'sha filial rahbari; xodimning o'zi emas. Rozilikni O'ZGARTIRMAYDI."""
+    issue = repo.get_issue(issue_id)
+    if issue is None or outcome not in ISSUE_OUTCOMES:
+        return "unknown"
+    if not can_manage_issue(user_id, issue):
+        return "denied"
+    return "resolved" if repo.resolve_issue(issue_id, user_id, outcome, _now_iso()) else "already"
+
+
+def issue_for_agreement(agreement_id: int) -> dict | None:
+    return repo.get_issue_for_agreement(agreement_id)
+
+
+def get_issue(issue_id: int) -> dict | None:
+    return repo.get_issue(issue_id)
+
+
+def set_issue_notified(issue_id: int, count: int) -> None:
+    repo.set_issue_notified(issue_id, count)
+
+
+def open_issues() -> list[dict]:
+    return repo.list_open_issues()
+
+
+def mark_issue_reminded(issue_id: int, day: str) -> None:
+    repo.mark_reminded(issue_id, day)
+
+
+def latest_agreement_id(employee_id: int) -> int | None:
+    agreements = repo.list_agreements(employee_id)
+    return agreements[-1]["id"] if agreements else None

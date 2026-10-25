@@ -1563,6 +1563,9 @@ def _founder_today_problems_text(summary: dict) -> str:
     lines.extend(_today_problems_section_text("🟡 Bugungi grafigi kiritilmagan faol xodimlar", summary["missing_schedule"]))
     lines.append("")
     lines.extend(_today_problems_section_text("⏳ Kutilayotgan grafik o'zgartirish so'rovlari", summary["pending_requests"]))
+    if summary["agreement_questions"]["total"]:
+        lines.append("")
+        lines.extend(_today_problems_section_text("❓ Oylik kelishuvi bo'yicha ochiq savollar", summary["agreement_questions"]))
     return "\n".join(lines)
 
 

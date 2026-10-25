@@ -162,3 +162,84 @@ def record_consent(agreement_id: int, user_id: int, at: str) -> bool:
     finally:
         conn.close()
     return changed
+
+
+# ----------------------------------------------------- "Tushunmadim" savollari --
+
+
+def open_issue(agreement_id: int, employee_id: int, branch: str | None, due_date: str, now: str) -> int | None:
+    """Versiya uchun savol yo'q bo'lsa yaratadi (id), bor bo'lsa ``None`` (takroriy bosish)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO salary_agreement_issues (agreement_id, employee_id, branch, status, due_date, opened_at) "
+            "VALUES (?, ?, ?, 'open', ?, ?) ON CONFLICT(agreement_id) DO NOTHING",
+            (agreement_id, employee_id, branch, due_date, now),
+        )
+        created = cursor.rowcount > 0
+        issue_id = cursor.lastrowid if created else None
+        conn.commit()
+    finally:
+        conn.close()
+    return issue_id
+
+
+def get_issue(issue_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM salary_agreement_issues WHERE id = ?", (issue_id,)).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def get_issue_for_agreement(agreement_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM salary_agreement_issues WHERE agreement_id = ?", (agreement_id,)).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def set_issue_notified(issue_id: int, count: int) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE salary_agreement_issues SET notified_count = ? WHERE id = ?", (count, issue_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def resolve_issue(issue_id: int, user_id: int, outcome: str, at: str) -> bool:
+    """Atomik ``open -> resolved``; takroriy yopish ``False``. Rozilik jadvaliga tegmaydi."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE salary_agreement_issues SET status = 'resolved', resolved_by = ?, resolved_at = ?, outcome = ? "
+            "WHERE id = ? AND status = 'open'",
+            (user_id, at, outcome, issue_id),
+        )
+        changed = cursor.rowcount > 0
+        conn.commit()
+    finally:
+        conn.close()
+    return changed
+
+
+def list_open_issues() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM salary_agreement_issues WHERE status = 'open' ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+def mark_reminded(issue_id: int, day: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE salary_agreement_issues SET reminded_on = ? WHERE id = ?", (day, issue_id))
+        conn.commit()
+    finally:
+        conn.close()

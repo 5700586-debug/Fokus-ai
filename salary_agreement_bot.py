@@ -109,8 +109,37 @@ def _employee_text(agreement: dict, employee_id: int) -> str:
     )
 
 
-def _consent_kb(agreement_id: int) -> InlineKeyboardMarkup:
-    return _kb([("✅ Tushundim, roziman", f"sagr:ok:{agreement_id}")])
+def _consent_kb(agreement_id: int, *, with_question: bool = True) -> InlineKeyboardMarkup:
+    row = [("✅ Roziman", f"sagr:ok:{agreement_id}")]
+    if with_question:
+        row.append(("❓ Tushunmadim", f"sagr:no:{agreement_id}"))
+    return _kb(row)
+
+
+REMIND_HOUR = 21  # kun oxiri (Asia/Tashkent); mavjud discipline scheduler'ga job sifatida ulanadi
+
+
+async def remind_open_issues(bot, now=None) -> int:
+    """Kun oxirida yopilmagan "Tushunmadim" savollari haqida Founderga (summasiz) eslatma; har savol kuniga bir marta."""
+    now = now or company_time.now()
+    if now.hour < REMIND_HOUR:
+        return 0
+    today = now.date().isoformat()
+    pending = [i for i in sa.open_issues() if i["due_date"] <= today and i.get("reminded_on") != today]
+    if not pending:
+        return 0
+    lines = ["⏰ Yopilmagan oylik kelishuvi savollari:"]
+    for issue in pending:
+        profile = employees.get_profile(issue["employee_id"], include_contacts=False) or {"user_id": issue["employee_id"]}
+        lines.append(f"• {_full_name(profile)} — {issue.get('branch') or '-'} (muddat: {sa.format_date(issue['due_date'])})")
+    try:
+        await bot.send_message(FOUNDER_ID, "\n".join(lines))
+    except Exception as error:  # noqa: BLE001
+        logger.warning("Kelishuv savollari eslatmasi ketmadi: %s", type(error).__name__)
+        return 0
+    for issue in pending:
+        sa.mark_issue_reminded(issue["id"], today)
+    return len(pending)
 
 
 def _private(event) -> bool:
@@ -395,6 +424,129 @@ def register(dp: Dispatcher) -> None:
         }
         await callback.answer(messages[outcome], show_alert=True)
 
+    async def _notify_issue(bot, issue: dict, agreement: dict) -> int:
+        profile = employees.get_profile(issue["employee_id"], include_contacts=False) or {"user_id": issue["employee_id"]}
+        managers = sa.branch_managers(issue["branch"])
+        names = ", ".join(_full_name(employees.get_profile(m, include_contacts=False) or {"user_id": m}) for m in managers)
+        text = "\n".join(
+            [
+                "❓ Xodim oylik kelishuvini tushunmadi",
+                f"👤 Xodim: {_full_name(profile)}",
+                f"🏬 Filial: {issue.get('branch') or '-'}",
+                f"📄 Kelishuv versiyasi: {sa.version_number(issue['employee_id'], agreement['id'])}",
+                f"👔 Mas'ul: filial rahbari{' — ' + names if names else ' (belgilanmagan — Founder)'}",
+                f"⏰ Muddat: bugun, {sa.format_date(issue['due_date'])}",
+            ]
+        )
+        markup = _kb(
+            [("📄 Kelishuvni ochish", f"sagr:view:{agreement['id']}")],
+            [("✅ Tushuntirildi", f"sagr:res:{issue['id']}:explained")],
+            [("📝 Yangi kelishuv", f"sagr:res:{issue['id']}:new_agreement")],
+            [("🤝 Kelishilmadi", f"sagr:res:{issue['id']}:disagreed")],
+        )
+        delivered = 0
+        for recipient in dict.fromkeys([FOUNDER_ID, *managers]):
+            try:
+                await bot.send_message(recipient, text, reply_markup=markup)
+                delivered += 1
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Kelishuv savoli xabari ketmadi (issue=%s): %s", issue["id"], type(error).__name__)
+        sa.set_issue_notified(issue["id"], delivered)
+        return delivered
+
+    @dp.callback_query(F.data.startswith("sagr:no:"))
+    async def agreement_not_understood(callback: CallbackQuery) -> None:
+        if callback.from_user is None or not _private(callback):
+            await callback.answer("Bu amal faqat shaxsiy chatda.", show_alert=True)
+            return
+        try:
+            agreement_id = int(callback.data.split(":")[2])
+        except ValueError:
+            await callback.answer()
+            return
+        outcome, issue = sa.ask_not_understood(agreement_id, callback.from_user.id)
+        if outcome == sa.ISSUE_OPENED:
+            await callback.answer("Savolingiz qabul qilindi.")
+            delivered = await _notify_issue(callback.bot, issue, sa.get_agreement(agreement_id))
+            note = (
+                "❓ Savolingiz rahbarga yuborildi. Tushuntirishgach shu yerda rozilik bera olasiz."
+                if delivered
+                else "❓ Savolingiz saqlandi, lekin rahbarga xabar yetkazib bo'lmadi. Iltimos, rahbaringizga o'zingiz murojaat qiling."
+            )
+            await callback.message.edit_text(
+                f"{callback.message.text or ''}\n\n{note}", reply_markup=_consent_kb(agreement_id, with_question=False)
+            )
+            return
+        messages = {
+            sa.ISSUE_ALREADY: "Savolingiz allaqachon yuborilgan.",
+            sa.ISSUE_CONSENTED: "Siz bu kelishuvga allaqachon rozilik bergansiz.",
+            sa.CONSENT_NOT_OWNER: "Bu tugma siz uchun emas.",
+            sa.CONSENT_SUPERSEDED: "Bu kelishuv yangilangan. Yangi versiyani «💵 Oylik kelishuvim» orqali oching.",
+            sa.CONSENT_UNKNOWN: "Kelishuv topilmadi.",
+        }
+        await callback.answer(messages[outcome], show_alert=True)
+
+    @dp.callback_query(F.data.startswith("sagr:res:"))
+    async def agreement_issue_resolve(callback: CallbackQuery) -> None:
+        if callback.from_user is None or not _private(callback):
+            await callback.answer("Bu amal faqat shaxsiy chatda.", show_alert=True)
+            return
+        try:
+            _, _, raw_id, code = callback.data.split(":")
+            issue_id = int(raw_id)
+        except ValueError:
+            await callback.answer()
+            return
+        result = sa.resolve_issue(issue_id, callback.from_user.id, code)
+        if result == "resolved":
+            await callback.answer("Hal qilindi.")
+            await callback.message.edit_text(
+                f"{callback.message.text or ''}\n\n✅ Hal qilindi: {sa.ISSUE_OUTCOMES[code]}. "
+                "Eslatma: bu xodim roziligini almashtirmaydi."
+            )
+            return
+        await callback.answer(
+            {"already": "Bu savol allaqachon yopilgan.", "denied": "Bu amal siz uchun emas."}.get(result, "Savol topilmadi."),
+            show_alert=True,
+        )
+
+    @dp.callback_query(F.data.startswith("sagr:view:"))
+    async def agreement_view(callback: CallbackQuery) -> None:
+        if callback.from_user is None or not _private(callback):
+            await callback.answer("Bu amal faqat shaxsiy chatda.", show_alert=True)
+            return
+        try:
+            agreement = sa.get_agreement(int(callback.data.split(":")[2]))
+        except ValueError:
+            agreement = None
+        profile = employees.get_profile(agreement["employee_id"], include_contacts=False) if agreement else None
+        if agreement is None or profile is None or not sa.can_view(callback.from_user.id, agreement["employee_id"], profile.get("branch")):
+            await callback.answer("Bu kelishuvni ko'rishga ruxsatingiz yo'q.", show_alert=True)
+            return
+        await callback.answer()
+        await callback.message.answer(
+            f"👤 {_full_name(profile)}\n{_employee_text(agreement, agreement['employee_id'])}\n\nHolat: {sa.consent_status_text(agreement)}"
+        )
+
+    @dp.message(Command("filialkelishuv"))
+    async def branch_agreements(message: Message) -> None:
+        """Rahbar (o'z filiali) / Founder: xodimlarning joriy kelishuv versiyasini ochish tugmalari."""
+        if message.from_user is None or not _private(message):
+            return
+        viewer = message.from_user.id
+        from config import RECRUITING_BRANCH_NAMES
+
+        rows = []
+        for branch in RECRUITING_BRANCH_NAMES:
+            for profile in employees.list_approved_by_branch(branch):
+                latest = sa.latest_agreement_id(profile["user_id"])
+                if latest and sa.can_view(viewer, profile["user_id"], profile.get("branch")) and profile["user_id"] != viewer:
+                    rows.append([(f"{_full_name(profile)} — {branch}", f"sagr:view:{latest}")])
+        if not rows:
+            await message.answer("Ko'rsatish mumkin bo'lgan kelishuv topilmadi.")
+            return
+        await message.answer("📄 Kelishuvni oching:", reply_markup=_kb(*rows[:30]))
+
     @dp.message(Command("mykelishuv"))
     @dp.message(F.text == EMPLOYEE_BUTTON)
     async def my_agreement(message: Message) -> None:
@@ -414,4 +566,4 @@ def register(dp: Dispatcher) -> None:
         if current is not None or pending_id is not None:
             latest = sa.get_agreement(pending_id) if pending_id else current
             lines += ["", f"Holat: {sa.consent_status_text(latest)}"]
-        await message.answer("\n".join(lines), reply_markup=_consent_kb(pending_id) if pending_id else None)
+        await message.answer("\n".join(lines), reply_markup=_consent_kb(pending_id, with_question=sa.issue_for_agreement(pending_id) is None) if pending_id else None)

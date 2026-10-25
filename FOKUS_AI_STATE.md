@@ -4,6 +4,13 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Fiks kelishuvi LIVE — 2026-10-25 (Asia/Tashkent)
+
+- PR #61 merge qilingan: `82958c498a5cc11eda5af1502c74a5638c15afa8` (review head `fec608d`). Render `fokus-ai-singapore`, deploy `dep-dbeuls15efls73bd4a5g` LIVE, 2026-10-25 16:43:02 +05. Health HTTP 200; DB_STARTUP_PROBE outcome=ok, median 64.9 ms.
+- Mustaqil targeted SQLite tekshiruvi: 324 passed. Nol/manfiy fiks va tahrirlashdagi eski Saqlash tokeni xatolari tuzatilgani kod va test bilan tekshirildi. PostgreSQL 63 PASS — robot hisoboti; ushbu review'da mustaqil qayta ishlatilmadi. Full suite ishlatilmadi.
+- Deploydan tashqari haqiqiy xodimga oylik/kelishuv yozilmadi. Botda kiritish va ko'rsatish oqimini Muhammadiyning real foydalanishida tekshirish kutiladi. Ishlangan vaqtdan to'lanadigan haq hisoblash bu PRda yo'q.
+- Keyingi qadam: mavjud “💵 Oylik belgilash” orqali filial/xodim tanlash va kelishuv kartasini tekshirish. Faqat to'g'ri haqiqiy qiymatlar tasdiqlanganda Founder Saqlashni bosadi. Asosiy navbat: Oylik baholarim → oy boshidan hisob → solishtirish.
+
 ## Fiks oylik kelishuvi: kiritish va ko'rsatish (branch `feature/fixed-salary-agreement`, PR ochiq, merge/deploy YO'Q)
 
 - **Founder oqimi** ("💵 Oylik belgilash" = `/setsalary`, argumentsiz; `discipline_bot.py`, `SalaryStates`, `sal:*` callback'lar): filial → shu filialning tasdiqlangan xodimi → fiks summa (so'm) → oy uchun ish kunlari (1–31) → bir kun ish soati (>0 va ≤24, butun yoki yarim soat; ichkarida butun daqiqa) → amal qilish sanasi (KK.OO.YYYY yoki "Bugundan") → karta (xodim, filial, summa, kunlar, soat, sana) [✅ Saqlash] [✏️ O'zgartirish (bitta maydon)] [❌ Bekor qilish]. User ID yozish talab qilinmaydi; standart qiymat yo'q. Saqlashgacha DB'ga hech narsa yozilmaydi. Har callback/xabarda `ACTION_SET_SALARY` server ruxsati qayta tekshiriladi (faqat Founder, faqat shaxsiy chat); qalbaki/eskirgan `sal:*` tugmalar (boshqa filial xodimi, tokensiz Saqlash) rad etiladi. Noto'g'ri matn xato xabari bilan shu qadamda qoladi.

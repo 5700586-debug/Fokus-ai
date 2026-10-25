@@ -457,3 +457,18 @@ def test_agreement_migration_twice_keeps_data_on_postgres(pg, monkeypatch):
 
     assert len(_agreements(EMPLOYEE)) == 1 and discipline.get_salary(EMPLOYEE)["fixed_salary"] == 3_000_000
     assert _scalar("SELECT data_type FROM information_schema.columns WHERE table_name = 'salary_agreements' AND column_name = 'employee_id'") == "bigint"
+
+
+def test_legacy_fixed_salary_rejects_invalid_amounts_and_changes_nothing_on_postgres(pg):
+    from services import salary_agreement as sa
+
+    discipline.adjust_bonus_bank(EMPLOYEE, 50, "test", "test", None)
+    assert sa.save_legacy_fixed_salary(EMPLOYEE, 3_000_000, FOUNDER).created
+    before = (_agreements(EMPLOYEE), _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}"))
+
+    for bad in (0, -1, sa.MAX_SALARY + 1):
+        with pytest.raises(sa.ValidationError):
+            sa.save_legacy_fixed_salary(EMPLOYEE, bad, FOUNDER)
+
+    assert (_agreements(EMPLOYEE), _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}")) == before
+    assert discipline.get_salary(EMPLOYEE)["bonus_bank"] == 50

@@ -374,3 +374,122 @@ def test_failed_write_rolls_back_agreement_and_salary_mirror():
         conn.close()
     assert _rows(EMP) == []
     assert _save(3_000_000, company_time.today().isoformat(), "rb1").created  # qayta urinish ishlaydi
+
+
+# ------------------------- PR #61 tuzatishlari: eski summa qoidasi va eski "Saqlash" tokeni --
+
+
+@pytest.mark.parametrize("amount", ["0", "-5", "-3000000", "2000000001", "99999999999999"])
+async def test_legacy_setsalary_rejects_zero_negative_and_too_large_amounts(bot_dp, amount):
+    main, bot = bot_dp
+    _employee(EMP)
+    discipline_repo.upsert_fixed_salary(EMP, 2_000_000, FOUNDER_ID)
+    discipline.adjust_bonus_bank(EMP, 7, "test", "test", None)
+    salary_before = discipline_repo.get_salary(EMP)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text=f"/setsalary {EMP} {amount}")
+
+    assert "❌" in _text(sent) and "musbat" in _text(sent) and "xato" not in _text(sent).lower().replace("noto'g'ri", "")
+    assert _rows() == []
+    after = discipline_repo.get_salary(EMP)
+    assert (after["fixed_salary"], after["bonus_bank"], after["updated_at"]) == (
+        salary_before["fixed_salary"], salary_before["bonus_bank"], salary_before["updated_at"]
+    )
+
+
+async def test_valid_legacy_setsalary_still_works_and_keeps_days_and_hours_unknown(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+
+    sent = await send(main.dp, bot, FOUNDER_ID, text=f"/setsalary {EMP} 3000000")
+
+    assert "o'rnatildi" in _text(sent)
+    (row,) = _rows(EMP)
+    assert row["fixed_salary"] == 3_000_000 and row["work_days"] is None and row["daily_minutes"] is None
+
+
+@pytest.mark.parametrize("amount", [0, -1, -3_000_000, sa.MAX_SALARY + 1, True, 1.5, "3000000"])
+def test_save_legacy_fixed_salary_rejects_invalid_values_without_touching_the_db(amount):
+    discipline_repo.upsert_fixed_salary(EMP, 2_000_000, FOUNDER_ID)
+    before = discipline_repo.get_salary(EMP)
+
+    with pytest.raises(sa.ValidationError):
+        sa.save_legacy_fixed_salary(EMP, amount, FOUNDER_ID)
+
+    assert _rows() == [] and discipline_repo.get_salary(EMP) == before
+    with pytest.raises(sa.ValidationError):
+        discipline.set_fixed_salary(EMP, amount, FOUNDER_ID)  # eski service nuqtasi ham
+
+
+async def test_old_save_button_is_dead_from_the_moment_editing_starts(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    card = await _flow_to_card(main, bot)
+    old_save = _save_data(card)
+
+    await _cb(main, bot, "sal:edit")
+    in_menu = await _cb(main, bot, old_save)
+    assert "eskirgan" in _text(in_menu) and _rows() == []  # tahrirlash menyusida
+
+    await _cb(main, bot, "sal:fld:amount")
+    waiting = await _cb(main, bot, old_save)  # yangi summa hali kiritilmagan
+    assert "eskirgan" in _text(waiting) and _rows() == []
+
+
+async def test_after_new_amount_old_token_stays_dead_and_new_token_saves_the_new_amount_once(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    card = await _flow_to_card(main, bot)
+    old_save = _save_data(card)
+    await _cb(main, bot, "sal:edit")
+    await _cb(main, bot, "sal:fld:amount")
+
+    new_card = await send(main.dp, bot, FOUNDER_ID, text="5 500 000")
+    new_save = _save_data(new_card)
+
+    assert new_save != old_save and "5 500 000 so'm" in _text(new_card)
+    rejected = await _cb(main, bot, old_save)
+    assert "eskirgan" in _text(rejected) and _rows() == []
+
+    await _cb(main, bot, new_save)
+    again = await _cb(main, bot, new_save)
+
+    (row,) = _rows(EMP)
+    assert row["fixed_salary"] == 5_500_000 and row["work_days"] == 28 and row["daily_minutes"] == 720
+    assert "eskirgan" in _text(again) or "allaqachon" in _text(again)
+    assert len(_rows(EMP)) == 1
+
+
+async def test_leaving_the_edit_by_cancel_or_back_never_revives_old_buttons(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    card = await _flow_to_card(main, bot)
+    old_save = _save_data(card)
+
+    await _cb(main, bot, "sal:edit")
+    back = await _cb(main, bot, "sal:back")  # orqaga: karta YANGI token bilan
+    new_save = _save_data(back)
+    assert new_save != old_save
+    assert "eskirgan" in _text(await _cb(main, bot, old_save)) and _rows() == []
+
+    await _cb(main, bot, "sal:edit")
+    await _cb(main, bot, "sal:cancel")  # bekor qilish
+    for stale in (old_save, new_save):
+        assert "eskirgan" in _text(await _cb(main, bot, stale))
+    assert _rows() == []
+
+
+async def test_save_is_refused_while_a_field_is_waiting_even_with_a_matching_token(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    card = await _flow_to_card(main, bot)
+    token = _save_data(card).split(":", 2)[2]
+    await _cb(main, bot, "sal:edit")
+    await _cb(main, bot, "sal:fld:days")
+
+    # token qo'lda tiklangan taqdirda ham (qalbaki holat) kutish/tahrirlash holatida saqlanmaydi
+    fsm = main.dp.fsm.get_context(bot=bot, chat_id=FOUNDER_ID, user_id=FOUNDER_ID)
+    await fsm.update_data(sal_token=token)
+    rejected = await _cb(main, bot, f"sal:save:{token}")
+
+    assert "eskirgan" in _text(rejected) and _rows() == []

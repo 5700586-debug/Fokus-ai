@@ -94,10 +94,15 @@ def parse_effective_date(text: str, today: date | None = None) -> str:
     return parsed.isoformat()
 
 
+def validate_salary_amount(fixed_salary) -> None:
+    """Eski va yangi yo'l uchun YAGONA summa qoidasi: musbat butun so'm, ``MAX_SALARY`` gacha."""
+    if not isinstance(fixed_salary, int) or isinstance(fixed_salary, bool) or not 0 < fixed_salary <= MAX_SALARY:
+        raise ValidationError("Summa musbat butun so'm bo'lishi kerak (1 dan 2 000 000 000 gacha).")
+
+
 def validate_agreement(fixed_salary, work_days, daily_minutes, effective_from: str) -> None:
     """Server tomonida yakuniy tekshiruv (FSM ma'lumoti ishonchli deb hisoblanmaydi)."""
-    if not isinstance(fixed_salary, int) or isinstance(fixed_salary, bool) or not 0 < fixed_salary <= MAX_SALARY:
-        raise ValidationError("Summa noto'g'ri.")
+    validate_salary_amount(fixed_salary)
     if not isinstance(work_days, int) or isinstance(work_days, bool) or not 1 <= work_days <= 31:
         raise ValidationError("Kunlar soni noto'g'ri.")
     if not isinstance(daily_minutes, int) or isinstance(daily_minutes, bool) or not 0 < daily_minutes <= 1440 or daily_minutes % 30:
@@ -164,6 +169,7 @@ def save_agreement(
 
 def save_legacy_fixed_salary(employee_id: int, fixed_salary: int, updated_by: int) -> SaveResult:
     """Eski ``/setsalary <user_id> <summa>``: bugundan amal qiladigan, kun/soat NOMA'LUM kelishuv qatori."""
+    validate_salary_amount(fixed_salary)  # service bevosita chaqirilganda ham 0/manfiy/juda katta summa rad etiladi
     return _write(
         employee_id, fixed_salary, None, None, company_time.today().isoformat(), updated_by, SOURCE_LEGACY, None
     )

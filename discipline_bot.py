@@ -475,8 +475,9 @@ def _sal_card_keyboard(token: str) -> InlineKeyboardMarkup:
     )
 
 
-def _sal_complete(data: dict) -> bool:
-    return all(data.get(key) is not None for key in ("sal_emp", "sal_branch", "sal_amount", "sal_days", "sal_minutes", "sal_date", "sal_token"))
+def _sal_complete(data: dict, need_token: bool = True) -> bool:
+    keys = ("sal_emp", "sal_branch", "sal_amount", "sal_days", "sal_minutes", "sal_date") + (("sal_token",) if need_token else ())
+    return all(data.get(key) is not None for key in keys)
 
 
 
@@ -1169,8 +1170,13 @@ def register(dp: Dispatcher, openai_client) -> None:
         return await permissions.ensure_permission(event, permissions.ACTION_SET_SALARY)
 
     async def _sal_show_card(target, state: FSMContext, *, edit: bool) -> None:
+        import secrets
+
+        # Har yakuniy karta YANGI Saqlash tokeni oladi: oldingi kartalarning tugmalari yaroqsiz bo'ladi.
+        token = secrets.token_hex(8)
+        await state.update_data(sal_token=token, sal_edit=False)
         data = await state.get_data()
-        text, keyboard = _sal_card_text(data), _sal_card_keyboard(data["sal_token"])
+        text, keyboard = _sal_card_text(data), _sal_card_keyboard(token)
         await state.set_state(None)
         if edit:
             await target.message.edit_text(text, reply_markup=keyboard)
@@ -1211,7 +1217,11 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         user_id = int(parts[1])
         fixed_salary = int(parts[2])
-        discipline.set_fixed_salary(user_id, fixed_salary, message.from_user.id)
+        try:
+            discipline.set_fixed_salary(user_id, fixed_salary, message.from_user.id)
+        except salary_agreement.ValidationError as error:
+            await message.answer(f"❌ {error}")
+            return
         await message.answer(f"✅ {user_id} uchun fiks oylik o'rnatildi: {fixed_salary:,} so'm")
 
     @dp.callback_query(F.data.startswith("sal:br:"))
@@ -1254,10 +1264,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         }:
             await callback.answer("Bu tugma eskirgan — qaytadan boshlang.", show_alert=True)
             return
-        import secrets
-
         await state.update_data(
-            sal_emp=employee_id, sal_token=secrets.token_hex(8), sal_edit=False,
+            sal_emp=employee_id, sal_token=None, sal_edit=False,
             sal_amount=None, sal_days=None, sal_minutes=None, sal_date=None,
         )
         await _sal_ask(callback, state, "amount", edit=True)
@@ -1303,12 +1311,16 @@ def register(dp: Dispatcher, openai_client) -> None:
     async def salary_edit(callback: CallbackQuery, state: FSMContext) -> None:
         if not await _sal_allowed(callback):
             return
-        if not _sal_complete(await state.get_data()):
+        data = await state.get_data()
+        if not _sal_complete(data) or data.get("sal_edit"):
             await callback.answer("Bu tugma eskirgan.", show_alert=True)
             return
+        # Tahrirlash boshlanishi bilan oldingi Saqlash tokeni darhol yaroqsiz bo'ladi (tugmani yashirish bilan cheklanmaydi).
+        await state.update_data(sal_token=None, sal_edit=True)
         rows = [
             [InlineKeyboardButton(text="💰 Summa", callback_data="sal:fld:amount"), InlineKeyboardButton(text="📅 Kunlar", callback_data="sal:fld:days")],
             [InlineKeyboardButton(text="🕒 Soat", callback_data="sal:fld:hours"), InlineKeyboardButton(text="📌 Sana", callback_data="sal:fld:date")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="sal:back")],
             _SAL_CANCEL_ROW,
         ]
         await callback.message.edit_text("Nimani o'zgartiramiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -1319,11 +1331,22 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await _sal_allowed(callback):
             return
         field = callback.data.split(":")[2]
-        if field not in _SAL_STATE_BY_FIELD or not _sal_complete(await state.get_data()):
+        data = await state.get_data()
+        if field not in _SAL_STATE_BY_FIELD or not _sal_complete(data, need_token=False) or not data.get("sal_edit"):
             await callback.answer("Bu tugma eskirgan.", show_alert=True)
             return
-        await state.update_data(sal_edit=True)
         await _sal_ask(callback, state, field, edit=True)
+        await callback.answer()
+
+    @dp.callback_query(F.data == "sal:back")
+    async def salary_back_to_card(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        data = await state.get_data()
+        if not _sal_complete(data, need_token=False) or not data.get("sal_edit"):
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        await _sal_show_card(callback, state, edit=True)  # YANGI token bilan; eskisi yaroqsiz qoladi
         await callback.answer()
 
     @dp.callback_query(F.data == "sal:cancel")
@@ -1340,7 +1363,11 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         data = await state.get_data()
         token = callback.data.split(":", 2)[2]
-        if not _sal_complete(data) or data["sal_token"] != token:
+        # Karta tasdiqlashga tayyor bo'lishi shart: maydonlar to'liq, tahrirlash holati yo'q, kutish holati yo'q, token mos.
+        if (
+            not _sal_complete(data) or data.get("sal_edit") or data["sal_token"] != token
+            or await state.get_state() is not None
+        ):
             await callback.answer("Bu tugma eskirgan yoki allaqachon saqlangan.", show_alert=True)
             return
         branch_ids = {item["user_id"] for item in employees.list_approved_by_branch(data["sal_branch"])}

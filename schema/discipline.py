@@ -17,6 +17,25 @@ CREATE TABLE IF NOT EXISTS salaries (
     updated_at TEXT
 );
 
+-- Fiks oylik KELISHUVI tarixi: har o'zgarish YANGI qator (eskisi o'chirilmaydi/ustidan yozilmaydi). Amaldagi kelishuv —
+-- ``effective_from <= bugun`` ichida eng kech ``effective_from`` (teng bo'lsa eng katta ``id``). ``work_days``/``daily_minutes``
+-- NULL — eski ``/setsalary`` orqali kiritilgan (kun/soat noma'lum, taxmin qilinmaydi). ``request_token`` — takroriy/parallel
+-- "Saqlash" bitta yozuv yaratishi uchun (NULL bir nechta bo'lishi mumkin).
+CREATE TABLE IF NOT EXISTS salary_agreements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    fixed_salary INTEGER NOT NULL,
+    work_days INTEGER,
+    daily_minutes INTEGER,
+    effective_from TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'agreement',
+    request_token TEXT UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_salary_agreements_employee ON salary_agreements (employee_id, effective_from);
+
 CREATE TABLE IF NOT EXISTS company_rules (
     rule_number INTEGER PRIMARY KEY,
     title TEXT NOT NULL,

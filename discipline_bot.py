@@ -32,6 +32,7 @@ from roles import is_authorized, list_users
 from services import chat_cleanup, dialog_cleanup, discipline, discipline_ai, nazoratchi_close_report as close_report, nazoratchi_day, permissions, rule_learning
 from services import company_rules_import as discipline_import
 from services import rules as rules_service
+from services import salary_agreement
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +419,66 @@ class PenaltyStates(StatesGroup):
 
 class AppealStates(StatesGroup):
     waiting_reason = State()
+
+
+class SalaryStates(StatesGroup):
+    waiting_amount = State()
+    waiting_days = State()
+    waiting_hours = State()
+    waiting_date = State()
+
+
+_SAL_CANCEL_ROW = [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="sal:cancel")]
+_SAL_PROMPTS = {
+    "amount": "💰 Fiks oylik summasini so'mda yozing (masalan: 4 000 000):",
+    "days": "📅 Oy uchun kelishilgan ish kunlari sonini yozing (1 dan 31 gacha):",
+    "hours": "🕒 Bir kun uchun kelishilgan ish soatini yozing (butun yoki yarim soat, masalan 12 yoki 12.5):",
+    "date": "📌 Kelishuv qaysi sanadan amal qiladi? Sanani KK.OO.YYYY ko'rinishida yozing yoki \"Bugundan\"ni bosing:",
+}
+_SAL_STATE_BY_FIELD = {
+    "amount": SalaryStates.waiting_amount,
+    "days": SalaryStates.waiting_days,
+    "hours": SalaryStates.waiting_hours,
+    "date": SalaryStates.waiting_date,
+}
+_SAL_NEXT = {"amount": "days", "days": "hours", "hours": "date"}
+
+
+def _sal_card_text(data: dict, saved: bool = False) -> str:
+    today = company_time.today().isoformat()
+    effective = data["sal_date"]
+    lines = [
+        "✅ Kelishuv saqlandi" if saved else "💵 Fiks kelishuvi — tekshiring",
+        f"👤 {_employee_name(data['sal_emp'])}",
+        f"🏬 {data['sal_branch']}",
+        f"💰 Fiks summa: {salary_agreement.format_money(data['sal_amount'])}",
+        f"📅 Oylik ish kunlari: {data['sal_days']} kun",
+        f"🕒 Kunlik ish soati: {salary_agreement.format_minutes(data['sal_minutes'])}",
+        f"📌 Amal qilish sanasi: {salary_agreement.format_date(effective)}",
+    ]
+    if effective > today:
+        lines.append("ℹ️ Kelajakdagi sana: bu kelishuv hozirgi fiksni o'zgartirmaydi, sanasi kelganda amal qiladi.")
+    elif effective < today:
+        lines.append("ℹ️ O'tgan sana: avvalgi baho, bonus, davomat va hisoblar qayta yozilmaydi.")
+    return "\n".join(lines)
+
+
+def _sal_card_keyboard(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Saqlash", callback_data=f"sal:save:{token}"),
+                InlineKeyboardButton(text="✏️ O'zgartirish", callback_data="sal:edit"),
+            ],
+            _SAL_CANCEL_ROW,
+        ]
+    )
+
+
+def _sal_complete(data: dict, need_token: bool = True) -> bool:
+    keys = ("sal_emp", "sal_branch", "sal_amount", "sal_days", "sal_minutes", "sal_date") + (("sal_token",) if need_token else ())
+    return all(data.get(key) is not None for key in keys)
+
 
 
 _APPEAL_PROMPT = "✍️ Sababingizni matn yoki ovozli xabar sifatida yuboring."
@@ -1097,24 +1158,246 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         await _send_next_rule_or_status(callback.bot, employee_id)
 
+    # ----------------------------------------------- fiks oylik kelishuvi (Founder) --
+
+    async def _sal_allowed(event) -> bool:
+        """Har yozish/ko'rsatish qadamida server ruxsati qayta tekshiriladi; faqat shaxsiy chat."""
+        chat = event.message.chat if isinstance(event, CallbackQuery) else event.chat
+        if event.from_user is None or chat.type != "private":
+            if isinstance(event, CallbackQuery):
+                await event.answer("Bu amal faqat shaxsiy chatda.", show_alert=True)
+            return False
+        return await permissions.ensure_permission(event, permissions.ACTION_SET_SALARY)
+
+    async def _sal_show_card(target, state: FSMContext, *, edit: bool) -> None:
+        import secrets
+
+        # Har yakuniy karta YANGI Saqlash tokeni oladi: oldingi kartalarning tugmalari yaroqsiz bo'ladi.
+        token = secrets.token_hex(8)
+        await state.update_data(sal_token=token, sal_edit=False)
+        data = await state.get_data()
+        text, keyboard = _sal_card_text(data), _sal_card_keyboard(token)
+        await state.set_state(None)
+        if edit:
+            await target.message.edit_text(text, reply_markup=keyboard)
+        else:
+            await target.answer(text, reply_markup=keyboard)
+
+    async def _sal_ask(target, state: FSMContext, field: str, *, edit: bool) -> None:
+        await state.set_state(_SAL_STATE_BY_FIELD[field])
+        rows = [_SAL_CANCEL_ROW]
+        if field == "date":
+            rows = [[InlineKeyboardButton(text="📅 Bugundan", callback_data="sal:today")], _SAL_CANCEL_ROW]
+        markup = InlineKeyboardMarkup(inline_keyboard=rows)
+        if edit:
+            await target.message.edit_text(_SAL_PROMPTS[field], reply_markup=markup)
+        else:
+            await target.answer(_SAL_PROMPTS[field], reply_markup=markup)
+
     @dp.message(Command("setsalary"))
-    async def set_salary_handler(message: Message) -> None:
-        if not await permissions.ensure_permission(message, permissions.ACTION_SET_SALARY):
+    async def set_salary_handler(message: Message, state: FSMContext) -> None:
+        if not await _sal_allowed(message):
             return
 
         parts = (message.text or "").split()
+        if len(parts) == 1:  # sodda oqim: filial -> xodim -> summa -> kunlar -> soat -> sana -> karta
+            await state.clear()
+            rows = [
+                [InlineKeyboardButton(text=f"📍 {name}", callback_data=f"sal:br:{index}")]
+                for index, name in enumerate(RECRUITING_BRANCH_NAMES)
+            ]
+            rows.append(_SAL_CANCEL_ROW)
+            await message.answer("🏬 Qaysi filial xodimiga fiks kelishuvi kiritamiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+            return
+
+        # Eski texnik yo'l: /setsalary <user_id> <fiks_oylik> — bir xil service yozish yo'li.
         if len(parts) != 3 or not parts[1].isdigit() or not parts[2].lstrip("-").isdigit():
-            await message.answer("Foydalanish: /setsalary <user_id> <fiks_oylik>")
+            await message.answer("Foydalanish: /setsalary (tugma orqali) yoki /setsalary <user_id> <fiks_oylik>")
             return
 
         user_id = int(parts[1])
         fixed_salary = int(parts[2])
-        discipline.set_fixed_salary(user_id, fixed_salary, message.from_user.id)
+        try:
+            discipline.set_fixed_salary(user_id, fixed_salary, message.from_user.id)
+        except salary_agreement.ValidationError as error:
+            await message.answer(f"❌ {error}")
+            return
         await message.answer(f"✅ {user_id} uchun fiks oylik o'rnatildi: {fixed_salary:,} so'm")
+
+    @dp.callback_query(F.data.startswith("sal:br:"))
+    async def salary_pick_branch(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        try:
+            branch = RECRUITING_BRANCH_NAMES[int(callback.data.split(":")[2])]
+        except (ValueError, IndexError):
+            await callback.answer("Filial topilmadi.", show_alert=True)
+            return
+
+        staff = employees.list_approved_by_branch(branch)
+        if not staff:
+            await callback.answer("Bu filialda tasdiqlangan xodim yo'q.", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(sal_branch=branch)
+        buttons = [
+            InlineKeyboardButton(text=_employee_name(item["user_id"]), callback_data=f"sal:emp:{item['user_id']}")
+            for item in staff
+        ]
+        rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)] + [_SAL_CANCEL_ROW]
+        await callback.message.edit_text(f"🏬 {branch}\n👤 Xodimni tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("sal:emp:"))
+    async def salary_pick_employee(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        data = await state.get_data()
+        branch = data.get("sal_branch")
+        try:
+            employee_id = int(callback.data.split(":")[2])
+        except ValueError:
+            employee_id = None
+        # Qalbaki/eskirgan tugma: xodim shu filialning tasdiqlangan ro'yxatida bo'lishi shart.
+        if branch is None or employee_id is None or employee_id not in {
+            item["user_id"] for item in employees.list_approved_by_branch(branch)
+        }:
+            await callback.answer("Bu tugma eskirgan — qaytadan boshlang.", show_alert=True)
+            return
+        await state.update_data(
+            sal_emp=employee_id, sal_token=None, sal_edit=False,
+            sal_amount=None, sal_days=None, sal_minutes=None, sal_date=None,
+        )
+        await _sal_ask(callback, state, "amount", edit=True)
+        await callback.answer()
+
+    async def _sal_store_and_continue(message: Message, state: FSMContext, field: str, value) -> None:
+        key = {"amount": "sal_amount", "days": "sal_days", "hours": "sal_minutes", "date": "sal_date"}[field]
+        await state.update_data(**{key: value})
+        data = await state.get_data()
+        if data.get("sal_edit") or field == "date":
+            await state.update_data(sal_edit=False)
+            await _sal_show_card(message, state, edit=False)
+        else:
+            await _sal_ask(message, state, _SAL_NEXT[field], edit=False)
+
+    def _sal_text_handler(field: str, parser):
+        async def handler(message: Message, state: FSMContext) -> None:
+            if not await _sal_allowed(message):
+                return
+            try:
+                value = parser((message.text or "").strip())
+            except salary_agreement.ValidationError as error:
+                await message.answer(f"❌ {error}\n\n{_SAL_PROMPTS[field]}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[_SAL_CANCEL_ROW]))
+                return
+            await _sal_store_and_continue(message, state, field, value)
+
+        return handler
+
+    dp.message.register(_sal_text_handler("amount", salary_agreement.parse_salary), StateFilter(SalaryStates.waiting_amount), F.text)
+    dp.message.register(_sal_text_handler("days", salary_agreement.parse_days), StateFilter(SalaryStates.waiting_days), F.text)
+    dp.message.register(_sal_text_handler("hours", salary_agreement.parse_daily_minutes), StateFilter(SalaryStates.waiting_hours), F.text)
+    dp.message.register(_sal_text_handler("date", salary_agreement.parse_effective_date), StateFilter(SalaryStates.waiting_date), F.text)
+
+    @dp.callback_query(F.data == "sal:today", StateFilter(SalaryStates.waiting_date))
+    async def salary_date_today(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        await state.update_data(sal_date=company_time.today().isoformat(), sal_edit=False)
+        await _sal_show_card(callback, state, edit=True)
+        await callback.answer()
+
+    @dp.callback_query(F.data == "sal:edit")
+    async def salary_edit(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        data = await state.get_data()
+        if not _sal_complete(data) or data.get("sal_edit"):
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        # Tahrirlash boshlanishi bilan oldingi Saqlash tokeni darhol yaroqsiz bo'ladi (tugmani yashirish bilan cheklanmaydi).
+        await state.update_data(sal_token=None, sal_edit=True)
+        rows = [
+            [InlineKeyboardButton(text="💰 Summa", callback_data="sal:fld:amount"), InlineKeyboardButton(text="📅 Kunlar", callback_data="sal:fld:days")],
+            [InlineKeyboardButton(text="🕒 Soat", callback_data="sal:fld:hours"), InlineKeyboardButton(text="📌 Sana", callback_data="sal:fld:date")],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="sal:back")],
+            _SAL_CANCEL_ROW,
+        ]
+        await callback.message.edit_text("Nimani o'zgartiramiz?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("sal:fld:"))
+    async def salary_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        field = callback.data.split(":")[2]
+        data = await state.get_data()
+        if field not in _SAL_STATE_BY_FIELD or not _sal_complete(data, need_token=False) or not data.get("sal_edit"):
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        await _sal_ask(callback, state, field, edit=True)
+        await callback.answer()
+
+    @dp.callback_query(F.data == "sal:back")
+    async def salary_back_to_card(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        data = await state.get_data()
+        if not _sal_complete(data, need_token=False) or not data.get("sal_edit"):
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        await _sal_show_card(callback, state, edit=True)  # YANGI token bilan; eskisi yaroqsiz qoladi
+        await callback.answer()
+
+    @dp.callback_query(F.data == "sal:cancel")
+    async def salary_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        await state.clear()  # saqlanmagan kelishuv DB'ga yozilmaydi
+        await callback.message.edit_text("❌ Bekor qilindi. Hech narsa saqlanmadi.")
+        await callback.answer()
+
+    @dp.callback_query(F.data.startswith("sal:save:"))
+    async def salary_save(callback: CallbackQuery, state: FSMContext) -> None:
+        if not await _sal_allowed(callback):
+            return
+        data = await state.get_data()
+        token = callback.data.split(":", 2)[2]
+        # Karta tasdiqlashga tayyor bo'lishi shart: maydonlar to'liq, tahrirlash holati yo'q, kutish holati yo'q, token mos.
+        if (
+            not _sal_complete(data) or data.get("sal_edit") or data["sal_token"] != token
+            or await state.get_state() is not None
+        ):
+            await callback.answer("Bu tugma eskirgan yoki allaqachon saqlangan.", show_alert=True)
+            return
+        branch_ids = {item["user_id"] for item in employees.list_approved_by_branch(data["sal_branch"])}
+        if data["sal_emp"] not in branch_ids:
+            await callback.answer("Xodim endi faol emas — qaytadan boshlang.", show_alert=True)
+            return
+        try:
+            result = salary_agreement.save_agreement(
+                data["sal_emp"], data["sal_amount"], data["sal_days"], data["sal_minutes"], data["sal_date"],
+                callback.from_user.id, token,
+            )
+        except salary_agreement.ValidationError as error:
+            await callback.answer(str(error), show_alert=True)
+            return
+        await state.clear()
+        if not result.created:
+            await callback.answer("Bu kelishuv allaqachon saqlangan.", show_alert=True)
+            await callback.message.edit_text(_sal_card_text(data, saved=True))
+            return
+        await callback.message.edit_text(_sal_card_text(data, saved=True))
+        await callback.answer("Saqlandi")
+
+    # ------------------------------------------------------------ ko'rish --
 
     @dp.message(Command("maosh"))
     async def salary_lookup_handler(message: Message) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_LOOKUP_ANY_SALARY):
+            return
+        if message.chat.type != "private":
+            await message.answer("Oylik ma'lumoti faqat shaxsiy chatda ko'rsatiladi.")
             return
 
         parts = (message.text or "").split()
@@ -1125,21 +1408,20 @@ def register(dp: Dispatcher, openai_client) -> None:
         user_id = int(parts[1])
         salary = discipline.get_salary(user_id)
         name = _employee_name(user_id)
-        await message.answer(
-            f"👤 {name}\n💵 Fiks oylik: {salary['fixed_salary']:,} so'm\n"
-            f"💰 Bonus banki: {salary['bonus_bank']} ball"
-        )
+        lines = [f"👤 {name}", *salary_agreement.view_lines(user_id, salary["fixed_salary"]), f"💰 Bonus banki: {salary['bonus_bank']} ball"]
+        await message.answer("\n".join(lines))
 
     @dp.message(Command("mymaosh"))
     async def my_salary_handler(message: Message) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
+        if message.chat.type != "private":
+            await message.answer("Oylik ma'lumoti faqat shaxsiy chatda ko'rsatiladi.")
+            return
 
         salary = discipline.get_salary(message.from_user.id)
-        await message.answer(
-            f"💵 Fiks oylik: {salary['fixed_salary']:,} so'm\n"
-            f"💰 Bonus banki: {salary['bonus_bank']} ball"
-        )
+        lines = [*salary_agreement.view_lines(message.from_user.id, salary["fixed_salary"]), f"💰 Bonus banki: {salary['bonus_bank']} ball"]
+        await message.answer("\n".join(lines))
 
     # ------------------------------------------------------- apellyatsiya --
 

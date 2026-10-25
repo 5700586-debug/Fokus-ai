@@ -63,7 +63,7 @@ def pg(pg_schema, temp_db, monkeypatch):
     conn.autocommit = True
     try:
         conn.cursor().execute(
-            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit, nazoratchi_branch_sessions, daily_evaluations, daily_evaluation_history RESTART IDENTITY CASCADE"
+            "TRUNCATE discipline_penalties, bonus_bank_ledger, salaries, bot_workflow_messages, company_rules, supervisor_audit, nazoratchi_branch_sessions, daily_evaluations, daily_evaluation_history, salary_agreements RESTART IDENTITY CASCADE"
         )
     finally:
         conn.close()
@@ -381,3 +381,94 @@ def test_mystars_reads_use_one_connection_and_one_rollback_vs_real_base_on_postg
     assert base_counts == (12, 10, 10)  # PostgreSQL'da close() har ulanishda rollback qiladi
     assert new == (9, 1, 1)  # bitta ulanish, bitta rollback
     assert new[0] < legacy[0] and new[1] < legacy[1] and new[2] < legacy[2]
+
+
+# ------------------------------- fiks kelishuvi: saqlash qoidalari (PgConnection) --
+
+
+def _agreements(employee_id: int) -> list[tuple]:
+    conn = psycopg2.connect(_DSN)
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT fixed_salary, work_days, daily_minutes, effective_from, created_by, source "
+            f"FROM salary_agreements WHERE employee_id = {employee_id} ORDER BY id"
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def test_agreement_save_history_future_and_bonus_bank_on_postgres(pg):
+    from datetime import timedelta
+
+    import company_time
+    from services import salary_agreement as sa
+
+    today = company_time.today()
+    discipline.adjust_bonus_bank(EMPLOYEE, 50, "test", "test", None)
+
+    first = sa.save_agreement(EMPLOYEE, 4_000_000, 28, 750, today.isoformat(), FOUNDER, "pg-1")
+    duplicate = sa.save_agreement(EMPLOYEE, 4_000_000, 28, 750, today.isoformat(), FOUNDER, "pg-1")
+    sa.save_agreement(EMPLOYEE, 6_000_000, 26, 720, (today + timedelta(days=10)).isoformat(), FOUNDER, "pg-2")
+
+    assert first.created and not duplicate.created
+    assert len(_agreements(EMPLOYEE)) == 2  # tarix saqlangan, takroriy yozilmagan
+    assert discipline.get_salary(EMPLOYEE)["fixed_salary"] == 4_000_000  # kelajak sanali kelishuv fiksni o'zgartirmadi
+    assert discipline.get_salary(EMPLOYEE)["bonus_bank"] == 50
+    assert sa.get_upcoming(EMPLOYEE)["fixed_salary"] == 6_000_000
+    assert _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}") == 4_000_000  # ustun amaldagi bilan sinxron
+
+
+def test_parallel_agreement_save_with_one_token_creates_one_row_on_postgres(pg):
+    import company_time
+    from services import salary_agreement as sa
+
+    today = company_time.today().isoformat()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: sa.save_agreement(EMPLOYEE, 3_000_000, 20, 480, today, FOUNDER, "pg-par"), range(4)))
+
+    assert sum(1 for r in results if r.created) == 1 and len(_agreements(EMPLOYEE)) == 1
+
+
+def test_agreement_write_failure_rolls_back_row_and_salary_on_postgres(pg):
+    import company_time
+    from services import salary_agreement as sa
+
+    _break("salaries", "INSERT")
+    try:
+        with pytest.raises(Exception):
+            sa.save_agreement(EMPLOYEE, 3_000_000, 20, 480, company_time.today().isoformat(), FOUNDER, "pg-rb")
+        assert _agreements(EMPLOYEE) == []
+    finally:
+        _repair("salaries")
+    assert sa.save_agreement(EMPLOYEE, 3_000_000, 20, 480, company_time.today().isoformat(), FOUNDER, "pg-rb").created
+
+
+def test_agreement_migration_twice_keeps_data_on_postgres(pg, monkeypatch):
+    import company_time
+    from services import salary_agreement as sa
+
+    sa.save_agreement(EMPLOYEE, 3_000_000, 20, 480, company_time.today().isoformat(), FOUNDER, "pg-mig")
+
+    db.init_db()
+    db.init_db()
+
+    assert len(_agreements(EMPLOYEE)) == 1 and discipline.get_salary(EMPLOYEE)["fixed_salary"] == 3_000_000
+    assert _scalar("SELECT data_type FROM information_schema.columns WHERE table_name = 'salary_agreements' AND column_name = 'employee_id'") == "bigint"
+
+
+def test_legacy_fixed_salary_rejects_invalid_amounts_and_changes_nothing_on_postgres(pg):
+    from services import salary_agreement as sa
+
+    discipline.adjust_bonus_bank(EMPLOYEE, 50, "test", "test", None)
+    assert sa.save_legacy_fixed_salary(EMPLOYEE, 3_000_000, FOUNDER).created
+    before = (_agreements(EMPLOYEE), _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}"))
+
+    for bad in (0, -1, sa.MAX_SALARY + 1):
+        with pytest.raises(sa.ValidationError):
+            sa.save_legacy_fixed_salary(EMPLOYEE, bad, FOUNDER)
+
+    assert (_agreements(EMPLOYEE), _scalar(f"SELECT fixed_salary FROM salaries WHERE user_id = {EMPLOYEE}")) == before
+    assert discipline.get_salary(EMPLOYEE)["bonus_bank"] == 50

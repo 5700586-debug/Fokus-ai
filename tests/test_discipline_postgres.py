@@ -31,7 +31,7 @@ pytestmark = pytest.mark.skipif(not _DSN, reason="FOKUS_PG_TEST_DSN o'rnatilmaga
 
 _DAY = "2026-10-18"
 _USER = 7_952_886_089  # int4 dan katta SINTETIK Telegram-uslubidagi ID (BIGINT ustunlar tekshiruvi)
-_TABLES = ("daily_evaluations", "daily_evaluation_history", "salaries", "bonus_bank_ledger")
+_TABLES = ("daily_evaluations", "daily_evaluation_history", "salaries", "bonus_bank_ledger", "salary_agreements")
 _RULES_TABLE = "rules"  # ball tariflari (bos.grade_points.*) shu jadvaldan o'qiladi
 
 

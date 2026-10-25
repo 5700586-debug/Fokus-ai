@@ -56,7 +56,7 @@ def _values(text):
 
 
 def test_sample_text_is_exact_and_old_name_removed():
-    assert bot_module.SAMPLE == SAMPLE
+    assert bot_module.SAMPLE == "\n".join(SAMPLE.split("\n")[1:])  # tanlangan xodimdan keyin namuna — faqat hisob ma'lumotlari
     import inspect
 
     assert "Eshmat" not in inspect.getsource(bot_module) and "Shermatov" not in inspect.getsource(bot_module)
@@ -116,7 +116,8 @@ async def test_sample_does_not_pick_employee_or_create_agreement_and_nothing_sav
     main, bot = bot_dp
     _employee(EMP)
     sent = await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
-    assert SAMPLE in _text(sent) and not _buttons(sent)[1:] and _count("salary_agreements") == 0
+    assert "xodimni tanlang" in _text(sent) and not any(b.startswith("sagr:save:") for b in _buttons(sent))
+    assert _count("salary_agreements") == 0
     card = await send(main.dp, bot, FOUNDER_ID, text=SAMPLE.replace("Yusufov Sultonxon", "Юсуфов Султонхон").replace("Saturn Charhiy", "Сатурн Чархий"))
     text = _text(card)
     assert "Yusufov Sultonxon" in text and "1 800 000" in text and "700 000" in text and "kafolatlangan to‘lov emas" in text

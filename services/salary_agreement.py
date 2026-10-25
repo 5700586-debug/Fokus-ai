@@ -200,6 +200,10 @@ def get_all_upcoming(employee_id: int) -> list[dict]:
     return repo.upcoming_agreements(employee_id, company_time.today().isoformat())
 
 
+def employee_ids_with_agreements() -> set[int]:
+    return repo.employee_ids_with_agreements()
+
+
 def list_history(employee_id: int) -> list[dict]:
     return repo.list_agreements(employee_id)
 

@@ -262,3 +262,13 @@ def mark_reminded(issue_id: int, day: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def employee_ids_with_agreements() -> set[int]:
+    """``salary_agreements``da kamida bitta yozuvi bor (eski, amaldagi yoki kelajak) xodimlar; rozilikdan mustaqil."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT DISTINCT employee_id FROM salary_agreements").fetchall()
+    finally:
+        conn.close()
+    return {row["employee_id"] for row in rows}

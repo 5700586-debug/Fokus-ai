@@ -162,6 +162,19 @@ def list_approved_by_branch(branch: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def list_approved() -> list[dict]:
+    """Barcha tasdiqlangan (``status='approved'``) xodimlar, filialga biriktirilmaganlar ham (faqat o'qish)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM employees WHERE status = 'approved' ORDER BY familiya, ism, user_id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [dict(row) for row in rows]
+
+
 def approve_profile(user_id: int, approved_by: int) -> dict | None:
     """FAQAT profil hali ``'submitted'`` holatida bo'lsa tasdiqlaydi
     (atomic ``UPDATE ... WHERE user_id = ? AND status = 'submitted'``,

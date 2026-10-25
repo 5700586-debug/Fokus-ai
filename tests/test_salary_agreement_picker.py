@@ -520,3 +520,86 @@ async def test_founder_questions_and_card_have_no_bonus_even_for_employee_with_o
     card = await send(main.dp, bot, FOUNDER_ID, text="Fiks: 2 500 000\nKuniga: 10 soat\nBoshlanishi: 01.10.2026")
     for sent in (prompt, asked, card):
         assert "onus" not in _text(sent) and NOTE not in _text(sent) and "450 000" not in _text(sent)
+
+
+# ------------------------------------------------ "versiya" foydalanuvchidan yashirin --
+
+
+def _all_text(bot_sent_lists):
+    return "\n".join(_text(sent) for sent in bot_sent_lists).lower()
+
+
+async def test_version_is_never_shown_or_asked_but_history_buttons_and_tariff_work(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    _employee(E, "Boshqa", "Bek", role="savdo_boshligi")  # E: shu filial rahbari (issue xabari uchun)
+    seen = []
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    prompt = await _cb(main, bot, f"sagr:new:{A}")
+    seen.append(prompt)
+    asked = await send(main.dp, bot, FOUNDER_ID, text="Fiks: 2 500 000\nOyiga: 28 kun\nKuniga: 10 soat\nBoshlanishi: 01.10.2026")
+    assert "Tarif raqami" in _text(asked)  # tarif savoli saqlangan (versiya savoli emas)
+    seen.append(asked)
+    card = await send(main.dp, bot, FOUNDER_ID, text="3")
+    seen.append(card)
+    assert "Tarif: 3" in _text(card)
+    saved = await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
+    seen.append(saved)
+    first = sa.list_history(A)[0]
+    assert first["tariff"] == 3 and first["fixed_salary"] == 2_500_000
+    employee_msg = _to(bot, A)
+    assert f"sagr:ok:{first['id']}" in _buttons(employee_msg) and "💵 Oylik kelishuvi" in _text(employee_msg)
+    assert NOTE in _text(employee_msg)
+
+    # yangi kelishuv: eski tarix o'chmaydi, har biriga o'z tugmasi
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    card2 = await send(main.dp, bot, FOUNDER_ID, text="Tarif: 3\nFiks: 3 000 000\nOyiga: 28 kun\nKuniga: 10 soat\nBoshlanishi: 01.06.2027")
+    saved2 = await _cb(main, bot, next(d for d in _buttons(card2) if d.startswith("sagr:save:")))
+    seen.append(saved2)
+    history = sa.list_history(A)
+    assert len(history) == 2 and history[0] == first
+    second = history[1]["id"]
+    cards = await send(main.dp, bot, A, text="/mykelishuv")
+    seen.append(cards)
+    assert len(cards) == 2 and "Amaldagi kelishuv" in cards[0].text and "Kelajakdagi kelishuv" in cards[1].text
+    assert "01.06.2027" in cards[1].text and "3 000 000" in cards[1].text
+    assert f"sagr:ok:{first['id']}" in _buttons([cards[0]]) and f"sagr:ok:{second}" in _buttons([cards[1]])
+    assert f"sagr:ok:{second}" not in _buttons([cards[0]])
+
+    # savol (Tushunmadim) xabari, rozilik xabari, rad etilgan callbacklar
+    seen.append(await _cb(main, bot, f"sagr:no:{first['id']}", user=A))
+    seen.append(await _cb(main, bot, f"sagr:ok:{first['id']}", user=A))
+    seen.append(await _cb(main, bot, f"sagr:ok:{first['id']}", user=A))  # takroriy
+    seen.append(await _cb(main, bot, f"sagr:ok:{second}", user=A))
+    seen.append(await _cb(main, bot, f"sagr:ok:{second}", user=A))
+    seen.append(await _cb(main, bot, f"sagr:no:{second}", user=A))  # rozilikdan keyin
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    seen.append(await _cb(main, bot, f"sagr:show:{A}"))
+    seen.append(await _cb(main, bot, f"sagr:resend:{second}"))
+    consent = {r["agreement_id"]: r for r in db_rows("salary_agreement_consents")}
+    assert consent[first["id"]]["consented_by"] == A and consent[second]["consented_by"] == A
+    assert len(sa.list_history(A)) == 2 and len(db_rows("salary_agreement_issues")) <= 1
+    text = _all_text(seen + [[m] for m in bot.sent])
+    assert "versiya" not in text and "version" not in text
+
+
+def db_rows(table):
+    conn = db.get_connection()
+    try:
+        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()]
+    finally:
+        conn.close()
+
+
+async def test_issue_and_alert_messages_have_no_version_wording(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    first = sa.save_agreement(A, 2_500_000, 28, 600, "2026-01-01", FOUNDER_ID, "v1", tariff=3, with_consent=True).agreement["id"]
+    await _cb(main, bot, f"sagr:no:{first}", user=A)
+    founder_msgs = _text(_to(bot, FOUNDER_ID))
+    assert "tushunmadi" in founder_msgs and "Amal qilish sanasi" in founder_msgs and "ersiya" not in founder_msgs
+    sa.save_agreement(A, 2_600_000, 28, 600, "2026-01-01", FOUNDER_ID, "v2", tariff=3, with_consent=True)
+    stale = await _cb(main, bot, f"sagr:ok:{first}", user=A)
+    stale2 = await _cb(main, bot, f"sagr:no:{first}", user=A)
+    assert "ersiya" not in _text(stale).lower() + _text(stale2).lower() and "Yangi kelishuvni" in _text(stale)

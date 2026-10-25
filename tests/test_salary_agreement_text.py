@@ -138,3 +138,82 @@ async def test_misspelled_name_asks_to_choose_and_ambiguous_amount_asks_only_tha
     sent = await send(main.dp, bot, FOUNDER_ID, text="1,8 mln")
     assert any(b.startswith("sagr:save:") for b in _buttons(sent)) and "1 800 000" in _text(sent)
     assert _count("salary_agreements") == 0
+
+
+# ------------------------------------------- ism qatori istalgan o'rinda --
+
+_BODY = ["Tarif 3", "Fiks 1 800 000", "Oyiga 28 kun", "Kuniga 11", "Natija bonusi 700 000", "Boshlanishi 01.10.2026"]
+_NAME = "Yusufov Sultonxon — Saturn Charhiy"
+
+
+def _compose(position, colons=False, transform=lambda t: t):
+    body = [line.replace(" ", ": ", 1) if colons and line.split(" ", 1)[0] != "Natija" else line for line in _BODY]
+    if colons:
+        body[4] = "Natija bonusi: 700 000"
+    lines = list(body)
+    lines.insert({"start": 0, "middle": 3, "end": len(lines)}[position], _NAME)
+    return transform("\n".join(lines))
+
+
+@pytest.mark.parametrize("position", ["start", "middle", "end"])
+@pytest.mark.parametrize("colons", [False, True])
+def test_name_line_anywhere_with_or_without_colons(position, colons):
+    values, employee = _values(_compose(position, colons))
+    assert values == EXPECTED
+    assert employee is not None and sat.norm(employee["name"]) == "yusufov sultonxon"
+    assert B1 in sat._branch_matches(employee["branch_hint"])
+
+
+_CYR_TEXT = "Тариф 3\nФикс 1 800 000 сўм\nОйига 28 кун\nКунига 11 соат\nНатижа бонуси 700 000\nБошланиши 01.10.2026\nЮсуфов Султонхон — Сатурн Чархий"
+_MIXED_TYPO = "Tarf: 3\nfix 1800000\nOyiga 28 kunn\nkuniga: 11\nBunus 700 ming\nboshlanishi 1 oktabr 2026\nЮсуфов Sultonxon — Saturn Charhiy"
+
+
+@pytest.mark.parametrize("text", [_CYR_TEXT, _MIXED_TYPO])
+def test_cyrillic_mixed_and_typo_labels_are_not_taken_as_name(text):
+    values, employee = _values(text)
+    assert values == EXPECTED
+    assert sat.norm(employee["name"]) == "yusufov sultonxon"
+
+
+def test_label_lines_with_typos_never_become_the_name():
+    for line in ("Tarf 3", "Bunus 700 000", "Tarif", "Natija bonusi", "Boshlanishi", "Kuniga", "Fiks"):
+        assert "employee" not in sat.parse_text(line, name_words=1).values, line
+    assert sat.norm(sat.parse_text("Sanaev Bek", name_words=2).values["employee"]["name"]) == "sanaev bek"
+
+
+async def test_reordered_text_resolves_employee_and_makes_card_without_extra_questions(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    card = await send(main.dp, bot, FOUNDER_ID, text=_compose("end"))
+    text = _text(card)
+    assert "Yusufov Sultonxon" in text and B1 in text and "1 800 000" in text and "28 kun" in text
+    assert "11 soat" in text and "700 000" in text and "01.10.2026" in text
+    assert any(b.startswith("sagr:save:") for b in _buttons(card))
+    assert _count("salary_agreements") == 0 and _count("salary_agreement_consents") == 0
+    assert not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]
+
+
+async def test_ambiguous_name_still_asks_when_name_is_not_first(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP, branch=B1)
+    _employee(EMP2, branch=B2)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    sent = await send(main.dp, bot, FOUNDER_ID, text=_compose("end").replace(f" — {B1}", ""))
+    assert {f"sagr:pick:{EMP}", f"sagr:pick:{EMP2}"} <= set(_buttons(sent))
+    assert _count("salary_agreements") == 0
+
+
+async def test_short_amount_answer_completes_card_and_keeps_other_data(bot_dp):
+    main, bot = bot_dp
+    _employee(EMP)
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    text = _compose("middle").replace("Fiks 1 800 000", "Fiks 1800")
+    asked = await send(main.dp, bot, FOUNDER_ID, text=text)
+    assert "Fiks oylik qancha" in _text(asked) and not any(b.startswith("sagr:save:") for b in _buttons(asked))
+    card = await send(main.dp, bot, FOUNDER_ID, text="1 800 000")
+    out = _text(card)
+    assert "Yusufov Sultonxon" in out and "1 800 000" in out and "28 kun" in out and "11 soat" in out
+    assert "700 000" in out and "01.10.2026" in out and "Tarif: 3" in out
+    assert any(b.startswith("sagr:save:") for b in _buttons(card))
+    assert _count("salary_agreements") == 0 and not [m for m in bot.sent if getattr(m, "chat_id", None) == EMP]

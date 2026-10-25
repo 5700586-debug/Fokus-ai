@@ -14,6 +14,12 @@ from services import salary_agreement as sa
 
 FIELDS = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "effective_from", "result_bonus_cap")
 _AMOUNT = r"(\d[\d\s .,]*?)\s*(mln|million|milyon|ming|min|k|m)?\b"
+# Yorliq so'zi (imlo variantlari bilan): bunday so'z bilan boshlangan qator ism emas
+_LABEL_WORD = re.compile(
+    r"\s*(?:ta[rn]?r?if\w{0,2}|taraf|tarf|fi[kx]s\w{0,2}|fix|oylik\w{0,2}|oyiga|oyda|kuniga|kunlik|natija|"
+    r"b[ou]n[uo]s\w{0,2}|boshlan\w*|sana\w?|kelishuv\w*)(?![a-z'])",
+    re.I,
+)
 _APOS = re.compile(r"['‘’`ʻʼ]")
 
 
@@ -95,18 +101,19 @@ def parse_text(text: str, today: date | None = None, name_words: int = 2) -> Par
     lowered = _APOS.sub("", translit(text))
     lines = [line.strip() for line in lowered.splitlines() if line.strip()]
 
-    # Birinchi yorliqsiz qator: "Ism Familiya — Filial"
+    # Ism qatori istalgan o'rinda: yorliq so'zi bilan boshlanmagan, raqamsiz birinchi qator ("Ism Familiya — Filial")
     for line in lines:
-        if not re.search(r"(?i)\b(tarif|taraf|fiks|fix|oylik|oyiga|kuniga|kelishuv|natija|bonus|boshlan|sana)\w*\s*[:=]", line) and not re.search(r"\d{4}", line):
-            parts = re.split(r"\s+[—–-]\s+|\s*[—–,]\s*", line, maxsplit=1)
-            if len(parts) == 1:  # ajratgichsiz: "Ism Familiya Saturn Charhiy"
-                for branch in RECRUITING_BRANCH_NAMES:
-                    if norm(line).endswith(" " + norm(branch)):
-                        parts = [line[: len(line) - len(branch)].strip(), branch]
-                        break
-            name = parts[0].strip(" :,.")
-            if name and len(name.split()) >= name_words and not any(ch.isdigit() for ch in name):
-                result.values["employee"] = {"name": name, "branch_hint": parts[1].strip() if len(parts) > 1 else None}
+        if _LABEL_WORD.match(line) or any(ch.isdigit() for ch in line.split("—")[0].split("–")[0]) or re.search(r"\d{4}", line):
+            continue
+        parts = re.split(r"\s+[—–-]\s+|\s*[—–,]\s*", line, maxsplit=1)
+        if len(parts) == 1:  # ajratgichsiz: "Ism Familiya Saturn Charhiy"
+            for branch in RECRUITING_BRANCH_NAMES:
+                if norm(line).endswith(" " + norm(branch)):
+                    parts = [line[: len(line) - len(branch)].strip(), branch]
+                    break
+        name = parts[0].strip(" :,.")
+        if name and len(name.split()) >= name_words and not any(ch.isdigit() for ch in name):
+            result.values["employee"] = {"name": name, "branch_hint": parts[1].strip() if len(parts) > 1 else None}
             break
 
     tariff = _grab(r"\bta[rn]?r?if\w*|\btaraf\w*|\btarf\w*", lowered)

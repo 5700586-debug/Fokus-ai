@@ -81,6 +81,19 @@ def _section_summary(items: list[dict]) -> dict:
     return {"total": len(items), "items": items[:MAX_ENTRIES_PER_SECTION]}
 
 
+def open_agreement_questions() -> list[dict]:
+    """Xodim "❓ Tushunmadim" bosgan, hali yopilmagan oylik kelishuvi savollari (summasiz)."""
+    from services import salary_agreement
+
+    result = []
+    for issue in salary_agreement.open_issues():
+        profile = employees.get_profile(issue["employee_id"], include_contacts=False)
+        if profile is None or profile.get("status") != "approved":
+            continue
+        result.append({"full_name": _full_name(profile), "branch": issue.get("branch") or "-", "date": issue["due_date"]})
+    return result
+
+
 def build_today_problems_summary(today: date | None = None) -> dict:
     """``{"missing_schedule": {...}, "pending_requests": {...}}`` — har
     bo'lim ``{"total": int, "items": list[dict]}`` (``items`` ko'pi
@@ -89,4 +102,5 @@ def build_today_problems_summary(today: date | None = None) -> dict:
     return {
         "missing_schedule": _section_summary(employees_missing_todays_schedule(today)),
         "pending_requests": _section_summary(pending_schedule_change_requests()),
+        "agreement_questions": _section_summary(open_agreement_questions()),
     }

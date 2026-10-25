@@ -1667,6 +1667,15 @@ def register(dp: Dispatcher, openai_client) -> None:
 # --------------------------------------------------------------- scheduler --
 
 
+async def _agreement_issue_reminder_tick(bot) -> None:
+    import salary_agreement_bot
+
+    try:
+        await salary_agreement_bot.remind_open_issues(bot)
+    except Exception as error:  # noqa: BLE001
+        logger.error("Kelishuv savollari eslatmasi xatosi: %s", type(error).__name__)
+
+
 async def _day_close_tick(bot) -> None:
     from roles import list_users_by_role
     from services import attendance as attendance_service
@@ -1731,5 +1740,6 @@ def start_scheduler(bot):
 
     scheduler = AsyncIOScheduler(timezone=_resolve_timezone())
     scheduler.add_job(_day_close_tick, "interval", minutes=5, args=[bot], id="bos_day_close_audit")
+    scheduler.add_job(_agreement_issue_reminder_tick, "interval", minutes=10, args=[bot], id="salary_agreement_issue_reminder")
     scheduler.start()
     return scheduler

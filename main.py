@@ -46,6 +46,7 @@ import calibration_bot  # noqa: E402
 import cash_shift_bot  # noqa: E402
 import cash_close_review  # noqa: E402
 import discipline_bot  # noqa: E402
+import salary_agreement_bot  # noqa: E402
 import employees  # noqa: E402
 import health_server  # noqa: E402
 import inventory_bot  # noqa: E402
@@ -467,6 +468,7 @@ _SHARED_COMMANDS = [
     "/oylikturnir — Oylik reyting",
     "/listnizom — Korxona nizomlari",
     "/apellyatsiya — Ball ayirishga e'tiroz bildirish",
+    "/mykelishuv — 💵 Oylik kelishuvim",
 ]
 
 _CATEGORY_LABELS: dict[str, str] = {
@@ -602,6 +604,7 @@ _FOUNDER_MENU_LABELS = [
     "🏬 Do'konlar",
     "💰 Smenalarni ko'rish",
     "🚨 Bugungi muammolar",
+    "💵 Oylik kelishuvi",
     "⚙️ Sozlamalar",
 ]
 
@@ -748,6 +751,7 @@ _SHARED_BUTTON_LABELS: dict[str, str] = {
     "/oylikturnir": "🏅 Oylik reyting",
     "/listnizom": "📋 Nizomlar",
     "/apellyatsiya": "🙋 E'tirozim bor",
+    "/mykelishuv": "💵 Oylik kelishuvim",
 }
 
 # Foydalanuvchi qurilmasida keshlanib qolgan ESKI friendly yorliqlar —
@@ -902,7 +906,7 @@ dp.update.outer_middleware(_NormalizeStaleMenuButtonMiddleware())
 _MENU_SCREEN_TEXTS = (
     set(_ALL_MENU_BUTTON_TEXTS)
     | {BACK_TEXT, "🚨 Bugungi muammolar", "/start", cash_shift_bot.HOME_TEXT}
-    | {"/mystars", "/mymaosh", "/bugungiporga", "/oylikturnir", "/natijam"}
+    | {"/mystars", "/mymaosh", "/mykelishuv", "/bugungiporga", "/oylikturnir", "/natijam"}
 )
 menu_screens.configure(
     _MENU_SCREEN_TEXTS,
@@ -943,6 +947,7 @@ cash_close_review.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
+salary_agreement_bot.register(dp)
 supplier_chat_bot.register(dp, openai_client)
 saturn_group_bot.register(dp, openai_client)
 recruiting_bot.register(dp, openai_client)
@@ -1558,6 +1563,9 @@ def _founder_today_problems_text(summary: dict) -> str:
     lines.extend(_today_problems_section_text("🟡 Bugungi grafigi kiritilmagan faol xodimlar", summary["missing_schedule"]))
     lines.append("")
     lines.extend(_today_problems_section_text("⏳ Kutilayotgan grafik o'zgartirish so'rovlari", summary["pending_requests"]))
+    if summary["agreement_questions"]["total"]:
+        lines.append("")
+        lines.extend(_today_problems_section_text("❓ Oylik kelishuvi bo'yicha ochiq savollar", summary["agreement_questions"]))
     return "\n".join(lines)
 
 

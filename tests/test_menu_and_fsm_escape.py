@@ -94,7 +94,7 @@ async def test_start_shows_founder_category_for_founder(bot_dp):
 
     assert buttons == {
         "👤 Xodim qo'shish", "📢 Ishga e'lon berish", "👥 Xodimlar", "🏬 Do'konlar",
-        "💰 Smenalarni ko'rish", "🚨 Bugungi muammolar", "⚙️ Sozlamalar",
+        "💰 Smenalarni ko'rish", "🚨 Bugungi muammolar", "💵 Oylik kelishuvi", "⚙️ Sozlamalar",
     }
 
 
@@ -271,7 +271,8 @@ _EXPECTED_SHARED_ROWS = [
     ["⭐ Yulduzlarim", "💰 Oyligim"],
     ["📅 Grafik so'rovi", "🏆 Bugungi o'rnim"],
     ["🏅 Oylik reyting", "📋 Nizomlar"],
-    ["🙋 E'tirozim bor", "🔙 Orqaga"],
+    ["🙋 E'tirozim bor", "💵 Oylik kelishuvim"],
+    ["🔙 Orqaga"],
 ]
 
 
@@ -308,6 +309,7 @@ def test_shared_button_labels_map_back_to_their_real_commands():
         "/oylikturnir": "🏅 Oylik reyting",
         "/listnizom": "📋 Nizomlar",
         "/apellyatsiya": "🙋 E'tirozim bor",
+        "/mykelishuv": "💵 Oylik kelishuvim",
     }
     for bare, friendly in main._SHARED_BUTTON_LABELS.items():
         assert main._STALE_LABEL_TO_COMMAND[friendly] == bare

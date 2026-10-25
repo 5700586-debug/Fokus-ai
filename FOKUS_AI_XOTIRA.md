@@ -48,6 +48,9 @@ Manba: Autopilot (2026-08-31), PR tekshiruvi (2026-09-19).
 ✅ Davomat: nazoratchi kelish vaqtini qo'lda kiritadi (manba manual_nazoratchi_entry); kechikish sababi tugmalari: sababsiz · rahbar ruxsati (Founderga avtomatik Ha/Yo'q) · fors-major · boshqa. Minus miqdori o'ylab topilmaydi — Founder aniqlaydi. (manba: eski FOKUS_AI_STATE.md)
 ✅ Real Telegram E2E FAILED bo'lsa sabab commit comment sifatida avtomatik yoziladi (session/token hech qachon chiqmaydi). GitHub job-log'lariga autentifikatsiyasiz kirib bo'lmaydi — shuning uchun testlar imkon qadar sodda/strukturaviy yoziladi. (manba: eski FOKUS_AI_STATE.md)
 ## 4. Biznes qarorlari
+
+✅ E'tirof berish va qo'shimcha ish uchun yulduzcha to'lash oqimi keyingi qadamga kiritilsin. Huquq: Founder — barcha xodimlar; Savdo bo'limi boshlig'i (`savdo_boshligi`, ya'ni filial rahbari — bitta lavozim) — faqat o'z filialidagi xodimlar. Ikkala amal Savdo bo'limi boshlig'i menyusida bo'lsin; alohida yangi rol yaratilmasin. Hali amalga oshirilmagan. (Muhammadiy, 2026-10-26, shu chat)
+
 ✅ Kamida 1 yil faqat 1 Nazoratchi (single-slot ataylab). (Autopilot, 2026-08-31) Ko'p nazoratchiga o'tishga to'sqinlik qiluvchi kod yozilmaydi.
 ✅ Nazoratchi baholashni kun oxirida qiladi; smena bo'yicha alohida nazorat qurilmaydi. Ish/vaqt = 0 ham baho hisoblanadi. (Sodiq bilan suhbat, 2026-10-05)
 ✅ Filiallar bittadan qo'shiladi: sinov → tuzatish → keyingi filial. (Autopilot, 2026-08-31)

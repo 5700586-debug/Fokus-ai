@@ -26,20 +26,20 @@ FOUNDER_BUTTON = "💵 Oylik kelishuvi"
 EMPLOYEE_BUTTON = "💵 Oylik kelishuvim"
 
 SAMPLE = (
-    "Eshmat Shermatov — Saturn Charhiy\n"
     "Tarif: 3\n"
-    "Fiks: 1.800.000 so'm\n"
-    "Oyiga: 28 ish kuni\n"
+    "Fiks: 1 800 000\n"
+    "Oyiga: 28 kun\n"
     "Kuniga: 11 soat\n"
-    "Kelishuv boshlanishi: 01.10.2026\n"
-    "Natija bonusi: oyiga 700.000 so'mgacha"
+    "Natija bonusi: 700 000\n"
+    "Boshlanishi: 01.10.2026"
 )
-_INTRO = (
-    "💵 Oylik kelishuvi.\n\nShu namunadagidek bitta xabarda yozing (tartib va tinish belgilari muhim emas):\n\n"
-    f"{SAMPLE}\n\nYetishmagan qismini keyin qisqa so'rayman."
+PAGE_SIZE = 10
+_LIST_HEADER = (
+    "💵 Oylik kelishuvi — xodimni tanlang.\n"
+    "➕ kelishuvi yo'q (yangi kiritish) · ✅ mavjud kelishuvni ko'rish · 🔄 yangi kelishuv kiritish"
 )
 _ASK = {
-    "employee": "👤 Qaysi xodim? Ism-familiyani yozing (masalan: Eshmat Shermatov — Saturn Charhiy).",
+    "employee": "👤 Qaysi xodim? Ism-familiyani yozing (masalan: Yusufov Sultonxon — Saturn Charhiy).",  # faqat ro'yxatdan tanlanmagan holatda
     "tariff": "🏷 Tarif raqami? (1, 2 yoki 3)",
     "fixed_salary": "💵 Fiks oylik qancha? (masalan: 1 800 000 yoki 1,8 mln)",
     "work_days": "📅 Oyiga necha ish kuni? (masalan: 28)",
@@ -86,13 +86,13 @@ def _card_text(data: dict) -> str:
         [
             "📝 Oylik kelishuvi — tekshiring:",
             f"👤 Xodim: {data['employee_name']}",
-            f"🏬 Filial: {data['branch']}",
+            f"🏬 Filial: {data.get('branch') or 'Biriktirilmagan'}",
             f"🏷 Tarif: {data['tariff']}",
             f"💵 Fiks oylik: {sa.format_money(data['fixed_salary'])}",
             f"📅 Oylik ish kunlari: {data['work_days']} kun",
             f"🕒 Kunlik ish soati: {sa.format_minutes(data['daily_minutes'])}",
             f"📌 Kelishuv boshlanishi: {sa.format_date(data['effective_from'])}",
-            f"🎯 Natija bonusi: {'oyiga ' + sa.format_money(cap) + 'gacha' if cap else 'Belgilanmagan'}",
+            f"🎯 Natija bonusi: {'oyiga ' + sa.format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}",
             "\nSaqlanmaguncha xodimga hech narsa yuborilmaydi.",
         ]
     )
@@ -140,6 +140,64 @@ async def remind_open_issues(bot, now=None) -> int:
     for issue in pending:
         sa.mark_issue_reminded(issue["id"], today)
     return len(pending)
+
+
+def _list_labels(profiles: list[dict]) -> dict[int, str]:
+    """Tugma matni; bir xil ismlar filial yoki ID bilan farqlanadi (tanlash baribir ``employee_id`` orqali)."""
+    names = {p["user_id"]: _full_name(p) for p in profiles}
+    counts: dict[str, int] = {}
+    for name in names.values():
+        counts[sat.norm(name)] = counts.get(sat.norm(name), 0) + 1
+    labels = {}
+    for p in profiles:
+        name = names[p["user_id"]]
+        if counts[sat.norm(name)] > 1:
+            branch = p.get("branch")
+            twin_branches = [q.get("branch") for q in profiles if sat.norm(names[q["user_id"]]) == sat.norm(name)]
+            name += f" · {branch}" if branch and twin_branches.count(branch) == 1 else f" · #{p['user_id']}"
+        labels[p["user_id"]] = name
+    return labels
+
+
+def _employee_list(page: int) -> tuple[str, InlineKeyboardMarkup]:
+    profiles = employees.list_approved()
+    with_agreement = sa.employee_ids_with_agreements()
+    labels = _list_labels(profiles)
+    ordered = [p for p in profiles if p["user_id"] not in with_agreement] + [
+        p for p in profiles if p["user_id"] in with_agreement
+    ]
+    pages = max(1, -(-len(ordered) // PAGE_SIZE))
+    page = min(max(page, 0), pages - 1)
+    rows: list[list[tuple[str, str]]] = []
+    for p in ordered[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]:
+        uid = p["user_id"]
+        if uid in with_agreement:
+            rows.append([(f"✅ {labels[uid]}", f"sagr:show:{uid}"), ("🔄", f"sagr:new:{uid}")])
+        else:
+            rows.append([(f"➕ {labels[uid]}", f"sagr:new:{uid}")])
+    nav = []
+    if page > 0:
+        nav.append(("⬅️", f"sagr:pg:{page - 1}"))
+    if page < pages - 1:
+        nav.append(("➡️", f"sagr:pg:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append(_CANCEL_ROW)
+    text = _LIST_HEADER + (f"\n\nSahifa {page + 1}/{pages}" if pages > 1 else "")
+    if not ordered:
+        text += "\n\nTasdiqlangan xodim topilmadi."
+    return text, _kb(*rows)
+
+
+def _agreement_cards(employee_id: int) -> list[tuple[dict, str]]:
+    """Amaldagi va barcha kelajak kelishuvlar (har biri o'z kartasi uchun)."""
+    cards = []
+    current = sa.get_current(employee_id)
+    if current is not None:
+        cards.append((current, "💵 Amaldagi kelishuv"))
+    for item in sa.get_all_upcoming(employee_id):
+        cards.append((item, f"⏭ Kelajakdagi kelishuv ({sa.format_date(item['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
+    return cards
 
 
 def _private(event) -> bool:
@@ -226,7 +284,7 @@ def register(dp: Dispatcher) -> None:
 
         problem_lines = [text for key, text in parsed.problems.items()]
         await state.update_data(ag_problem_text=("⚠️ " + " ".join(problem_lines) + "\n\n") if problem_lines else "")
-        if employee:
+        if employee and not data.get("ag_locked"):  # ro'yxatdan tanlangan xodim matndagi ism bilan almashmaydi
             outcome = await _resolve_employee(message, state, employee["name"], employee["branch_hint"])
             if outcome == "":
                 return
@@ -240,9 +298,72 @@ def register(dp: Dispatcher) -> None:
         if not await _allowed(message):
             return
         await state.clear()
+        # Ro'yxatdan tanlanmasa ham to'liq matn (ism bilan) yozish mumkin (eski yo'l saqlangan).
         await state.set_state(AgreementStates.collecting)
-        await state.update_data(ag={}, ag_ask=None, ag_token=None, ag_cands=[], ag_problem_text="")
-        await message.answer(_INTRO, reply_markup=_kb(_CANCEL_ROW))
+        await state.update_data(ag={}, ag_ask=None, ag_token=None, ag_cands=[], ag_problem_text="", ag_locked=False)
+        text, markup = _employee_list(0)
+        await message.answer(text, reply_markup=markup)
+
+    @dp.callback_query(F.data.startswith("sagr:pg:"))
+    async def agreement_page(callback: CallbackQuery) -> None:
+        if not await _allowed(callback):
+            return
+        try:
+            page = int(callback.data.split(":")[2])
+        except ValueError:
+            await callback.answer()
+            return
+        text, markup = _employee_list(page)
+        await callback.answer()
+        await callback.message.edit_text(text, reply_markup=markup)
+
+    def _approved_profile(raw_id: str) -> dict | None:
+        try:
+            profile = employees.get_profile(int(raw_id), include_contacts=False)
+        except ValueError:
+            return None
+        return profile if profile and profile.get("status") == "approved" else None
+
+    @dp.callback_query(F.data.startswith("sagr:new:"))
+    async def agreement_new(callback: CallbackQuery, state: FSMContext) -> None:
+        """➕ / 🔄: tanlangan ``employee_id`` uchun yangi kelishuv (versiya) kiritishni boshlaydi. Oldingi draft/token bekor."""
+        if not await _allowed(callback):
+            return
+        profile = _approved_profile(callback.data.split(":")[2])
+        if profile is None:
+            await callback.answer("Xodim tasdiqlangan ro'yxatda emas.", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AgreementStates.collecting)
+        ag = {"employee_id": profile["user_id"], "employee_name": _full_name(profile), "branch": profile.get("branch")}
+        await state.update_data(ag=ag, ag_ask=None, ag_token=None, ag_cands=[], ag_problem_text="", ag_locked=True)
+        await callback.answer()
+        await callback.message.edit_text(
+            f"👤 Xodim: {ag['employee_name']} — {ag['branch'] or 'Filial biriktirilmagan'}\n\n"
+            "Faqat hisob ma'lumotlarini yozing (namuna — avtomatik to'ldirilmaydi; lotin yoki kirill, tartibi muhim emas):\n\n"
+            f"{SAMPLE}\n\nYetishmagan yoki noaniq qismini qisqa so'rayman.",
+            reply_markup=_kb(_CANCEL_ROW),
+        )
+
+    @dp.callback_query(F.data.startswith("sagr:show:"))
+    async def agreement_show(callback: CallbackQuery) -> None:
+        """✅: mavjud (amaldagi + kelajak) kelishuvlarni ko'rsatadi; hech narsa yozmaydi va yubormaydi."""
+        if not await _allowed(callback):
+            return
+        profile = _approved_profile(callback.data.split(":")[2])
+        if profile is None:
+            await callback.answer("Xodim tasdiqlangan ro'yxatda emas.", show_alert=True)
+            return
+        cards = _agreement_cards(profile["user_id"])
+        await callback.answer()
+        if not cards:
+            await callback.message.answer("Bu xodimda hali kelishuv yo'q.")
+            return
+        await callback.message.answer(f"👤 {_full_name(profile)} — {profile.get('branch') or 'Filial biriktirilmagan'}")
+        for index, (agreement, title) in enumerate(cards):
+            text = f"{_employee_text(agreement, profile['user_id'], title)}\n\nHolat: {sa.consent_status_text(agreement)}"
+            markup = _kb([("🔄 Yangi kelishuv", f"sagr:new:{profile['user_id']}")]) if index == len(cards) - 1 else None
+            await callback.message.answer(text, reply_markup=markup)
 
     @dp.message(StateFilter(AgreementStates.collecting), F.text)
     async def agreement_text(message: Message, state: FSMContext) -> None:
@@ -265,7 +386,7 @@ def register(dp: Dispatcher) -> None:
             return
         ag = dict(data["ag"])
         ag.update(employee_id=profile["user_id"], employee_name=_full_name(profile), branch=profile["branch"])
-        await state.update_data(ag=ag, ag_cands=[], ag_problem_text="")
+        await state.update_data(ag=ag, ag_cands=[])
         await callback.answer()
         await _next_step(callback, state, edit=True)
 
@@ -564,11 +685,7 @@ def register(dp: Dispatcher) -> None:
             salary = discipline.get_salary(user_id)
             await message.answer("\n".join(sa.view_lines(user_id, salary["fixed_salary"])))
             return
-        cards = []
-        if current is not None:
-            cards.append((current, "💵 Amaldagi kelishuv"))
-        for item in upcoming:
-            cards.append((item, f"⏭ Kelajakdagi kelishuv ({sa.format_date(item['effective_from'])} dan; hozirgi shartlarni o'zgartirmaydi)"))
+        cards = _agreement_cards(user_id)
         for agreement, title in cards:
             # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
             text = f"{_employee_text(agreement, user_id, title)}\n\nHolat: {sa.consent_status_text(agreement)}"

@@ -200,6 +200,10 @@ def get_all_upcoming(employee_id: int) -> list[dict]:
     return repo.upcoming_agreements(employee_id, company_time.today().isoformat())
 
 
+def employee_ids_with_agreements() -> set[int]:
+    return repo.employee_ids_with_agreements()
+
+
 def list_history(employee_id: int) -> list[dict]:
     return repo.list_agreements(employee_id)
 
@@ -230,7 +234,7 @@ def agreement_lines(agreement: dict) -> list[str]:
         extra.append(f"🏷 Tarif: {agreement['tariff']}")
     if agreement.get("tariff") is not None or agreement.get("result_bonus_cap") is not None:
         cap = agreement.get("result_bonus_cap")
-        extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha' if cap else 'Belgilanmagan'}")
+        extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}")
     return extra + [
         f"📅 Oylik ish kunlari: {str(days) + ' kun' if days is not None else 'Kiritilmagan'}",
         f"🕒 Kunlik ish soati: {format_minutes(agreement.get('daily_minutes'))}",

@@ -11,6 +11,11 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Deploydan tashqari haqiqiy xodimga oylik/kelishuv yozilmadi. Botda kiritish va ko'rsatish oqimini Muhammadiyning real foydalanishida tekshirish kutiladi. Ishlangan vaqtdan to'lanadigan haq hisoblash bu PRda yo'q.
 - Keyingi qadam: mavjud “💵 Oylik belgilash” orqali filial/xodim tanlash va kelishuv kartasini tekshirish. Faqat to'g'ri haqiqiy qiymatlar tasdiqlanganda Founder Saqlashni bosadi. Asosiy navbat: Oylik baholarim → oy boshidan hisob → solishtirish.
 
+## Keyingi qadam — Muhammadiy tasdiqlagan, 2026-10-26
+
+- Savdo bo'limi boshlig'i menyusiga **e'tirof berish** va **qo'shimcha ish uchun yulduzcha to'lash** oqimlarini kiritish rejalashtirildi. Huquq: Founder barcha xodimlar uchun; `savdo_boshligi` faqat o'z filiali uchun. Savdo bo'limi boshlig'i = filial rahbari, bitta lavozim; yangi rol yaratilmaydi.
+- Joriy PR #68 faqat hisobning o'qish qatlami; yuqoridagi menyu/kiritish oqimlari hali amalga oshirilmagan. Ushbu yozuv faqat keyingi qadamni saqlaydi, kod yoki production o'zgarmagan.
+
 ## "Oyligim" uchun tasdiqlangan hisobning o'qish qatlami (branch `feat/oyligim-read-layer`, PR ochiq, merge/deploy YO'Q)
 
 - Yangi: `services/payroll_view.py` (`compute_totals` sof formula, `month_view(employee_id, "YYYY-MM")`) + `repositories/payroll_view.py`. FAQAT O'QIYDI (hech narsa yozmaydi; yangi ledger, kiritish oqimi, avtomatik bonus yo'q). Tugmalar va xabar ko'rinishiga tegilmagan.

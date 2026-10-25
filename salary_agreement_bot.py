@@ -26,20 +26,20 @@ FOUNDER_BUTTON = "💵 Oylik kelishuvi"
 EMPLOYEE_BUTTON = "💵 Oylik kelishuvim"
 
 SAMPLE = (
-    "Eshmat Shermatov — Saturn Charhiy\n"
+    "Yusufov Sultonxon — Saturn Charhiy\n"
     "Tarif: 3\n"
-    "Fiks: 1.800.000 so'm\n"
-    "Oyiga: 28 ish kuni\n"
+    "Fiks: 1 800 000\n"
+    "Oyiga: 28 kun\n"
     "Kuniga: 11 soat\n"
-    "Kelishuv boshlanishi: 01.10.2026\n"
-    "Natija bonusi: oyiga 700.000 so'mgacha"
+    "Natija bonusi: 700 000\n"
+    "Boshlanishi: 01.10.2026"
 )
 _INTRO = (
-    "💵 Oylik kelishuvi.\n\nShu namunadagidek bitta xabarda yozing (tartib va tinish belgilari muhim emas):\n\n"
-    f"{SAMPLE}\n\nYetishmagan qismini keyin qisqa so'rayman."
+    "💵 Oylik kelishuvi.\n\nBitta xabarda yozing (namuna; lotin yoki kirill, tartibi muhim emas):\n\n"
+    f"{SAMPLE}\n\nYetishmagan yoki noaniq qismini qisqa so'rayman."
 )
 _ASK = {
-    "employee": "👤 Qaysi xodim? Ism-familiyani yozing (masalan: Eshmat Shermatov — Saturn Charhiy).",
+    "employee": "👤 Qaysi xodim? Ism-familiyani yozing (masalan: Yusufov Sultonxon — Saturn Charhiy).",
     "tariff": "🏷 Tarif raqami? (1, 2 yoki 3)",
     "fixed_salary": "💵 Fiks oylik qancha? (masalan: 1 800 000 yoki 1,8 mln)",
     "work_days": "📅 Oyiga necha ish kuni? (masalan: 28)",
@@ -92,7 +92,7 @@ def _card_text(data: dict) -> str:
             f"📅 Oylik ish kunlari: {data['work_days']} kun",
             f"🕒 Kunlik ish soati: {sa.format_minutes(data['daily_minutes'])}",
             f"📌 Kelishuv boshlanishi: {sa.format_date(data['effective_from'])}",
-            f"🎯 Natija bonusi: {'oyiga ' + sa.format_money(cap) + 'gacha' if cap else 'Belgilanmagan'}",
+            f"🎯 Natija bonusi: {'oyiga ' + sa.format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}",
             "\nSaqlanmaguncha xodimga hech narsa yuborilmaydi.",
         ]
     )
@@ -265,7 +265,7 @@ def register(dp: Dispatcher) -> None:
             return
         ag = dict(data["ag"])
         ag.update(employee_id=profile["user_id"], employee_name=_full_name(profile), branch=profile["branch"])
-        await state.update_data(ag=ag, ag_cands=[], ag_problem_text="")
+        await state.update_data(ag=ag, ag_cands=[])
         await callback.answer()
         await _next_step(callback, state, edit=True)
 

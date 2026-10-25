@@ -11,6 +11,15 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Deploydan tashqari haqiqiy xodimga oylik/kelishuv yozilmadi. Botda kiritish va ko'rsatish oqimini Muhammadiyning real foydalanishida tekshirish kutiladi. Ishlangan vaqtdan to'lanadigan haq hisoblash bu PRda yo'q.
 - Keyingi qadam: mavjud “💵 Oylik belgilash” orqali filial/xodim tanlash va kelishuv kartasini tekshirish. Faqat to'g'ri haqiqiy qiymatlar tasdiqlanganda Founder Saqlashni bosadi. Asosiy navbat: Oylik baholarim → oy boshidan hisob → solishtirish.
 
+## `/kelishuv` namunasi soddalashtirildi va matn tushunish yaxshilandi (branch `feature/agreement-sample-parser`, PR ochiq, merge/deploy YO'Q)
+
+- Namuna: "Yusufov Sultonxon — Saturn Charhiy / Tarif: 3 / Fiks: 1 800 000 / Oyiga: 28 kun / Kuniga: 11 soat / Natija bonusi: 700 000 / Boshlanishi: 01.10.2026" (eski "Eshmat Shermatov" namunasi hamma joydan almashtirildi). Namuna faqat ko'rsatma: xodim tanlamaydi, kelishuv yaratmaydi.
+- Parser (`services/salary_agreement_text.py`, yangi AI/pullik integratsiya YO'Q): o'zbek kirill/lotin/aralash yozuv lotinga o'tkaziladi (`translit`); yorliq imlo xatolari (tarf, fix/fiks/oylik, bunus, kuniga: 11 soatsiz), qator tartibi, "Ism, Filial" va ajratgichsiz "Ism Familiya Filial", sana "1.10.2026", "01/10/2026", "1 oktabr 2026" tushuniladi. Noaniq summa ("1800", "700"), yilsiz sana va tushunilmagan qism TAXMIN QILINMAYDI — faqat o'sha qism so'raladi.
+- Ism: aynan mos va bitta nomzod+mos filial bo'lsagina avtomatik; kirill/lotin yoki imlo xatosi (o'xshashlik ≥0.8), bir xil ism yoki filial mos kelmasa — mavjud tasdiqlangan xodimlardan nomzod tugmalari (`sagr:pick`). Yangi xodim yaratilmaydi.
+- Saqlashdan oldingi tekshirish kartasi va tasdiqlash o'zgarmagan; hech narsa saqlanmaydi/yuborilmaydi. Natija bonusi kartada va xodim matnida "chegara, kafolatlangan to'lov emas" deb belgilangan; oylik formulasi, nizom, ruxsatlar o'zgarmagan.
+- Cheklov: o'xshashlik chegarasi sodda (difflib); kirill harflar harfma-harf o'tkaziladi (lotin so'z ichidagi kirill "с" kabi o'xshash harflar "s" bo'ladi); oy nomli sana yil bilan yozilishi kerak.
+- Test: `tests/test_salary_agreement_text.py` (namuna, kirill/lotin/aralash, imlo, noaniqlik, o'xshash ismlar, tasdiqlashgacha yozuv yo'qligi).
+
 ## Oylik kelishuvi: matn bilan kiritish + xodim roziligi (branch `feature/salary-agreement-v2`, PR ochiq, merge/deploy YO'Q)
 
 - **Founder:** menyuda "💵 Oylik kelishuvi" (yoki `/kelishuv`) -> namuna ko'rsatiladi -> bitta xabar yoki yetishmagan qismlar qisqa savol bilan. Parser deterministik (`services/salary_agreement_text.py`, AI/pullik integratsiya yo'q): "1.800.000 / 1 800 000 / 1800000 / 1,8 mln / 700 ming" bir xil; "28 kun", "11 soat", qator tartibi xato emas. Birliksiz kichik son ("700") TAXMIN QILINMAYDI — so'raladi. Xodim faqat mavjud tasdiqlangan xodimlar orasidan; bir xil ism yoki filial mos kelmasa — tanlash tugmalari; yangi xodim yaratilmaydi, kelishuv sanasi ishga kirish sanasiga yozilmaydi.

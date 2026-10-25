@@ -230,7 +230,7 @@ def agreement_lines(agreement: dict) -> list[str]:
         extra.append(f"🏷 Tarif: {agreement['tariff']}")
     if agreement.get("tariff") is not None or agreement.get("result_bonus_cap") is not None:
         cap = agreement.get("result_bonus_cap")
-        extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha' if cap else 'Belgilanmagan'}")
+        extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}")
     return extra + [
         f"📅 Oylik ish kunlari: {str(days) + ' kun' if days is not None else 'Kiritilmagan'}",
         f"🕒 Kunlik ish soati: {format_minutes(agreement.get('daily_minutes'))}",

@@ -110,14 +110,16 @@ async def test_full_flow_saves_only_after_confirm_and_sends_to_employee(bot_dp):
     _employee(EMP)
     card = await _to_card(main, bot)
     assert "Tekshiring".lower() in _text(card).lower() and "1 800 000" in _text(card)
+    assert "onus" not in _text(card) and "⭐" not in _text(card)
     assert _rows() == [] and _to_employee(bot) == []
     saved = await _cb(main, bot, _save_btn(card))
     rows = _rows()
     assert len(rows) == 1 and rows[0]["fixed_salary"] == 1_800_000 and rows[0]["tariff"] == 3
-    assert rows[0]["work_days"] == 28 and rows[0]["daily_minutes"] == 660 and rows[0]["result_bonus_cap"] == 700_000
+    assert rows[0]["work_days"] == 28 and rows[0]["daily_minutes"] == 660 and rows[0]["result_bonus_cap"] is None
     assert "Xodim tasdig'i kutilmoqda" in _text(saved)
     sent_to_emp = [m for m in saved if getattr(m, "chat_id", None) == EMP]
     assert sent_to_emp and f"sagr:ok:{rows[0]['id']}" in _buttons(sent_to_emp)
+    assert "Oylik bonus: 140 ⭐ — 700 000 so'mgacha ishlab topishingiz mumkin. 1 ⭐ = 5 000 so'm." in _text(sent_to_emp)
     assert _rows("salary_agreement_consents")[0]["delivery_status"] == "sent"
     assert _rows("salary_agreement_consents")[0]["consented_at"] is None
     # hire date unchanged: employees jadvali tegilmagan
@@ -155,11 +157,9 @@ async def test_missing_parts_are_asked_and_clear_data_not_reasked(bot_dp):
     sent = await _to_card(main, bot, f"Ali Valiyev — {B1}\nTarif: 3\nFiks: 1,8 mln\nOyiga: 28 kun\nKuniga: 11 soat")
     assert "sanadan boshlanadi" in _text(sent)
     sent = await _cb(main, bot, "sagr:today")
-    assert "natija bonusi" in _text(sent).lower()
-    sent = await send(main.dp, bot, FOUNDER_ID, text="700")
-    assert "Aniq yozing" in _text(sent)
-    sent = await send(main.dp, bot, FOUNDER_ID, text="700 ming")
-    assert "700 000" in _text(sent) and _save_btn(sent)
+    assert "onus" not in _text(sent).lower() and _save_btn(sent)  # bonus savoli yo'q: karta tayyor
+    assert "1 800 000" in _text(sent) and "28 kun" in _text(sent) and "11 soat" in _text(sent)
+    assert _rows() == [] and _to_employee(bot) == []
 
 
 async def test_only_founder_can_start_or_save(bot_dp):

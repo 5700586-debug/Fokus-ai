@@ -11,6 +11,13 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 - Deploydan tashqari haqiqiy xodimga oylik/kelishuv yozilmadi. Botda kiritish va ko'rsatish oqimini Muhammadiyning real foydalanishida tekshirish kutiladi. Ishlangan vaqtdan to'lanadigan haq hisoblash bu PRda yo'q.
 - Keyingi qadam: mavjud “💵 Oylik belgilash” orqali filial/xodim tanlash va kelishuv kartasini tekshirish. Faqat to'g'ri haqiqiy qiymatlar tasdiqlanganda Founder Saqlashni bosadi. Asosiy navbat: Oylik baholarim → oy boshidan hisob → solishtirish.
 
+## Kelishuvdan "Natija bonusi" kiritishi olib tashlandi + xodim matni (branch `fix/kelishuv-no-bonus-input`, PR ochiq, merge/deploy YO'Q)
+
+- `/kelishuv` namunasi, kiritish savollari va Founder tekshirish kartasidan "Natija bonusi / eng ko'pi qancha / 700 000" olib tashlandi; bonus chegarasi Founderdan so'ralmaydi, namunadan yoki matndan saqlanmaydi (yangi kelishuvda `result_bonus_cap` = NULL; matnda bonus qatori yozilsa e'tiborsiz). Namuna: Tarif: 3 / Fiks: 2 500 000 / Oyiga: 28 kun / Kuniga: 10 soat / Boshlanishi: 01.10.2026. Bonus savoliga qaytish yo'q (`sagr:nobonus`, `bonus_none` olib tashlandi). DB ustuni, eski yozuvlar (ularda `result_bonus_cap` ko'rsatiladi), tarix va bonus hisoblash qoidalari O'ZGARMAGAN.
+- Xodimga tasdiqlash uchun yuboriladigan kelishuv xabarida (va xodimning o'z `/mykelishuv` kartasida, rozilik qatori bor versiyalar uchun) AYNAN shu qator: "Oylik bonus: 140 ⭐ — 700 000 so'mgacha ishlab topishingiz mumkin. 1 ⭐ = 5 000 so'm." (`salary_agreement_bot.BONUS_NOTE`) — faqat ko'rsatish matni (xodimga ko'rsatiladigan rozilik qatorli kelishuvda eski `result_bonus_cap` qatori CHIQARILMAYDI — bonus haqida faqat shu bitta qator; DB qiymati va tarix o'zgarmaydi; Founder "✅ ko'rish"ida eski qiymat ko'rinaveradi); Founder kartasida, Founder "✅ ko'rish"ida va kiritish savollarida yo'q; hisoblash qoidasi/DB qiymati emas.
+- Parser: "Fiks oylik 2.500.000", "Oylik fiks: 2 500 000", "Fiks: 2500000" bir xil summa; "Oylik ish kunlari 28 kun" summa emas (kun), "Kunlik ish soati 10 soat", "Amal qilish sanasi 01.10.2026" tushuniladi. "Amaldagi kelishuv 3" tarif yorlig'i emas -> faqat tarif qisqa so'raladi, qolgani saqlanadi. Har savol yonida faqat o'sha maydonning xatosi (`ag_problems`).
+- Test: `tests/test_salary_agreement_picker.py` (bonus yo'qligi, xodim matni aynan, fiks variantlari, uzun yorliqlar, maydon xatolari, navigatsiya himoyalari).
+
 ## `/kelishuv` navigatsiya tuzatishi (branch `fix/kelishuv-navigation`, PR ochiq, merge/deploy YO'Q)
 
 - Muammo: `/kelishuv` ochilganda eski pastki klaviatura ("⬅️ Filial" va h.k.) qolar, bosilsa matn parseriga tushib ism/tarif so'rardi (ro'yxat paytida ham kiritish holati faol edi).

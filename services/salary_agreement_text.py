@@ -14,6 +14,10 @@ from services import salary_agreement as sa
 
 FIELDS = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "effective_from", "result_bonus_cap")
 _AMOUNT = r"(\d[\d\s .,]*?)\s*(mln|million|milyon|ming|min|k|m)?\b"
+# "Fiks", "Fiks oylik", "Oylik fiks"; "Oylik ish kunlari ..." fiks yorlig'i emas
+_FIXED_LABEL = (
+    r"\b(?:(?:fi[kx]s\w*|fix\w*|oylik\b(?!\s+(?:ish|kun)))(?:\s+(?:fi[kx]s\w*|fix\w*|oylik\b(?!\s+(?:ish|kun))))?)"
+)
 # Yorliq so'zi (imlo variantlari bilan): bunday so'z bilan boshlangan qator ism emas
 _LABEL_WORD = re.compile(
     r"\s*(?:ta[rn]?r?if\w{0,2}|taraf|tarf|fi[kx]s\w{0,2}|fix|oylik\w{0,2}|oyiga|oyda|kuniga|kunlik|natija|"
@@ -124,7 +128,7 @@ def parse_text(text: str, today: date | None = None, name_words: int = 2) -> Par
         else:
             result.problems["tariff"] = "Tarifni 1, 2 yoki 3 deb yozing."
 
-    _set_amount(result, "fixed_salary", _grab(r"\b(?:fi[kx]s\w*|fix\w*|oylik\w*)", lowered))
+    _set_amount(result, "fixed_salary", _grab(_FIXED_LABEL, lowered))
     bonus = _grab(r"\b(?:natija\s*)?b[ou]n[uo]s\w*", lowered)
     if bonus is not None:
         if re.fullmatch(r"(yoq|yo'q|yo‘q|0|belgilanmagan)", norm(bonus)):

@@ -27,10 +27,9 @@ EMPLOYEE_BUTTON = "💵 Oylik kelishuvim"
 
 SAMPLE = (
     "Tarif: 3\n"
-    "Fiks: 1 800 000\n"
+    "Fiks: 2 500 000\n"
     "Oyiga: 28 kun\n"
-    "Kuniga: 11 soat\n"
-    "Natija bonusi: 700 000\n"
+    "Kuniga: 10 soat\n"
     "Boshlanishi: 01.10.2026"
 )
 PAGE_SIZE = 10
@@ -41,13 +40,12 @@ _LIST_HEADER = (
 _ASK = {
     "employee": "👤 Qaysi xodim? Ism-familiyani yozing (masalan: Yusufov Sultonxon — Saturn Charhiy).",  # faqat ro'yxatdan tanlanmagan holatda
     "tariff": "🏷 Tarif raqami? (1, 2 yoki 3)",
-    "fixed_salary": "💵 Fiks oylik qancha? (masalan: 1 800 000 yoki 1,8 mln)",
+    "fixed_salary": "💵 Fiks oylik qancha? (masalan: 2 500 000 yoki 2,5 mln)",
     "work_days": "📅 Oyiga necha ish kuni? (masalan: 28)",
     "daily_minutes": "🕒 Kuniga necha soat? (masalan: 11)",
     "effective_from": "📌 Kelishuv qaysi sanadan boshlanadi? (KK.OO.YYYY)",
-    "result_bonus_cap": "🎯 Natija bonusi oyiga eng ko'pi bilan qancha? (masalan: 700 000)",
 }
-_ORDER = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "effective_from", "result_bonus_cap")
+_ORDER = ("employee", "tariff", "fixed_salary", "work_days", "daily_minutes", "effective_from")
 
 
 class AgreementStates(StatesGroup):
@@ -74,16 +72,12 @@ def _missing(data: dict) -> str | None:
         if key == "employee":
             if data.get("employee_id") is None:
                 return key
-        elif key == "result_bonus_cap":
-            if key not in data and not data.get("bonus_none"):
-                return key
         elif data.get(key) is None:
             return key
     return None
 
 
 def _card_text(data: dict) -> str:
-    cap = data.get("result_bonus_cap")
     return "\n".join(
         [
             "📝 Oylik kelishuvi — tekshiring:",
@@ -94,19 +88,23 @@ def _card_text(data: dict) -> str:
             f"📅 Oylik ish kunlari: {data['work_days']} kun",
             f"🕒 Kunlik ish soati: {sa.format_minutes(data['daily_minutes'])}",
             f"📌 Kelishuv boshlanishi: {sa.format_date(data['effective_from'])}",
-            f"🎯 Natija bonusi: {'oyiga ' + sa.format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}",
             "\nSaqlanmaguncha xodimga hech narsa yuborilmaydi.",
         ]
     )
 
 
-def _employee_text(agreement: dict, employee_id: int, title: str = "💵 Oylik kelishuvi") -> str:
+BONUS_NOTE = "Oylik bonus: 140 ⭐ — 700 000 so'mgacha ishlab topishingiz mumkin. 1 ⭐ = 5 000 so'm."
+
+
+def _employee_text(agreement: dict, employee_id: int, title: str = "💵 Oylik kelishuvi", bonus_note: bool = False) -> str:
+    """``bonus_note`` — faqat xodimga tasdiqlash uchun ko'rsatiladigan matn (hisoblash qoidasi/DB qiymati emas)."""
     version = sa.version_number(employee_id, agreement["id"])
     return "\n".join(
         [
             f"{title} (versiya {version})",
             f"💵 Fiks oylik: {sa.format_money(agreement['fixed_salary'])}",
-            *sa.agreement_lines(agreement),
+            *sa.agreement_lines(agreement, show_bonus_cap=not bonus_note),  # bonus haqida faqat BONUS_NOTE
+            *(["", BONUS_NOTE] if bonus_note else []),
         ]
     )
 
@@ -243,9 +241,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         rows = [_CANCEL_ROW]
         if key == "effective_from":
             rows = [[("📅 Bugundan", "sagr:today")], _CANCEL_ROW]
-        elif key == "result_bonus_cap":
-            rows = [[("Bonus yo'q", "sagr:nobonus")], _CANCEL_ROW]
-        text = (note + "\n\n" if note else "") + (data.get("ag_problem_text") or "") + _ASK[key]
+        text = (note + "\n\n" if note else "") + (f"⚠️ {data['ag_problems'][key]}\n\n" if key in (data.get("ag_problems") or {}) else "") + _ASK[key]
         await _reply(target, text, _kb(*rows), edit=edit)
 
     async def _ingest(message: Message, state: FSMContext) -> None:
@@ -258,18 +254,15 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
             parsed.problems.update(bare.problems)
         ag = dict(data.get("ag", {}))
         parsed.values.pop("employee", None)  # xodim faqat ro'yxatdan tanlanadi; matndagi ism uni almashtirmaydi
-        bonus_none = parsed.values.pop("bonus_none", False)
+        for key in ("result_bonus_cap", "bonus_none"):  # bonus chegarasi Founderdan so'ralmaydi va matndan saqlanmaydi
+            parsed.values.pop(key, None)
+            parsed.problems.pop(key, None)
         for key, value in parsed.values.items():
             ag[key] = value
-        if bonus_none:
-            ag["bonus_none"] = True
-            ag["result_bonus_cap"] = None
-        elif parsed.values.get("result_bonus_cap"):
-            ag.pop("bonus_none", None)
-        await state.update_data(ag=ag)
-
-        problem_lines = [text for key, text in parsed.problems.items()]
-        await state.update_data(ag_problem_text=("⚠️ " + " ".join(problem_lines) + "\n\n") if problem_lines else "")
+        # Har savol yonida faqat o'sha maydonning xatosi: hal bo'lganlari olib tashlanadi, yangilari qo'shiladi
+        problems = {k: v for k, v in (data.get("ag_problems") or {}).items() if k not in ag or ag[k] is None}
+        problems.update({k: v for k, v in parsed.problems.items() if k not in parsed.values})
+        await state.update_data(ag=ag, ag_problems=problems)
         await _next_step(message, state)
 
     @dp.message(Command("kelishuv"))
@@ -335,7 +328,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         await state.clear()
         await state.set_state(AgreementStates.collecting)
         ag = {"employee_id": profile["user_id"], "employee_name": _full_name(profile), "branch": profile.get("branch")}
-        await state.update_data(ag=ag, ag_ask=None, ag_token=None, ag_problem_text="")
+        await state.update_data(ag=ag, ag_ask=None, ag_token=None, ag_problems={})
         await callback.answer()
         await callback.message.edit_text(
             f"👤 Xodim: {ag['employee_name']} — {ag['branch'] or 'Filial biriktirilmagan'}\n\n"
@@ -385,19 +378,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         if data.get("ag_ask") != "effective_from":
             await callback.answer("Tugma eskirgan.", show_alert=True)
             return
-        await state.update_data(ag={**data["ag"], "effective_from": company_time.today().isoformat()}, ag_problem_text="")
-        await callback.answer()
-        await _next_step(callback, state, edit=True)
-
-    @dp.callback_query(F.data == "sagr:nobonus")
-    async def agreement_nobonus(callback: CallbackQuery, state: FSMContext) -> None:
-        if not await _allowed(callback):
-            return
-        data = await state.get_data()
-        if data.get("ag_ask") != "result_bonus_cap":
-            await callback.answer("Tugma eskirgan.", show_alert=True)
-            return
-        await state.update_data(ag={**data["ag"], "bonus_none": True, "result_bonus_cap": None}, ag_problem_text="")
+        await state.update_data(ag={**data["ag"], "effective_from": company_time.today().isoformat()}, ag_problems={})
         await callback.answer()
         await _next_step(callback, state, edit=True)
 
@@ -409,7 +390,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         if not data.get("ag_token"):
             await callback.answer("Karta eskirgan.", show_alert=True)
             return
-        await state.update_data(ag_token=None, ag_ask=None, ag_problem_text="")  # eski "Saqlash" tugmasi o'chadi
+        await state.update_data(ag_token=None, ag_ask=None, ag_problems={})  # eski "Saqlash" tugmasi o'chadi
         await state.set_state(AgreementStates.collecting)
         await callback.answer()
         await callback.message.edit_text(
@@ -421,7 +402,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
     async def _send_to_employee(bot, agreement: dict) -> bool:
         employee_id = agreement["employee_id"]
         try:
-            await bot.send_message(employee_id, _employee_text(agreement, employee_id), reply_markup=_consent_kb(agreement["id"]))
+            await bot.send_message(employee_id, _employee_text(agreement, employee_id, bonus_note=True), reply_markup=_consent_kb(agreement["id"]))
         except Exception as error:  # noqa: BLE001
             logger.warning("Kelishuvni xodimga yuborib bo'lmadi (id=%s): %s", agreement["id"], type(error).__name__)
             sa.mark_delivery(agreement["id"], False)
@@ -462,7 +443,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         try:
             result = sa.save_agreement(
                 ag["employee_id"], ag["fixed_salary"], ag["work_days"], ag["daily_minutes"], ag["effective_from"],
-                callback.from_user.id, token, tariff=ag["tariff"], result_bonus_cap=ag.get("result_bonus_cap"),
+                callback.from_user.id, token, tariff=ag["tariff"],
                 with_consent=True,
             )
         except sa.ValidationError as error:
@@ -667,7 +648,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         cards = _agreement_cards(user_id)
         for agreement, title in cards:
             # Tugmalar aynan shu kartaning versiyasiga bog'langan; boshqa versiyaga rozilik yozilmaydi.
-            text = f"{_employee_text(agreement, user_id, title)}\n\nHolat: {sa.consent_status_text(agreement)}"
+            text = f"{_employee_text(agreement, user_id, title, bonus_note=sa.get_consent(agreement['id']) is not None)}\n\nHolat: {sa.consent_status_text(agreement)}"
             markup = (
                 _consent_kb(agreement["id"], with_question=sa.issue_for_agreement(agreement["id"]) is None)
                 if sa.pending_consent(agreement)

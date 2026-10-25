@@ -227,13 +227,13 @@ def format_date(iso_date: str) -> str:
     return f"{day}.{month}.{year}"
 
 
-def agreement_lines(agreement: dict) -> list[str]:
+def agreement_lines(agreement: dict, show_bonus_cap: bool = True) -> list[str]:
     days = agreement.get("work_days")
     extra = []
     if agreement.get("tariff") is not None:
         extra.append(f"🏷 Tarif: {agreement['tariff']}")
-    if agreement.get("tariff") is not None or agreement.get("result_bonus_cap") is not None:
-        cap = agreement.get("result_bonus_cap")
+    cap = agreement.get("result_bonus_cap")
+    if cap and show_bonus_cap:  # eski yozuvlardagi qiymat ko'rsatiladi; yangi kelishuvda bonus chegarasi kiritilmaydi
         extra.append(f"🎯 Natija bonusi: {'oyiga ' + format_money(cap) + 'gacha (chegara, kafolatlangan to‘lov emas)' if cap else 'Belgilanmagan'}")
     return extra + [
         f"📅 Oylik ish kunlari: {str(days) + ' kun' if days is not None else 'Kiritilmagan'}",

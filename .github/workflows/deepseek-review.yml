@@ -3,18 +3,28 @@ name: DeepSeek advisory review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Tekshiruv turi
+        required: true
+        type: choice
+        options: [slowness]
+        default: slowness
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: deepseek-review-${{ github.event.pull_request.number }}
+  group: deepseek-review-${{ github.event.pull_request.number || github.event.inputs.mode }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.mode == 'slowness')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     continue-on-error: true
@@ -48,3 +58,4 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         shell: bash
         run: python3 -I "$RUNNER_TEMP/deepseek_review.py"
+

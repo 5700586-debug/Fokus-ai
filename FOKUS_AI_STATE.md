@@ -4,7 +4,19 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
-## DeepSeek PR qorovuli — tayyorlangan, main'ga qo'shilmagan (2026-10-26)
+## DeepSeek sekinlik tekshiruvi — tayyorlangan, main'ga qo'shilmagan (2026-10-26)
+
+- Branch: `feature/deepseek-slowness`. Faqat workflow, `scripts/deepseek_review.py`, uning targeted testi va ushbu STATE o'zgardi. Bot kodi, DB, Render va ruxsatlar o'zgarmadi; merge/deploy qilinmagan.
+- Yangi `workflow_dispatch`, yagona `mode=slowness`, faqat `refs/heads/main`. Skript avvalgidek main'dan olinadi; qo'lda rejim bitta main SHA'ni aniqlab, barcha manbalarni aynan shu snapshotdan GitHub API orqali o'qiydi. PR diff rejimi, hodisalari, max 10 topilmasi, read-only huquqlari va sir filtri saqlandi; schedule yo'q.
+- Tor manbalar: `db.py`, `db_postgres.py`, `storage.py`, `services/latency_probe.py`, `services/menu_screens.py`, `repositories/bot_messages.py`, `performance_bot.py` (`mystars_handler`), `salary_agreement_bot.py` (`my_agreement`), `services/employee_dashboard.py` va `main.py`ning aniq tanlangan middleware/menyu funksiyalari. Butun fayl avval mavjud sir filtridan o'tadi; keyin AST orqali tanlangan bo'laklar asl qator raqamlari bilan olinadi (kod bajarilmaydi). Hajmga sig'magan yoki shubhali fayl butunlay chiqariladi, sabab hisobotga yoziladi.
+- Ixtiyoriy tarixiy menu/handler o'lchovi: faqat shu STATE'dagi `total_ms` raqami va `db_queries` birga bor satrlar; u ham butun fayl sir filtridan o'tgandagina. Eski qiymatlar hozirgi runtime o'lchovi deb ko'rsatilmaydi; Render/log/arbitrary fayl o'qish yo'q.
+- `d30456a` main snapshotidan lokal, tarmoqsiz tanlash tekshiruvi: system+input 53 877 belgi, yuqoridagi 9 ta `.py` fayl bo'laklari + tarixiy metrika satrlari sig'di. `main.py` mavjud konservativ filtrda koddagi sirga o'xshash ifodalar sabab `tekshirilmadi: maxfiy shubha`; filtrni chetlab o'tish yoki yumshatish qilinmadi. Demak main ichidagi middleware/menyu oqimi to'liq tekshirilmaydi.
+- DeepSeek hisobotida max 5 dalilli sekinlik TAXMINI: fayl:qator, dalil, taxminiy ta'sir, minimal tuzatish g'oyasi. Dalil yetmasa 3 ta sabab majburan to'ldirilmaydi. Qatorlar yuborilgan bo'laklarga mosligi tekshiriladi. Faqat Job Summary; tuzatish/PR izohi yo'q. Limitlar avvalgidek: kirish 60 000 belgi, chiqish 2 000 token, HTTP timeout 60 s, 1 retry; xato/kalitsiz holat ogohlantirish bilan yashil.
+- Targeted Linux: `python -m unittest discover -s tests -p test_deepseek_review.py -v` — 42 PASS (avvalgi 29 + yangi 13). GitHub/DeepSeek mock; source tanlash faqat lokal snapshotda. Full suite va haqiqiy pullik sekinlik so'rovi bajarilmadi. Keyingi amal: draft PR review; merge ruxsatisiz main'da yangi dispatch yo'q va ishga tushirilmaydi. “Oyligim”, e'tirof va qo'shimcha ish navbati saqlangan.
+
+## DeepSeek PR qorovuli — PR #69 MERGED (2026-10-26)
+
+- PR #69 merge SHA: `d30456a0eb9e247a6f089791314f68e81f790c59`. Oldingi jonli tekshiruvda Render `dep-dbfhs1ek1f9s7389vk9g` LIVE (2026-10-26 14:33:21 +05), DB_STARTUP_PROBE OK; Traceback/ProgrammingError/OperationalError topilmadi. Ushbu yangi vazifada Renderga qayta tegilmadi. Quyidagi bandlar PR #69 tayyorlangan paytdagi tarixiy checkpoint.
 
 - Branch: `feature/deepseek-review`; faqat `.github/workflows/deepseek-review.yml`, `scripts/deepseek_review.py`, `tests/test_deepseek_review.py` va ushbu STATE. Bot kodi/DB/Render o'zgarmagan; merge/deploy qilinmagan.
 - `pull_request` opened/synchronize/reopened; fork skip. PR kodi bajarilmaydi, tekshiruvchi faqat main'dan olinadi; birinchi PR paytida main'da skript yo'q -> yashil skip, PR skriptiga fallback yo'q. `contents: read` + `pull-requests: read`; hisobot faqat Job Summary, PR izohi/auto-fix/Render loglari yo'q; required check qilib sozlanmagan.

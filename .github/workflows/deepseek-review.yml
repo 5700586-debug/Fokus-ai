@@ -1,0 +1,50 @@
+name: DeepSeek advisory review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: deepseek-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    continue-on-error: true
+    env:
+      # Verified once: https://api-docs.deepseek.com/ (2026-10-26).
+      DEEPSEEK_MODEL: deepseek-flash
+    steps:
+      # No checkout: neither PR code nor PR dependencies are executed.
+      - name: Load trusted reviewer from main
+        id: trusted
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/contents/scripts/deepseek_review.py?ref=main" --jq '.content' > "$RUNNER_TEMP/deepseek-review.b64" 2>/dev/null; then
+            if python3 -I -c 'import base64,os,pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"]); (p/"deepseek_review.py").write_bytes(base64.b64decode(b"".join((p/"deepseek-review.b64").read_bytes().split()), validate=True))'; then
+              echo 'ready=true' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          if [ ! -f "$RUNNER_TEMP/deepseek_review.py" ]; then
+            echo "Ogohlantirish: tekshirilmadi — main skripti yo'q yoki olinmadi. Birinchi PR uchun skip normal." >> "$GITHUB_STEP_SUMMARY"
+            echo 'Xato topilmadi — xavfsiz degani emas' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Review diff (advisory only)
+        if: steps.trusted.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        shell: bash
+        run: python3 -I "$RUNNER_TEMP/deepseek_review.py"

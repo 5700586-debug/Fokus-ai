@@ -1,4 +1,4 @@
-"""Two real dispatcher paths, synthetic SQLite data, no Telegram/OpenAI calls."""
+"""Two real dispatcher paths, synthetic SQLite/CI PostgreSQL data, no external API calls."""
 
 from datetime import datetime, timedelta
 import re
@@ -17,6 +17,14 @@ from tests.test_menu_screen_cleanup import FakeSession, env  # noqa: F401
 
 pytestmark = pytest.mark.anyio
 SUP, EMP = 1, 880001
+
+
+def _connection_type():
+    if db._DATABASE_URL:
+        from db_postgres import PgConnection
+
+        return PgConnection
+    return db._MeasuredSqliteConnection
 
 
 @pytest.fixture
@@ -47,8 +55,9 @@ def sql_trace(monkeypatch):
         opened = set()
 
     captured = Trace()
-    real = db._MeasuredSqliteConnection.execute
-    real_close = db._MeasuredSqliteConnection.close
+    connection_type = _connection_type()
+    real = connection_type.execute
+    real_close = connection_type.close
 
     def execute(conn, sql, *args, **kwargs):
         captured.opened.add(conn)
@@ -59,8 +68,8 @@ def sql_trace(monkeypatch):
         captured.opened.discard(conn)
         return real_close(conn)
 
-    monkeypatch.setattr(db._MeasuredSqliteConnection, "execute", execute)
-    monkeypatch.setattr(db._MeasuredSqliteConnection, "close", close)
+    monkeypatch.setattr(connection_type, "execute", execute)
+    monkeypatch.setattr(connection_type, "close", close)
     return captured
 
 
@@ -91,7 +100,8 @@ async def test_grade_queries_drop_from_39_to_20(bot_dp, seeded, sql_trace, no_co
     await send_callback(main.dp, bot, SUP, f"nzr_grade:{EMP}:alo:20261026", SUP)
     metric = _metric(capsys, "grade_pick")
     assert metric["outcome"] == "ok"
-    assert int(metric["db_queries"]) == 20 < 39  # Baseline c7bde80, same fixture and dispatcher.
+    expected, baseline = (24, 43) if db._DATABASE_URL else (20, 39)
+    assert int(metric["db_queries"]) == expected < baseline  # PG also counts 4 adapter lastval() calls.
     assert int(metric["pool_acquires"]) == 14 < 29
     assert sum("AS kind, session_date" in sql for sql, active in sql_trace if active) == 2
     assert not any("employee_contacts" in sql for sql, active in sql_trace if active)
@@ -186,14 +196,15 @@ async def test_grade_failure_rolls_back_every_write_and_sends_no_employee_notice
     bot_dp, seeded, monkeypatch, table,
 ):
     main, bot = bot_dp
-    real = db._MeasuredSqliteConnection.execute
+    connection_type = _connection_type()
+    real = connection_type.execute
 
     def fail(conn, sql, *args, **kwargs):
         if re.match(r"INSERT(?: OR IGNORE)? INTO " + table + r"\b", sql):
             raise RuntimeError("synthetic write failure")
         return real(conn, sql, *args, **kwargs)
 
-    monkeypatch.setattr(db._MeasuredSqliteConnection, "execute", fail)
+    monkeypatch.setattr(connection_type, "execute", fail)
     await send_callback(main.dp, bot, SUP, f"nzr_grade:{EMP}:alo:20261026", SUP)
     conn = db.get_connection()
     try:

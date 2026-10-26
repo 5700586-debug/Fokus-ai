@@ -8,6 +8,15 @@ on:
       - performance_bot.py
       - tests/test_menu_latency.py
       - tests/test_menu_screen_cleanup.py
+      - nazoratchi_bot.py
+      - repositories/attendance.py
+      - repositories/discipline.py
+      - services/attendance.py
+      - services/discipline.py
+      - services/employee_dashboard.py
+      - services/nazoratchi_day.py
+      - services/rules.py
+      - tests/test_db_connection_reuse.py
       - .github/workflows/menu-latency.yml
 
 permissions:
@@ -16,12 +25,13 @@ permissions:
 jobs:
   postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16-alpine
         env:
           POSTGRES_PASSWORD: local-ci-only
-          POSTGRES_DB: fokus_menu_test
+          POSTGRES_DB: fokus_pgtest_read_batching
         ports:
           - 5432:5432
         options: >-
@@ -30,7 +40,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:local-ci-only@localhost:5432/fokus_menu_test
+      DATABASE_URL: postgresql://postgres:local-ci-only@localhost:5432/fokus_pgtest_read_batching
       BOT_TOKEN: "123456:TEST-TOKEN"
       OPENAI_API_KEY: test-key
     steps:
@@ -39,8 +49,39 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
+      - name: Verify ephemeral PostgreSQL only
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          import psycopg2
+          dsn = os.environ['DATABASE_URL']
+          target = urlsplit(dsn)
+          assert target.hostname in ('localhost', '127.0.0.1')
+          assert target.path == '/fokus_pgtest_read_batching'
+          with psycopg2.connect(dsn) as conn:
+              print('Ephemeral PostgreSQL server_version:', conn.server_version)
+              with conn.cursor() as cur:
+                  cur.execute('SELECT current_database()')
+                  print('Test database:', cur.fetchone()[0])
+          PY
       - run: >-
           python -m pytest -q
           tests/test_menu_latency.py
           tests/test_menu_screen_cleanup.py
           tests/test_chat_cleanup.py
+          tests/test_db_connection_reuse.py
+          tests/test_card_render_queries.py
+          tests/test_active_work_day.py
+          tests/test_nazoratchi_daily_flow.py
+          tests/test_discipline_bot_flows.py
+          tests/test_discipline_service.py
+          tests/test_employee_dashboard.py
+          tests/test_month_hours_queries.py
+          tests/test_discipline_timezone.py
+          tests/test_bonus_point_ledger.py
+      - name: PostgreSQL server-error rollback regressions
+        run: >-
+          env -u DATABASE_URL
+          FOKUS_PG_TEST_DSN=postgresql://postgres:local-ci-only@localhost:5432/fokus_pgtest_read_batching
+          python -m pytest -q tests/test_discipline_postgres.py

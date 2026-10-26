@@ -1,6 +1,7 @@
 """Isolated: python -m unittest discover -s tests -p test_deepseek_review.py -v."""
 
 import importlib.util
+import base64
 import io
 import json
 import os
@@ -308,5 +309,158 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("subprocess", source)
 
 
+class SlownessTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.event_path = Path(self.tmp.name) / "manual.json"
+        self.event_path.write_text(json.dumps({"inputs": {"mode": "slowness"}}))
+        self.sha = "b" * 40
+        self.env = dict(GITHUB_EVENT_PATH=str(self.event_path), GITHUB_EVENT_NAME="workflow_dispatch",
+                        GITHUB_REF="refs/heads/main", GITHUB_REPOSITORY="owner/repo",
+                        GH_TOKEN="mock-gh", DEEPSEEK_API_KEY="mock-deepseek",
+                        DEEPSEEK_MODEL="model-from-env")
+
+    def mock_http(self, url, token, payload=None):
+        if url.endswith("/commits/main"):
+            return {"sha": self.sha}
+        if "/contents/" in url:
+            path = url.split("/contents/", 1)[1].split("?", 1)[0]
+            source = "import time\n\ndef get_connection():\n    return time.sleep(1)\n"
+            if path != "db.py":
+                raise review.Skip("API xatosi")
+            return {"type": "file", "encoding": "base64",
+                    "content": base64.b64encode(source.encode()).decode()}
+        if url == "https://api.deepseek.com/chat/completions":
+            return answer([{"file": "db.py", "line": 4, "evidence": "time.sleep(1)",
+                            "impact": "Bloklovchi kutish, production ta'siri o'lchanmagan",
+                            "idea": "Kutish zaruratini tekshirish"}])
+        raise AssertionError("Unexpected URL")
+
+    def test_manual_mode_resolves_main_once_and_pins_every_source_to_sha(self):
+        with patch.object(review, "http_json", side_effect=self.mock_http) as call:
+            summary = review.run(self.env)
+        self.assertIn("Main snapshot SHA: " + self.sha, summary)
+        self.assertIn("TAXMIN: db", summary)
+        self.assertIn("Taxminiy ta'sir", summary)
+        self.assertIn("Tuzatish g'oyasi", summary)
+        self.assertIn("runtime", summary)
+        gets = [c.args[0] for c in call.call_args_list if "/contents/" in c.args[0]]
+        self.assertEqual(len(gets), len(review.SLOWNESS_FILES) + 1)
+        self.assertTrue(all(url.endswith("?ref=" + self.sha) for url in gets))
+        posts = [c for c in call.call_args_list if "deepseek.com/" in c.args[0]]
+        self.assertEqual(len(posts), 1)
+        payload = posts[0].args[2]
+        self.assertEqual(payload["model"], "model-from-env")
+        self.assertEqual(payload["max_tokens"], 2000)
+        self.assertNotIn("tools", payload)
+        self.assertLessEqual(sum(len(m["content"]) for m in payload["messages"]), 60000)
+
+    def test_wrong_branch_or_mode_never_calls_api(self):
+        for branch, mode in (("refs/heads/feature/x", "slowness"), ("refs/heads/main", "audit")):
+            self.event_path.write_text(json.dumps({"inputs": {"mode": mode}}))
+            with self.subTest(branch=branch, mode=mode), patch.object(review, "http_json") as call:
+                self.assertIn("tekshirilmadi", review.run({**self.env, "GITHUB_REF": branch}))
+                call.assert_not_called()
+
+    def test_empty_key_or_model_is_green_skip(self):
+        for key in ("DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "GH_TOKEN"):
+            with self.subTest(key=key), patch.object(review, "http_json") as call:
+                self.assertIn("tekshirilmadi", review.run({**self.env, key: ""}))
+                call.assert_not_called()
+
+    def test_whole_file_filter_runs_before_extraction(self):
+        fake = "sk-" + "x" * 25
+        source = f"def get_connection():\n    return 1\n\ndef unrelated():\n    return '{fake}'\n"
+        with patch.object(review, "snapshot_source", return_value=source):
+            user, refs, notes = review.slowness_input("root", self.sha, "mock")
+        self.assertFalse(refs)
+        self.assertNotIn(fake, user)
+        self.assertTrue(all(reason == "tekshirilmadi: maxfiy shubha" for _, reason in notes))
+
+    def test_ast_keeps_real_lines_and_never_executes_source(self):
+        source = "raise RuntimeError('must not execute')\n\ndef unrelated():\n    return 12\n\ndef selected():\n    return 42\n"
+        section, refs, missing = review.source_sections(source, ("selected", "missing"))
+        self.assertIn("7:     return 42", section)
+        self.assertNotIn("return 12", section)
+        self.assertEqual(refs, {1, 6, 7})
+        self.assertEqual(missing, ["missing"])
+
+    def test_budget_skips_whole_file_without_partial_send(self):
+        large = "def get_connection():\n    return '" + "x" * 60000 + "'\n"
+        with patch.object(review, "snapshot_source", return_value=large):
+            user, refs, notes = review.slowness_input("root", self.sha, "mock")
+        self.assertLessEqual(len(review.SLOWNESS_SYSTEM) + len(user), 60000)
+        self.assertNotIn("db.py", refs)
+        self.assertIn(("db.py", "tekshirilmadi: hajm chegarasi"), notes)
+        self.assertNotIn("x" * 100, user)
+
+    def test_optional_metrics_are_explicitly_historical_and_not_free_form_state(self):
+        state = "Other history not relevant\n- HANDLER_METRICS total_ms=2070 db_queries=6 db_ms=882\n"
+        def source(root, sha, path, token):
+            if path == review.SLOWNESS_EVIDENCE:
+                return state
+            raise review.Skip("no source")
+        with patch.object(review, "snapshot_source", side_effect=source):
+            user, refs, _ = review.slowness_input("root", self.sha, "mock")
+        self.assertIn("tarixiy", user)
+        self.assertIn("total_ms=2070", user)
+        self.assertNotIn("Other history", user)
+        self.assertEqual(refs[review.SLOWNESS_EVIDENCE], {2})
+
+    def test_invalid_line_or_missing_impact_is_dropped_and_max_five(self):
+        item = dict(file="db.py", line=4, evidence="Dalil", impact="O'lchanmagan", idea="Taklif")
+        bad = [dict(item, line=999), dict(item, line=True), dict(item, file="other.py"), dict(item, impact="")]
+        result, dropped = review.slowness_findings(answer(bad + [item] * 7), {"db.py": {4}})
+        self.assertEqual(len(result), 5)
+        self.assertEqual(dropped, 6)
+        result, _ = review.slowness_findings(answer([item]), {"db.py": {4}})
+        self.assertEqual(len(result), 1)  # Never invent three causes to fill a quota.
+
+    def test_bad_or_truncated_ai_response_is_not_success(self):
+        for response in (answer(finish="length"), {"choices": []}):
+            def http(url, token, payload=None):
+                if "api.deepseek.com" in url:
+                    return response
+                return self.mock_http(url, token, payload)
+            with self.subTest(response=response), patch.object(review, "http_json", side_effect=http):
+                summary = review.run(self.env)
+            self.assertIn("tekshirilmadi", summary)
+            self.assertNotIn("Xato topilmadi.", summary)
+
+    def test_missing_sources_never_calls_model(self):
+        with patch.object(review, "snapshot_source", side_effect=review.Skip("missing")), \
+                patch.object(review, "http_json", return_value={"sha": self.sha}) as call:
+            summary = review.run(self.env)
+        self.assertIn("yuborishga mos kod yo'q", summary)
+        self.assertEqual(call.call_count, 1)
+
+    def test_snapshot_requires_base64_file_response(self):
+        for response in ({"type": "dir"}, {"type": "file", "encoding": "base64", "content": "!bad!"}):
+            with self.subTest(response=response), patch.object(review, "http_json", return_value=response):
+                with self.assertRaises((review.Skip, ValueError)):
+                    review.snapshot_source("root", self.sha, "db.py", "mock")
+
+    def test_manual_main_also_exits_zero_and_writes_warning(self):
+        summary_path = Path(self.tmp.name) / "summary"
+        with patch.dict(os.environ, {**self.env, "GITHUB_STEP_SUMMARY": str(summary_path)}, clear=True), \
+                patch.object(review, "http_json", side_effect=RuntimeError("sensitive")):
+            self.assertEqual(review.main(), 0)
+        summary = summary_path.read_text()
+        self.assertIn("tekshirilmadi", summary)
+        self.assertNotIn("sensitive", summary)
+
+    def test_workflow_dispatch_is_main_only_and_keeps_pr_events(self):
+        self.assertIn("  workflow_dispatch:\n", WORKFLOW)
+        self.assertIn("options: [slowness]", WORKFLOW)
+        self.assertIn("github.ref == 'refs/heads/main'", WORKFLOW)
+        self.assertIn("github.event.inputs.mode == 'slowness'", WORKFLOW)
+        self.assertIn("types: [opened, synchronize, reopened]", WORKFLOW)
+        self.assertNotIn("schedule:", WORKFLOW)
+        self.assertNotIn(": write", WORKFLOW)
+        self.assertIn("?ref=main", WORKFLOW)
+
+
 if __name__ == "__main__":
     unittest.main()
+

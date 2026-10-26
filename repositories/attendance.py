@@ -66,6 +66,28 @@ def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive:
     return [dict(row) for row in rows]
 
 
+def dashboard_records(employee_id: int, start_date: str, end_date: str, recent_dates: list[str], conn) -> dict:
+    """One bounded read for the /mystars attendance view; reuse events for both summaries."""
+    placeholders = ", ".join("?" for _ in recent_dates) or "NULL"
+    rows = conn.execute(
+        "SELECT 'event' AS kind, event_time AS day, event_type, NULL AS planned_start, "
+        "NULL AS planned_end, NULL AS status, NULL AS note FROM attendance_events "
+        "WHERE employee_id = ? AND event_time >= ? AND event_time < ? "
+        "UNION ALL SELECT 'shift', shift_date, NULL, planned_start, planned_end, status, NULL "
+        "FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
+        "UNION ALL SELECT 'reason', event_date, NULL, NULL, NULL, reason_status, note "
+        f"FROM attendance_reasons WHERE employee_id = ? AND event_date IN ({placeholders}) ORDER BY day",
+        (employee_id, start_date, end_date, employee_id, start_date, end_date, employee_id, *recent_dates),
+    ).fetchall()
+    return {
+        "events": [{"event_time": r["day"], "event_type": r["event_type"]} for r in rows if r["kind"] == "event"],
+        "shifts": [{"shift_date": r["day"], "planned_start": r["planned_start"], "planned_end": r["planned_end"],
+                    "status": r["status"]} for r in rows if r["kind"] == "shift"],
+        "reasons": {r["day"]: {"reason_status": r["status"], "note": r["note"]}
+                    for r in rows if r["kind"] == "reason"},
+    }
+
+
 # ------------------------------------------------- reja smena jadvali --
 
 _SHIFT_UPSERT_COLUMNS = (

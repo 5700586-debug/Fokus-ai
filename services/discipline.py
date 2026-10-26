@@ -275,11 +275,11 @@ def format_grade_notice(result: EvaluationResult, totals: dict) -> str:
     )
 
 
-def employee_telegram_chat_id(employee_id: int) -> int | None:
+def employee_telegram_chat_id(employee_id: int, *, profile: dict | None = None) -> int | None:
     """Xodimning Telegram chat_id'si. ``employees.user_id`` — PRIMARY KEY va xodim
     profili Telegram'dan kelgan ``from_user.id`` bilan yaratiladi (onboarding, rekruting),
     ya'ni shaxsiy chat_id shu qiymatning o'zi. Profil yo'q yoki qiymat yaroqsiz bo'lsa ``None``."""
-    profile = employees.get_profile(employee_id)
+    profile = profile if profile is not None else employees.get_profile(employee_id)
     if profile is None:
         return None
     user_id = profile.get("user_id")
@@ -291,10 +291,11 @@ async def notify_employee_of_grade(bot, employee_id: int, result: EvaluationResu
     atrofidagi xato ushlanadi (baho/ledger bekor qilinmaydi); log'ga faqat operatsiya va xato turi."""
     if not result.changed:
         return NOTICE_UNCHANGED
-    if employees.get_profile(employee_id) is None:
+    profile = employees.get_profile(employee_id, include_contacts=False)
+    if profile is None:
         return NOTICE_UNKNOWN_EMPLOYEE
 
-    chat_id = employee_telegram_chat_id(employee_id)
+    chat_id = employee_telegram_chat_id(employee_id, profile=profile)
     if chat_id is None:
         return NOTICE_NOT_LINKED
 

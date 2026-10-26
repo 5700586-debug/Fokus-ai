@@ -105,12 +105,14 @@ def branch_pending_count(branch: str, work_date: str, supervisor_id: int) -> int
     return sum(1 for item in branch_statuses(branch, work_date, supervisor_id) if item.status in BLOCKING_STATUSES)
 
 
-def day_fully_closed(supervisor_id: int, work_date: str, sessions: list[dict] | None = None) -> bool:
+def day_fully_closed(
+    supervisor_id: int, work_date: str, sessions: list[dict] | None = None, *, required_branches=None,
+) -> bool:
     """Ish kuni FAQAT barcha qamrov filiallari yopilgandagina yopilgan (bitta filial butun kunni yopmaydi)."""
     if sessions is None:
         sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, work_date)
     closed = {item["branch"] for item in sessions if item["session_date"] == work_date and item["status"] == "closed"}
-    required = set(coverage_branches(supervisor_id))
+    required = set(coverage_branches(supervisor_id)) if required_branches is None else required_branches
     if required:
         return required <= closed
     opened = [item for item in sessions if item["session_date"] == work_date]
@@ -130,16 +132,30 @@ def current_work_date(now: datetime) -> str:
     return day_close_deadline.work_date_at(now, boundary).isoformat()
 
 
-def active_day(supervisor_id: int, now: datetime) -> ActiveDay:
+def read_day_context(supervisor_id: int, now: datetime) -> dict:
+    current = current_work_date(now)
+    snapshot = discipline_repo.get_day_review_snapshot(supervisor_id, current, RECRUITING_BRANCH_NAMES)
+    return {"current": current, **snapshot}
+
+
+def active_day(supervisor_id: int, now: datetime, *, snapshot: dict | None = None) -> ActiveDay:
     """Nazoratchining faol ish kuni (faqat O'QIYDI, hech narsa yozmaydi/yopmaydi/ochmaydi):
     eng eski yakunlanmagan kun (sessiyasi bor, barcha qamrov filiallari yopilmagan), kelajak sanalar e'tiborsiz;
     bo'lmasa joriy ish kuni (yopilgan bo'lsa ``closed=True``). Oradagi kalendar kunlar yaratilmaydi."""
-    current = current_work_date(now)
-    sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, current)
+    current = snapshot["current"] if snapshot is not None else current_work_date(now)
+    sessions = snapshot["sessions"] if snapshot is not None else discipline_repo.list_branch_sessions_up_to(supervisor_id, current)
+
+    def closed(day):
+        if snapshot is None:
+            return _is_closed_day(supervisor_id, day, sessions)
+        return day in snapshot["closed_dates"] or day_fully_closed(
+            supervisor_id, day, sessions, required_branches=snapshot["required_branches"],
+        )
+
     for work_date in sorted({item["session_date"] for item in sessions}):
-        if not _is_closed_day(supervisor_id, work_date, sessions):
+        if not closed(work_date):
             return ActiveDay(work_date, resumed=work_date < current)
-    if _is_closed_day(supervisor_id, current, sessions):
+    if closed(current):
         return ActiveDay(current, closed=True)
     return ActiveDay(current)
 
@@ -150,10 +166,10 @@ def _is_closed_day(supervisor_id: int, work_date: str, sessions: list[dict]) -> 
     return discipline.get_closure(supervisor_id, work_date) is not None or day_fully_closed(supervisor_id, work_date, sessions)
 
 
-def check_active(supervisor_id: int, review_date: str, now: datetime) -> str | None:
+def check_active(supervisor_id: int, review_date: str, now: datetime, *, snapshot: dict | None = None) -> str | None:
     """Callback/yozuv uchun himoya: ``None`` — ruxsat; ``"stale"`` — sana faol ish kuni emas (eskirgan/kelajak/boshqa kun);
     ``"closed"`` — faol kun yopilgan. Yopilgan yoki faol bo'lmagan kunga hech narsa yozilmaydi."""
-    day = active_day(supervisor_id, now)
+    day = active_day(supervisor_id, now) if snapshot is None else active_day(supervisor_id, now, snapshot=snapshot)
     if day.closed and review_date == day.work_date:
         return "closed"
     if review_date != day.work_date:

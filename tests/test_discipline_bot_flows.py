@@ -726,7 +726,7 @@ async def test_send_is_skipped_when_chat_id_resolves_to_none_UNIT_ONLY(bot_dp, e
     (qarang tests/test_discipline_service.py::test_employee_model_has_no_telegram_less_employee_unit_proof)."""
     main, bot = bot_dp
     _setup()
-    monkeypatch.setattr(discipline, "employee_telegram_chat_id", lambda employee_id: None)
+    monkeypatch.setattr(discipline, "employee_telegram_chat_id", lambda employee_id, **kwargs: None)
 
     sent = await entry(main, bot, discipline.GRADE_ALO)
 

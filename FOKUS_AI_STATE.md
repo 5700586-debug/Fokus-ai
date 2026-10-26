@@ -4,6 +4,15 @@ Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## DeepSeek PR qorovuli — tayyorlangan, main'ga qo'shilmagan (2026-10-26)
+
+- Branch: `feature/deepseek-review`; faqat `.github/workflows/deepseek-review.yml`, `scripts/deepseek_review.py`, `tests/test_deepseek_review.py` va ushbu STATE. Bot kodi/DB/Render o'zgarmagan; merge/deploy qilinmagan.
+- `pull_request` opened/synchronize/reopened; fork skip. PR kodi bajarilmaydi, tekshiruvchi faqat main'dan olinadi; birinchi PR paytida main'da skript yo'q -> yashil skip, PR skriptiga fallback yo'q. `contents: read` + `pull-requests: read`; hisobot faqat Job Summary, PR izohi/auto-fix/Render loglari yo'q; required check qilib sozlanmagan.
+- Model: workflow env'da `DEEPSEEK_MODEL=deepseek-flash`, rasmiy https://api-docs.deepseek.com/ hujjatidan 2026-10-26 bir marta tekshirildi. Skript faqat env'dan oladi; runtime hujjat yuklamaydi. Kalit yoki model yo'q bo'lsa ogohlantirish bilan skip.
+- Faqat `.py`/`.md` diff; maxfiy yo'l yoki sir gumonli fayl butunlay chiqariladi (o'chirilgan satrlar ham). Max 60 000 kirish belgisi, 2 000 chiqish tokeni, HTTP timeout 60 s, ko'pi bilan 1 retry; katta/to'liq bo'lmagan diff tekshirilgan deb ko'rsatilmaydi. AI fayl/qator/LEFT-RIGHT koordinatalari tekshiriladi, topilmalar max 10. API/format xatolari ogohlantirish; merge bloklanmaydi.
+- Mustaqil Linux targeted tekshiruv: `python -m unittest discover -s tests -p test_deepseek_review.py -v` — 29 test PASS; GitHub/DeepSeek tarmog'i mock. Full suite, pullik API va haqiqiy Actions run tekshirilmagan. Secret aniqlash evristik, barcha sirlarni topish kafolati emas; faqat diff tekshiriladi, xavfsizlik tasdig'i emas.
+- Keyingi amal: draft PR review; Muhammadiy DeepSeek akkaunti/kichik balans va GitHub Secrets'da `DEEPSEEK_API_KEY`ni o'zi qo'shadi. Merge uchun alohida ruxsat kerak. Asosiy “Oyligim”, e'tirof va qo'shimcha ish navbati quyida saqlangan.
+
 ## Fiks kelishuvi LIVE — 2026-10-25 (Asia/Tashkent)
 
 - PR #61 merge qilingan: `82958c498a5cc11eda5af1502c74a5638c15afa8` (review head `fec608d`). Render `fokus-ai-singapore`, deploy `dep-dbeuls15efls73bd4a5g` LIVE, 2026-10-25 16:43:02 +05. Health HTTP 200; DB_STARTUP_PROBE outcome=ok, median 64.9 ms.
@@ -14,9 +23,9 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 ## Keyingi qadam — Muhammadiy tasdiqlagan, 2026-10-26
 
 - Savdo bo'limi boshlig'i menyusiga **e'tirof berish** va **qo'shimcha ish uchun yulduzcha to'lash** oqimlarini kiritish rejalashtirildi. Huquq: Founder barcha xodimlar uchun; `savdo_boshligi` faqat o'z filiali uchun. Savdo bo'limi boshlig'i = filial rahbari, bitta lavozim; yangi rol yaratilmaydi.
-- Joriy PR #68 faqat hisobning o'qish qatlami; yuqoridagi menyu/kiritish oqimlari hali amalga oshirilmagan. Ushbu yozuv faqat keyingi qadamni saqlaydi, kod yoki production o'zgarmagan.
+- PR #68 main'ga merge qilingan (`1a17d82f5e5aa87915081a56adb40c9acaf412f9`, GitHub'da 2026-10-26 tekshirildi); faqat hisobning o'qish qatlami. Yuqoridagi menyu/kiritish oqimlari hali amalga oshirilmagan. Ushbu tekshiruvda Render deploy holati qayta tekshirilmadi.
 
-## "Oyligim" uchun tasdiqlangan hisobning o'qish qatlami (branch `feat/oyligim-read-layer`, PR ochiq, merge/deploy YO'Q)
+## "Oyligim" uchun tasdiqlangan hisobning o'qish qatlami (PR #68 MERGED; deploy ushbu tekshiruvda tekshirilmagan)
 
 - Yangi: `services/payroll_view.py` (`compute_totals` sof formula, `month_view(employee_id, "YYYY-MM")`) + `repositories/payroll_view.py`. FAQAT O'QIYDI (hech narsa yozmaydi; yangi ledger, kiritish oqimi, avtomatik bonus yo'q). Tugmalar va xabar ko'rinishiga tegilmagan.
 - Formula (Muhammadiy tasdiqlagan): reja = kelishuvdagi ish kunlari x kunlik daqiqa; `fiks = fiks_oylik x ishlangan_daqiqa / reja_daqiqa` (butun so'mga, yarim yuqoriga: 2 500 000 x 6003 / 16800 = 893 304); `yulduz jami = ish_bonusi - min(minus, ish_bonusi) + e'tirof + qo'shimcha_ish` (minus FAQAT ish bonusidan, e'tirof va qo'shimcha ish himoyalangan; misol 40-5+6+50 = 91); `umumiy = fiks + yulduz x 5000` (91 x 5000 + 893 304 = 1 348 304).

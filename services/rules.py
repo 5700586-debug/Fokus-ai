@@ -118,11 +118,12 @@ def get_bos_supervisor_late_penalty() -> int:
 
 
 def get_bos_grade_points() -> dict[str, int]:
+    values = performance_repo.list_rules()
     return {
-        "bajarilmagan": int(performance_repo.get_rule("bos.grade_points.bajarilmagan") or 0),
-        "chala": int(performance_repo.get_rule("bos.grade_points.chala") or 1),
-        "norma": int(performance_repo.get_rule("bos.grade_points.norma") or 2),
-        "alo": int(performance_repo.get_rule("bos.grade_points.alo") or 3),
+        "bajarilmagan": int(values.get("bos.grade_points.bajarilmagan") or 0),
+        "chala": int(values.get("bos.grade_points.chala") or 1),
+        "norma": int(values.get("bos.grade_points.norma") or 2),
+        "alo": int(values.get("bos.grade_points.alo") or 3),
     }
 
 

@@ -1104,10 +1104,17 @@ def register(dp: Dispatcher, openai_client) -> None:
             work_date=nazoratchi_day.active_day(actor_id, company_time.now()).work_date,
         )
 
-    def _render_card(profile: dict, actor_id: int, *, show_time_bonus_button: bool | None = None) -> tuple[str, InlineKeyboardMarkup]:
+    def _render_card(
+        profile: dict, actor_id: int, *, show_time_bonus_button: bool | None = None, grade_render: bool = False,
+    ) -> tuple[str, InlineKeyboardMarkup]:
         """Bitta karta chizilishi: faol ish kuni va vaqt bonusi holati BIR marta hisoblanadi; matn ham, baho tugmalari
         ham aynan shu ``work_date``dan yaratiladi. ``show_time_bonus_button=None`` — holatdan olinadi."""
-        work_date = nazoratchi_day.active_day(actor_id, company_time.now()).work_date
+        if grade_render:
+            now = company_time.now()
+            snapshot = nazoratchi_day.read_day_context(actor_id, now)
+            work_date = nazoratchi_day.active_day(actor_id, now, snapshot=snapshot).work_date
+        else:
+            work_date = nazoratchi_day.active_day(actor_id, company_time.now()).work_date
         time_bonus = time_bonus_service.get_today_status(profile["user_id"])
         show_button = (time_bonus is None) if show_time_bonus_button is None else show_time_bonus_button
         text = _simple_employee_card_text(profile, work_date, time_bonus)
@@ -1173,13 +1180,15 @@ def register(dp: Dispatcher, openai_client) -> None:
         if grade_key not in discipline.GRADE_LABELS:
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
-        profile = employees.get_profile(user_id)
+        profile = employees.get_profile(user_id, include_contacts=False)
         if profile is None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
         # Server: karta sanasi hamon FAOL ish kuni bo'lishi, kun/filial yopilmagan bo'lishi shart.
-        reason = nazoratchi_day.check_active(callback.from_user.id, work_date, company_time.now())
+        now = company_time.now()
+        snapshot = nazoratchi_day.read_day_context(callback.from_user.id, now)
+        reason = nazoratchi_day.check_active(callback.from_user.id, work_date, now, snapshot=snapshot)
         if reason == "closed":
             await callback.answer("Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.", show_alert=True)
             return
@@ -1188,7 +1197,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         if any(
             item["branch"] == profile.get("branch") and item["status"] == "closed"
-            for item in discipline_repo.list_branch_sessions_up_to(callback.from_user.id, work_date)
+            for item in snapshot["sessions"]
             if item["session_date"] == work_date
         ):
             await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
@@ -1210,7 +1219,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
 
         if callback.message:
-            text, keyboard = _render_card(profile, callback.from_user.id)
+            text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
             await callback.message.edit_text(text, reply_markup=keyboard)
 
     # --------------------------------------------------------- ball ayirish --

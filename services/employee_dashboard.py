@@ -50,7 +50,7 @@ def _build_dashboard(user_id: int, conn) -> dict | None:
     full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
 
     # "Kecha" va "oxirgi 2 kun" bir xil kunni o'z ichiga oladi: kun bir marta o'qiladi.
-    recent_days = attendance_service.get_recent_days_summary(user_id, days=2, conn=conn)
+    recent_days, hours = attendance_service.get_dashboard_attendance(user_id, profile, conn)
     yesterday_iso = (company_time.today() - timedelta(days=1)).isoformat()
     yesterday = next((day for day in recent_days if day["date"] == yesterday_iso), None)
     if yesterday is None:
@@ -65,7 +65,7 @@ def _build_dashboard(user_id: int, conn) -> dict | None:
         },
         "points": discipline.get_period_point_totals(user_id, conn=conn),
         "yesterday": yesterday,
-        "hours": attendance_service.get_month_to_date_hours(user_id, profile=profile, conn=conn),
+        "hours": hours,
         "recent_days": recent_days,
     }
 

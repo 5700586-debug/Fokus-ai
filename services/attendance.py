@@ -626,6 +626,11 @@ def get_month_to_date_hours(employee_id: int, profile: dict | None = None, conn=
     shifts_by_date = {shift["shift_date"]: shift for shift in shifts}
     events = attendance_repo.list_events_for_range(employee_id, range_start.isoformat(), fetch_end, conn=conn)
 
+    return _month_hours_from_records(range_start, range_end, shifts_by_date, events)
+
+
+def _month_hours_from_records(range_start: date, range_end: date, shifts_by_date: dict, events: list[dict]) -> dict:
+
     planned = _planned_from_shifts(range_start, range_end, shifts_by_date)
 
     # Har bir LOGICAL shift sanasi bo'yicha (kalendar kuni bo'yicha emas) -- tun smenasi faqat o'zining boshlanish
@@ -650,6 +655,25 @@ def get_month_to_date_hours(employee_id: int, profile: dict | None = None, conn=
         "range_start": range_start.isoformat(),
         "range_end": range_end.isoformat(),
     }
+
+
+def get_dashboard_attendance(employee_id: int, profile: dict, conn) -> tuple[list[dict], dict]:
+    """Recent calendar days and month hours from the same read; connection owned by the short reader."""
+    today = company_time.today()
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(2)]
+    date_range = _month_to_date_range(profile)
+    start = min(dates + ([date_range[0].isoformat()] if date_range else []))
+    end = (today + timedelta(days=2)).isoformat()
+    records = attendance_repo.dashboard_records(employee_id, start, end, dates, conn)
+    events = records["events"]
+    recent = [_day_summary(day, _arrival_from_events([e for e in events if e["event_time"][:10] == day]),
+                           records["reasons"].get(day)) for day in dates]
+    if date_range is None:
+        hours = {"planned_hours": None, "actual_hours": 0.0, "worked_days_count": 0, "missing_days_count": 0,
+                 "range_start": None, "range_end": None}
+    else:
+        hours = _month_hours_from_records(*date_range, {r["shift_date"]: r for r in records["shifts"]}, events)
+    return recent, hours
 
 
 def mark_unjustified(employee_id: int, event_date: str) -> None:

@@ -475,25 +475,21 @@ def get_month_point_totals(
     if owns:
         conn = get_connection()
     try:
-        grades = conn.execute(
-            "SELECT COALESCE(SUM(grade_points), 0) AS points FROM daily_evaluations "
-            "WHERE employee_id = ? AND eval_date >= ? AND eval_date < ?",
-            (user_id, start_date, end_date_exclusive),
-        ).fetchone()
-        other = conn.execute(
-            "SELECT "
+        totals = conn.execute(
+            "SELECT (SELECT COALESCE(SUM(grade_points), 0) FROM daily_evaluations "
+            "WHERE employee_id = ? AND eval_date >= ? AND eval_date < ?) AS points, "
             "COALESCE(SUM(CASE WHEN change_amount > 0 THEN change_amount ELSE 0 END), 0) AS bonus, "
             "COALESCE(SUM(CASE WHEN change_amount < 0 THEN -change_amount ELSE 0 END), 0) AS minus "
             "FROM bonus_bank_ledger WHERE user_id = ? AND ref_type != 'daily_evaluation' "
             "AND created_at >= ? AND created_at < ?",
-            (user_id, since_iso, until_iso_exclusive),
+            (user_id, start_date, end_date_exclusive, user_id, since_iso, until_iso_exclusive),
         ).fetchone()
     finally:
         if owns:
             conn.close()
 
-    bonus = (grades["points"] if grades else 0) + (other["bonus"] if other else 0)
-    minus = other["minus"] if other else 0
+    bonus = totals["points"] + totals["bonus"]
+    minus = totals["minus"]
     return {"bonus": bonus, "minus": minus, "net": bonus - minus}
 
 
@@ -1004,6 +1000,32 @@ def list_branch_sessions_up_to(supervisor_id: int, up_to_date: str) -> list[dict
         conn.close()
 
     return [dict(row) for row in rows]
+
+
+def get_day_review_snapshot(supervisor_id: int, up_to_date: str, branches: list[str]) -> dict:
+    """One read for a grade guard/render; no per-day or per-branch SQL loop."""
+    placeholders = ", ".join("?" for _ in branches) or "NULL"
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT 'session' AS kind, session_date AS work_date, branch, status "
+            "FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND session_date <= ? "
+            "UNION ALL SELECT 'closure', closure_date, NULL, NULL FROM daily_closures "
+            "WHERE supervisor_id = ? AND closure_date <= ? "
+            "UNION ALL SELECT DISTINCT 'branch', NULL, branch, NULL FROM employees "
+            "WHERE status = 'approved' AND user_id != ? "
+            "AND (role_key IS NULL OR role_key NOT IN ('founder', 'nazoratchi')) "
+            f"AND branch IN ({placeholders})",
+            (supervisor_id, up_to_date, supervisor_id, up_to_date, supervisor_id, *branches),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "sessions": [{"session_date": row["work_date"], "branch": row["branch"], "status": row["status"]}
+                     for row in rows if row["kind"] == "session"],
+        "closed_dates": {row["work_date"] for row in rows if row["kind"] == "closure"},
+        "required_branches": {row["branch"] for row in rows if row["kind"] == "branch"},
+    }
 
 
 def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None, on_date: str | None = None) -> list[dict]:

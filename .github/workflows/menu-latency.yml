@@ -17,6 +17,7 @@ on:
       - services/nazoratchi_day.py
       - services/rules.py
       - tests/test_db_connection_reuse.py
+      - tests/test_grade_notice_diagnostics.py
       - .github/workflows/menu-latency.yml
 
 permissions:
@@ -71,6 +72,7 @@ jobs:
           tests/test_menu_screen_cleanup.py
           tests/test_chat_cleanup.py
           tests/test_db_connection_reuse.py
+          tests/test_grade_notice_diagnostics.py
           tests/test_card_render_queries.py
           tests/test_nazoratchi_daily_flow.py
           tests/test_discipline_bot_flows.py

@@ -1180,8 +1180,10 @@ def register(dp: Dispatcher, openai_client) -> None:
         if grade_key not in discipline.GRADE_LABELS:
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
+        discipline.log_grade_event(user_id, work_date, "nzr_request", "received")
         profile = employees.get_profile(user_id, include_contacts=False)
         if profile is None:
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "unknown_employee")
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
@@ -1190,9 +1192,11 @@ def register(dp: Dispatcher, openai_client) -> None:
         snapshot = nazoratchi_day.read_day_context(callback.from_user.id, now)
         reason = nazoratchi_day.check_active(callback.from_user.id, work_date, now, snapshot=snapshot)
         if reason == "closed":
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "closed_day")
             await callback.answer("Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.", show_alert=True)
             return
         if reason is not None:
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "stale_day")
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
         if any(
@@ -1200,6 +1204,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             for item in snapshot["sessions"]
             if item["session_date"] == work_date
         ):
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "closed_branch")
             await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
             return
         # Birinchi muvaffaqiyatli baho shu nazoratchi+filial+ish kuni sessiyasini (bitta tranzaksiyada) ochadi: shunda

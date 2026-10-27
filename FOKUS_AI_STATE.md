@@ -6,6 +6,8 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 
 ## Baho xabari diagnostikasi — DRAFT (2026-10-27, Asia/Tashkent)
 
+- PR #72 review yakuni (Sodiq taqdim etgan Job Summary, 2026-10-27): [DeepSeek run #10](https://github.com/5700586-debug/Fokus-ai/actions/runs/40562080339), kod head `16bac2e`: “Tekshirilgan fayllar: 5. Xato topilmadi.” Eski totals/format ogohlantirishi yo'qolgan. Diffda notify callback.answer'dan OLDIN — query-is-too-old birinchi notify'ni to'sa olmaydi. Sodiq tomondan PR tayyor; merge/deploy faqat Muhammadiy ruxsati bilan. Ushbu qayd faqat STATE'ni yangilaydi, kod o'zgarmaydi.
+
 - Base main `9e57520a0abd410563ec47802cfbce95ca4def60` (PR #71 MERGED). Render `dep-dbfpob3ncjis738hcl7g` shu commit bilan LIVE: 2026-10-26 23:31:36 +05; health 200, DB_STARTUP_PROBE OK. Deploy almashishidagi TelegramConflictError eski jarayon SIGTERM olgach takrorlanmadi. Quyidagi eski DRAFT bo'limlari tarixiy checkpoint, joriy merge holati emas.
 - Real post-deploy log: Yulduzlarim `total_ms=1157 db_queries=7 db_ms=716`, avvalgi ikki namuna 1508/1679 ms, 11 so'rov. Baho tuzatish `total_ms=3897 db_queries=23 db_ms=3306`; avvalgi bitta namuna 7364 ms/44 so'rov, ammo yangi baho va tuzatish bir xil ish hajmi emas — qat'iy foizli tezlashuv deb olinmaydi.
 - Founder yangi ish bahosining birinchi xabari kelmaganini bildirdi; skrinshotlarda faol ish kuni 17.10.2026, 3->2 tuzatish xabari 23:51, vaqt bonusi undan KEYIN 23:58 da tasdiqlangan. Demak xabar vaqt bonusini kutmagan. Birinchi xabar kelmaganining ildiz sababi ANIQLANMAGAN; eski logdagi 7 so'rovga qarab takroriy baho deb hukm qilish yetarli emas.

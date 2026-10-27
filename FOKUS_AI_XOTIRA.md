@@ -49,6 +49,10 @@ Manba: Autopilot (2026-08-31), PR tekshiruvi (2026-09-19).
 ✅ Real Telegram E2E FAILED bo'lsa sabab commit comment sifatida avtomatik yoziladi (session/token hech qachon chiqmaydi). GitHub job-log'lariga autentifikatsiyasiz kirib bo'lmaydi — shuning uchun testlar imkon qadar sodda/strukturaviy yoziladi. (manba: eski FOKUS_AI_STATE.md)
 ## 4. Biznes qarorlari
 
+✅ Ish kuni yopilishi — Muhammadiy tasdiqlagan PR-A (2026-10-28): `/kunniyop` baholanmaganlar bilan ham yopadi; ular “baholanmadi”, 0 baho emas, yangi minus yozilmaydi. Kun chegarasi 06:00 Asia/Tashkent: 00:00–05:59 oldingi ish kuni; 06:00 dan yangi kun. Eski ochiq kun joriy bahoni orqaga tortmaydi. 06:00 avto-yopish/restart catch-up hech kimga baho yoki minus yozmaydi, Founderga kunlik xabar yubormaydi. Nazoratchi yo'q kuni sun'iy baho/o'rinbosar yo'q.
+✅ Deploygacha qolgan eski ochiq kunlar faqat Founder preview + tasdig'i bilan yopiladi; tarix, eski baholar va ledger saqlanadi. Avtomatik tick buni chetlab o'tmaydi. Qo'lda erta yopilgan kun yangi 06:00 chegarasigacha qayta ochilmaydi.
+⏸ PR-B keyin: “baholanmadi” kunni bonus hisobidan chiqarish va oyiga bir marta “Nazoratchi N kundan M kunini baholadi” qatori. PR-A bonus/fiks hisobi yoki oylik hisobotni o'zgartirmaydi. N/M va hisobot oluvchisi PR-B'da aniqlanadi; hozir taxmin qilinmaydi.
+
 ✅ E'tirof berish va qo'shimcha ish uchun yulduzcha to'lash oqimi keyingi qadamga kiritilsin. Huquq: Founder — barcha xodimlar; Savdo bo'limi boshlig'i (`savdo_boshligi`, ya'ni filial rahbari — bitta lavozim) — faqat o'z filialidagi xodimlar. Ikkala amal Savdo bo'limi boshlig'i menyusida bo'lsin; alohida yangi rol yaratilmasin. Hali amalga oshirilmagan. (Muhammadiy, 2026-10-26, shu chat)
 
 ✅ Kamida 1 yil faqat 1 Nazoratchi (single-slot ataylab). (Autopilot, 2026-08-31) Ko'p nazoratchiga o'tishga to'sqinlik qiluvchi kod yozilmaydi.
@@ -109,7 +113,7 @@ Robot (Claude Code) ishga tushirish usuli
 ⏸ main branch protection + repo private — production/tijoriy tayyorgarlikda.
 ⏸ Ko'p nazoratchi — kamida 1 yildan keyin.
 ⏸ Webhook'ga o'tish.
-⏸ _day_close_tick: 20:00 dan keyin yopilmagan kun uchun nazoratchiga avtomatik minus — 2-smena ~01:00 gacha ishlaydi, to'qnashuv. Yangi muddat Muhammadiy qaroriga bog'liq.
+❌ Kun yopilmadi avtomatik minusi bekor qilindi (Muhammadiy, 2026-10-28); o'rniga 06:00 minus va kunlik xabarsiz yopish — 4-bo'lim.
 ⏸ Kassa/ombor/moshina/market fotolari retention: muddat e'lon qilingan, haqiqiy avtomatik o'chirish yoqilmagan. Telegram'da faylni abadiy o'chirish API'si yo'q, faqat xabarni o'chirish mumkin. (manba: eski FOKUS_AI_STATE.md)
 ⏸ Admin/Founder majburiy smena yopish buyrug'i — filial tashlab ketilsa smena PENDING_HANDOVER/NEEDS_SUPERVISOR_APPROVAL da qolib ketishi mumkin (holati TEKSHIRILMAGAN). (manba: eski FOKUS_AI_STATE.md)
 ## 7. Bekor qilingan / kerak emas

@@ -1,8 +1,8 @@
 """Nazoratchi kunlik tekshiruv oqimi: filial tanlash -> xodimlar holati -> baholash ->
-qayta baholash -> hamma KERAKLI xodim baholangach FILIAL sessiyasini yopish.
+qayta baholash -> baholanmaganlar qolsa ham FILIAL sessiyasini yopish.
 
 Sessiya = sana + filial + nazoratchi (``nazoratchi_branch_sessions``). Yopilmagan sessiya
-yo'qolmaydi va majburan yopilmaydi. Grafikni nazoratchi emas, filial rahbari kiritadi:
+tarixi saqlanadi; eski kun yangi ish kunini to'smaydi. Grafikni nazoratchi emas, filial rahbari kiritadi:
 bu yerda grafik faqat O'QILADI (``employee_scheduled_shifts``). Yozuv yo'q kun — NOMA'LUM
 ("grafik yo'q"): bot ish/dam deb TAXMIN QILMAYDI.
 
@@ -12,7 +12,8 @@ TODO: dam olishga "kim ruxsat berdi" ustuni hozir yo'q — ``employee_scheduled_
 
 from dataclasses import dataclass, field
 
-from datetime import datetime
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 import employees
 from config import RECRUITING_BRANCH_NAMES
@@ -24,12 +25,14 @@ from services import rules as rules_service
 STATUS_EVALUATED = "evaluated"      # ✅ baholandi
 STATUS_PENDING = "pending"          # 🔵 ishda, baholanmagan
 STATUS_OFF = "off"                  # 🔴 damda
+STATUS_NOT_EVALUATED = "not_evaluated"  # yopilgan kunda baho yozilmagan
 STATUS_NO_SCHEDULE = "no_schedule"  # ⚠️ grafik yo'q
 
 STATUS_EMOJI = {
     STATUS_EVALUATED: "✅", STATUS_PENDING: "🔵", STATUS_OFF: "🔴", STATUS_NO_SCHEDULE: "⚠️",
+    STATUS_NOT_EVALUATED: "⚪",
 }
-# Yopishga to'sqinlik qiladigan holatlar: ishdagi baholanmagan va grafik yo'q (baholanmagan).
+# Ochiq kun ekranida baholanishi kutilayotganlar; yopishga to'siq emas.
 BLOCKING_STATUSES = frozenset({STATUS_PENDING, STATUS_NO_SCHEDULE})
 _MANAGEMENT_ROLE_KEYS = frozenset({"founder", "nazoratchi"})
 
@@ -63,7 +66,7 @@ class EmployeeStatus:
     def line(self) -> str:
         label = {
             STATUS_EVALUATED: "baholandi", STATUS_PENDING: "baholanmagan",
-            STATUS_OFF: "damda", STATUS_NO_SCHEDULE: "grafik yo'q",
+            STATUS_OFF: "damda", STATUS_NO_SCHEDULE: "grafik yo'q", STATUS_NOT_EVALUATED: "baholanmadi",
         }[self.status]
         text = f"{self.emoji} {self.name} — {label}"
         if self.status == STATUS_OFF and self.permitted_by:
@@ -71,14 +74,14 @@ class EmployeeStatus:
         return text
 
 
-def employee_status(profile: dict, review_date: str) -> EmployeeStatus:
+def employee_status(profile: dict, review_date: str, *, closed: bool = False) -> EmployeeStatus:
     user_id = profile["user_id"]
     if discipline.get_daily_grade(user_id, review_date) is not None:
         return EmployeeStatus(profile, STATUS_EVALUATED)
 
     shift = attendance_service.get_shift_for_date(user_id, review_date)
     if shift is None:
-        return EmployeeStatus(profile, STATUS_NO_SCHEDULE)  # taxmin qilinmaydi
+        return EmployeeStatus(profile, STATUS_NOT_EVALUATED if closed else STATUS_NO_SCHEDULE)  # taxmin qilinmaydi
     if shift.get("status") == "off":
         permitter = None
         created_by = shift.get("created_by")
@@ -86,11 +89,11 @@ def employee_status(profile: dict, review_date: str) -> EmployeeStatus:
             permitter_profile = employees.get_profile(created_by)
             permitter = full_name(permitter_profile) if permitter_profile else None
         return EmployeeStatus(profile, STATUS_OFF, permitter)
-    return EmployeeStatus(profile, STATUS_PENDING)
+    return EmployeeStatus(profile, STATUS_NOT_EVALUATED if closed else STATUS_PENDING)
 
 
-def branch_statuses(branch: str, review_date: str, exclude_user_id: int | None = None) -> list[EmployeeStatus]:
-    return [employee_status(profile, review_date) for profile in branch_employees(branch, exclude_user_id)]
+def branch_statuses(branch: str, review_date: str, exclude_user_id: int | None = None, *, closed: bool = False) -> list[EmployeeStatus]:
+    return [employee_status(profile, review_date, closed=closed) for profile in branch_employees(branch, exclude_user_id)]
 
 
 def coverage_branches(supervisor_id: int) -> list[str]:
@@ -127,9 +130,9 @@ class ActiveDay:
 
 
 def current_work_date(now: datetime) -> str:
-    """PR #54 siyosati: kompaniya vaqti + ``bos.work_day_start`` chegarasi."""
-    boundary = day_close_deadline.parse_hhmm(rules_service.get_bos_work_day_start())
-    return day_close_deadline.work_date_at(now, boundary).isoformat()
+    """Muhammadiy qarori: 00:00–05:59 oldingi ish kuni; 06:00 dan yangi kun."""
+    local = now.astimezone(ZoneInfo("Asia/Tashkent"))
+    return day_close_deadline.work_date_at(local, time(6)).isoformat()
 
 
 def read_day_context(supervisor_id: int, now: datetime) -> dict:
@@ -139,25 +142,13 @@ def read_day_context(supervisor_id: int, now: datetime) -> dict:
 
 
 def active_day(supervisor_id: int, now: datetime, *, snapshot: dict | None = None) -> ActiveDay:
-    """Nazoratchining faol ish kuni (faqat O'QIYDI, hech narsa yozmaydi/yopmaydi/ochmaydi):
-    eng eski yakunlanmagan kun (sessiyasi bor, barcha qamrov filiallari yopilmagan), kelajak sanalar e'tiborsiz;
-    bo'lmasa joriy ish kuni (yopilgan bo'lsa ``closed=True``). Oradagi kalendar kunlar yaratilmaydi."""
+    """Faqat joriy 06:00 ish kuni. Eski ochiq sessiya uni orqaga tortmaydi; yozuv yo'q."""
     current = snapshot["current"] if snapshot is not None else current_work_date(now)
     sessions = snapshot["sessions"] if snapshot is not None else discipline_repo.list_branch_sessions_up_to(supervisor_id, current)
-
-    def closed(day):
-        if snapshot is None:
-            return _is_closed_day(supervisor_id, day, sessions)
-        return day in snapshot["closed_dates"] or day_fully_closed(
-            supervisor_id, day, sessions, required_branches=snapshot["required_branches"],
-        )
-
-    for work_date in sorted({item["session_date"] for item in sessions}):
-        if not closed(work_date):
-            return ActiveDay(work_date, resumed=work_date < current)
-    if closed(current):
-        return ActiveDay(current, closed=True)
-    return ActiveDay(current)
+    closed = (current in snapshot["closed_dates"] or day_fully_closed(
+        supervisor_id, current, sessions, required_branches=snapshot["required_branches"],
+    )) if snapshot is not None else _is_closed_day(supervisor_id, current, sessions)
+    return ActiveDay(current, closed=closed)
 
 
 def _is_closed_day(supervisor_id: int, work_date: str, sessions: list[dict]) -> bool:
@@ -197,24 +188,17 @@ class CloseResult:
 
 
 def close_session(supervisor_id: int, branch: str, review_date: str) -> CloseResult:
-    """Tanlangan filial sessiyasini yopadi: ishdagi baholanmagan va grafik yo'q (baholanmagan)
-    xodimlar qolsa yopmaydi va ro'yxatini qaytaradi; damdagilar to'sqinlik qilmaydi."""
+    """Baholanmaganlar ham qolishi mumkin; ularga baho/ball yozilmaydi."""
     session = open_session(supervisor_id, branch, review_date)
     if session["status"] == "closed":
         return CloseResult(closed=False, already_closed=True)
-
     statuses = branch_statuses(branch, review_date, exclude_user_id=supervisor_id)
-    blockers = [item for item in statuses if item.status in BLOCKING_STATUSES]
-    if blockers:
-        return CloseResult(closed=False, blockers=blockers, total=len(statuses))
-
     evaluated = sum(1 for item in statuses if item.status == STATUS_EVALUATED)
     off_count = sum(1 for item in statuses if item.status == STATUS_OFF)
     if not discipline_repo.close_branch_session(session["id"], evaluated, len(statuses)):
         return CloseResult(closed=False, already_closed=True)
 
-    # Mavjud kunlik yopish belgisi (scheduler "kun yopilmadi" jarimasi uchun) — shu sanadagi BARCHA qamrov
-    # filiallari yopilgandagina qo'yiladi (bitta filial butun kunni yopmaydi).
+    # Qo'lda yopishda barcha qamrov filiallari yopilgach kunning o'zi yakunlanadi.
     if day_fully_closed(supervisor_id, review_date):
         discipline.close_day(supervisor_id, review_date, len(statuses))
 
@@ -227,3 +211,20 @@ def blockers_text(blockers: list[EmployeeStatus]) -> str:
     if any(item.status == STATUS_NO_SCHEDULE for item in blockers):
         lines += ["", "⚠️ Grafik yo'q xodimlar: grafikni filial rahbari kiritadi; ishda bo'lsa baholang."]
     return "\n".join(lines)
+
+
+def ensure_auto_close_policy(now: datetime) -> str:
+    return discipline_repo.auto_close_start(current_work_date(now))
+
+
+def auto_close_expired(now: datetime) -> dict:
+    ensure_auto_close_policy(now)
+    return discipline_repo.close_expired_review_days(current_work_date(now))
+
+
+def preview_legacy_close(now: datetime) -> dict:
+    return discipline_repo.preview_review_day_closure(current_work_date(now))
+
+
+def confirm_legacy_close(now: datetime, version: str) -> dict:
+    return discipline_repo.close_expired_review_days(current_work_date(now), expected_version=version)

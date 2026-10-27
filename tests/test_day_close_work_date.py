@@ -1,5 +1,4 @@
-"""Nazoratchi "kun yopilmadi" avtomatik minusi: ish kuni (work_date), aniq sana+vaqtli muddat, bir martalik yozish,
-barcha nazoratchilar, o'z dam kuni, sozlama o'zgarishi. Soat/vaqt zonasi boshqariladi; lokal DB; Telegram mock."""
+"""Legacy deadline settings must not re-enable the removed late-close penalty (PR-A)."""
 
 import asyncio
 from datetime import datetime
@@ -8,6 +7,7 @@ import pytest
 
 import db
 import discipline_bot
+import company_time
 from config import FOUNDER_ID
 from services import day_close_deadline, discipline
 
@@ -47,6 +47,7 @@ def _pin(monkeypatch, year: int, month: int, day: int, hour: int, minute: int) -
             return fixed.astimezone(tz) if tz else fixed
 
     monkeypatch.setattr(discipline_bot, "datetime", _Fixed)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
     return fixed
 
 
@@ -100,7 +101,7 @@ def test_pure_work_date_and_deadline_datetime_logic():
 # ------------------------------------------------------------------ 20:00 --
 
 
-async def test_default_20_00_behaviour_and_amount_are_unchanged(monkeypatch):
+async def test_old_20_00_deadline_never_creates_penalty_or_message(monkeypatch):
     _supervisor()
     bot = _Bot()
     _pin(monkeypatch, 2026, 3, 1, 19, 59)
@@ -110,15 +111,14 @@ async def test_default_20_00_behaviour_and_amount_are_unchanged(monkeypatch):
     _pin(monkeypatch, 2026, 3, 1, 20, 0)
     await discipline_bot._day_close_tick(bot)
 
-    assert _bank() == -40 and _audits() == ["2026-03-01"]
-    assert any("2026-03-01" in text and "-40" in text for target, text in bot.sent if target == SUP)  # xabarda work_date
-    assert any("2026-03-01" in text for target, text in bot.sent if target == FOUNDER_ID)
+    assert _bank() == 0 and _audits() == []
+    assert bot.sent == []  # Old deadline settings no longer produce a penalty or daily message.
 
 
 # ------------------------------------------------- 01:30 muddat, chegara 08:00 --
 
 
-async def test_night_deadline_belongs_to_previous_work_date(monkeypatch):
+async def test_old_night_deadline_cannot_reenable_penalty(monkeypatch):
     _supervisor()
     _night_policy()
     bot = _Bot()
@@ -129,11 +129,11 @@ async def test_night_deadline_belongs_to_previous_work_date(monkeypatch):
 
     _pin(monkeypatch, 2026, 3, 2, 1, 35)
     await discipline_bot._day_close_tick(bot)
-    assert _audits() == ["2026-03-01"] and _bank() == -40  # D uchun bir marta
+    assert _audits() == [] and _bank() == 0  # No late-close penalty under PR-A.
 
     _pin(monkeypatch, 2026, 3, 2, 9, 0)  # yangi ish kuni D+1: muddat D+2 01:30
     await discipline_bot._day_close_tick(bot)
-    assert _audits() == ["2026-03-01"] and _bank() == -40
+    assert _audits() == [] and _bank() == 0
 
 
 async def test_repeated_parallel_and_restart_ticks_never_double_penalize(monkeypatch):
@@ -145,7 +145,7 @@ async def test_repeated_parallel_and_restart_ticks_never_double_penalize(monkeyp
     await asyncio.gather(*(discipline_bot._day_close_tick(bot) for _ in range(4)))
     await discipline_bot._day_close_tick(_Bot())  # "restart": yangi jarayon, bir xil DB
 
-    assert _bank() == -40 and _audits() == ["2026-03-01"]
+    assert _bank() == 0 and _audits() == []
 
 
 async def test_next_calendar_day_closure_does_not_close_the_previous_work_date(monkeypatch):
@@ -156,7 +156,7 @@ async def test_next_calendar_day_closure_does_not_close_the_previous_work_date(m
 
     await discipline_bot._day_close_tick(_Bot())
 
-    assert _audits() == ["2026-03-01"]
+    assert _audits() == []
 
 
 async def test_work_date_closure_prevents_penalty(monkeypatch):
@@ -184,7 +184,7 @@ async def test_every_active_supervisor_is_checked_independently(monkeypatch):
 
     await discipline_bot._day_close_tick(_Bot())
 
-    assert _bank(SUP) == 0 and _bank(SUP2) == -40 and _audits(SUP2) == ["2026-03-01"]
+    assert _bank(SUP) == 0 and _bank(SUP2) == 0 and _audits(SUP2) == []
 
 
 async def test_own_day_off_exempts_only_that_supervisor_and_missing_branch_data_is_not_guessed(monkeypatch):
@@ -199,7 +199,7 @@ async def test_own_day_off_exempts_only_that_supervisor_and_missing_branch_data_
     await discipline_bot._day_close_tick(_Bot())
 
     assert _bank(SUP) == 0 and _audits(SUP) == []  # "Dam" belgilangan
-    assert _bank(SUP2) == -40  # grafik ma'lumoti yo'q: taxmin qilinmaydi, oddiy qoida
+    assert _bank(SUP2) == 0  # grafik ma'lumoti yo'q: taxmin qilinmaydi, oddiy qoida
 
 
 # --------------------------------------------------------- sozlama o'zgarishi --
@@ -215,7 +215,7 @@ async def test_deadline_changed_after_it_passed_is_not_applied_retroactively(mon
     assert _bank() == 0 and _audits() == []  # orqaga minus yo'q
 
 
-async def test_deadline_changed_before_it_passed_applies_to_that_day(monkeypatch):
+async def test_old_deadline_changed_before_it_passed_still_cannot_reenable_penalty(monkeypatch):
     _supervisor()
     _set_rule("bos.day_close_deadline", "22:00", updated_at="2026-03-01T05:00:00+00:00")  # 10:00 Toshkent, muddatdan oldin
     bot = _Bot()
@@ -224,7 +224,7 @@ async def test_deadline_changed_before_it_passed_applies_to_that_day(monkeypatch
     assert _bank() == 0
     _pin(monkeypatch, 2026, 3, 1, 22, 5)
     await discipline_bot._day_close_tick(bot)
-    assert _bank() == -40 and _audits() == ["2026-03-01"]
+    assert _bank() == 0 and _audits() == []
 
 
 async def test_policy_survives_restart_because_it_lives_in_the_database(monkeypatch):
@@ -251,7 +251,7 @@ async def test_invalid_time_format_does_not_crash_or_penalize(monkeypatch):
 
 
 @pytest.mark.parametrize(("event", "table"), [("INSERT", "bonus_bank_ledger"), ("INSERT", "salaries"), ("UPDATE", "salaries")])
-async def test_write_failure_leaves_no_partial_audit_balance_or_ledger_and_retry_works(monkeypatch, event, table):
+async def test_tick_does_not_write_financial_tables_even_if_their_triggers_would_fail(monkeypatch, event, table):
     _supervisor()
     if event == "UPDATE":
         discipline.adjust_bonus_bank(SUP, 100, "boshlang'ich", "test", None)
@@ -276,4 +276,4 @@ async def test_write_failure_leaves_no_partial_audit_balance_or_ledger_and_retry
         conn.close()
     assert _audits() == [] and _bank() == before_bank
     await discipline_bot._day_close_tick(_Bot())  # keyingi tick qayta urinadi
-    assert _audits() == ["2026-03-01"] and _bank() == before_bank - 40
+    assert _audits() == [] and _bank() == before_bank

@@ -51,7 +51,7 @@ async def test_day_close_tick_does_nothing_before_deadline(monkeypatch):
     assert bot.sent == []
 
 
-async def test_day_close_tick_penalizes_supervisor_after_deadline(monkeypatch):
+async def test_day_close_tick_never_penalizes_supervisor_after_old_deadline(monkeypatch):
     _make_nazoratchi(1)
     _pin_now(monkeypatch, 16, 0)
 
@@ -60,10 +60,9 @@ async def test_day_close_tick_penalizes_supervisor_after_deadline(monkeypatch):
 
     from services import discipline
 
-    assert discipline.get_salary(1)["bonus_bank"] == -40
+    assert discipline.get_salary(1)["bonus_bank"] == 0
     targets = [target for target, _ in bot.sent]
-    assert 1 in targets
-    assert FOUNDER_ID in targets
+    assert targets == []
 
 
 async def test_day_close_tick_is_idempotent_same_day(monkeypatch):
@@ -76,7 +75,7 @@ async def test_day_close_tick_is_idempotent_same_day(monkeypatch):
 
     from services import discipline
 
-    assert discipline.get_salary(1)["bonus_bank"] == -40
+    assert discipline.get_salary(1)["bonus_bank"] == 0
 
 
 async def test_day_close_tick_skips_when_day_already_closed(monkeypatch):

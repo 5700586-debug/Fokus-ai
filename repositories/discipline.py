@@ -1048,3 +1048,108 @@ def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None
         conn.close()
 
     return [dict(row) for row in rows]
+
+
+# One persistent cutover in the existing rules table keeps pre-deploy days behind Founder approval.
+_AUTO_CLOSE_START = "bos.auto_close_start_date"
+
+
+def auto_close_start(current_day: str | None = None) -> str | None:
+    conn = get_connection()
+    try:
+        if current_day is not None:
+            conn.execute(
+                "INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUES (?, ?, 0, ?)",
+                (_AUTO_CLOSE_START, current_day, _now()),
+            )
+            conn.commit()
+        row = conn.execute("SELECT rule_value FROM rules WHERE rule_key = ?", (_AUTO_CLOSE_START,)).fetchone()
+        return row["rule_value"] if row else None
+    finally:
+        conn.close()
+
+
+def _review_close_snapshot(conn, before_day: str, legacy: bool) -> dict:
+    import hashlib
+    import json
+
+    row = conn.execute("SELECT rule_value FROM rules WHERE rule_key = ?", (_AUTO_CLOSE_START,)).fetchone()
+    start = row["rule_value"] if row else None
+    if start is None:
+        raise ValueError("Kun yopish tartibi hali ishga tushmagan.")
+    rows = conn.execute(
+        "SELECT s.* FROM nazoratchi_branch_sessions s WHERE s.session_date < ? "
+        + ("AND s.session_date < ? " if legacy else "AND s.session_date >= ? ")
+        + "AND (s.status = 'open' OR NOT EXISTS (SELECT 1 FROM daily_closures d "
+          "WHERE d.supervisor_id = s.supervisor_id AND d.closure_date = s.session_date)) "
+          "ORDER BY s.supervisor_id, s.session_date, s.branch, s.id",
+        (before_day, start),
+    ).fetchall()
+    rows = [dict(item) for item in rows]
+    version = hashlib.sha256(json.dumps([start, before_day, rows], sort_keys=True).encode()).hexdigest()
+    return {"rows": rows, "version": version}
+
+
+def preview_review_day_closure(before_day: str) -> dict:
+    """Read-only: no seed, FSM, closure or grade writes."""
+    conn = get_connection()
+    try:
+        return _review_close_snapshot(conn, before_day, legacy=True)
+    finally:
+        conn.close()
+
+
+def close_expired_review_days(before_day: str, *, expected_version: str | None = None) -> dict:
+    """Automatic post-cutover days, or exactly the reviewed legacy snapshot, in one transaction."""
+    import hmac
+
+    conn = get_connection()
+    try:
+        # Serializes concurrent tick/confirmation transactions on both supported backends.
+        locked = conn.execute("UPDATE rules SET rule_value = rule_value WHERE rule_key = ?", (_AUTO_CLOSE_START,))
+        if locked.rowcount != 1:
+            raise ValueError("Kun yopish tartibi hali ishga tushmagan.")
+        snapshot = _review_close_snapshot(conn, before_day, legacy=expected_version is not None)
+        if expected_version is not None and not hmac.compare_digest(expected_version, snapshot["version"]):
+            raise ValueError("Ko'rik eskirgan. Eski kunlarni qayta ko'ring.")
+        rows = snapshot["rows"]
+        closed_sessions = closed_days = 0
+        for item in rows:
+            if item["status"] != "open":
+                continue
+            counts = conn.execute(
+                "SELECT COUNT(*) AS total, COUNT(g.employee_id) AS evaluated FROM employees e "
+                "LEFT JOIN daily_evaluations g ON g.employee_id = e.user_id AND g.eval_date = ? "
+                "WHERE e.status = 'approved' AND e.branch = ? AND e.user_id != ? "
+                "AND (e.role_key IS NULL OR e.role_key NOT IN ('founder', 'nazoratchi'))",
+                (item["session_date"], item["branch"], item["supervisor_id"]),
+            ).fetchone()
+            changed = conn.execute(
+                "UPDATE nazoratchi_branch_sessions SET status = 'closed', evaluated_count = ?, total_count = ?, "
+                "closed_at = ? WHERE id = ? AND status = 'open'",
+                (counts["evaluated"], counts["total"], _now(), item["id"]),
+            )
+            closed_sessions += changed.rowcount
+        for supervisor_id, day in sorted({(r["supervisor_id"], r["session_date"]) for r in rows}):
+            counts = conn.execute(
+                "SELECT COUNT(*) AS total, COUNT(g.employee_id) AS evaluated FROM employees e "
+                "LEFT JOIN daily_evaluations g ON g.employee_id = e.user_id AND g.eval_date = ? "
+                "WHERE e.status = 'approved' AND e.user_id != ? "
+                "AND e.branch IN (SELECT branch FROM nazoratchi_branch_sessions "
+                "WHERE supervisor_id = ? AND session_date = ?) "
+                "AND (e.role_key IS NULL OR e.role_key NOT IN ('founder', 'nazoratchi'))",
+                (day, supervisor_id, supervisor_id, day),
+            ).fetchone()
+            changed = conn.execute(
+                "INSERT OR IGNORE INTO daily_closures "
+                "(supervisor_id, closure_date, evaluated_count, total_count, closed_at) VALUES (?, ?, ?, ?, ?)",
+                (supervisor_id, day, counts["evaluated"], counts["total"], _now()),
+            )
+            closed_days += changed.rowcount
+        conn.commit()
+        return {"days": closed_days, "sessions": closed_sessions}
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

@@ -47,7 +47,7 @@ def _employee_lines(item: nazoratchi_day.EmployeeStatus, review_date: str) -> li
     user_id = item.profile["user_id"]
 
     grade = discipline.get_daily_grade(user_id, review_date)
-    work = "qo'yilmagan" if grade is None else _signed_stars(grade["grade_points"])
+    work = "baholanmadi" if grade is None else _signed_stars(grade["grade_points"])
 
     time_bonus = time_bonus_repo.get_for_date(user_id, review_date)
     time_text = "tasdiqlanmagan" if time_bonus is None else "✅ berildi"

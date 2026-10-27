@@ -362,15 +362,15 @@ def test_get_closure_returns_recorded_counts():
     assert closure["total_count"] == 2
 
 
-def test_penalize_supervisor_for_late_close_deducts_bonus_bank():
-    assert discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40) is True
-    assert discipline.get_salary(999)["bonus_bank"] == -40
+def test_removed_late_close_penalty_never_deducts_bonus_bank():
+    assert discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40) is False
+    assert discipline.get_salary(999)["bonus_bank"] == 0
 
 
 def test_penalize_supervisor_for_late_close_same_day_is_idempotent():
     discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40)
     assert discipline.penalize_supervisor_for_late_close(999, "2026-03-01", 40) is False
-    assert discipline.get_salary(999)["bonus_bank"] == -40
+    assert discipline.get_salary(999)["bonus_bank"] == 0
 
 
 # ---------------------------------------------- kunlik baho: takror/tuzatish --

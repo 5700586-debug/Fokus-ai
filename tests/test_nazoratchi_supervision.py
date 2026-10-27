@@ -729,3 +729,10 @@ async def test_bootstrapped_founder_employee_shows_up_in_filiallar_flow(bot_dp, 
         for btn in row
     }
     assert any(f"nzr_emp:{FOUNDER_ID}" == data for data in buttons.values())
+
+
+@pytest.fixture(autouse=True)
+def _daytime_clock_for_non_boundary_tests(monkeypatch):
+    import company_time
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)

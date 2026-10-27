@@ -95,14 +95,14 @@ def _metric(capsys, handler):
     return dict(re.findall(r"(\w+)=([^ ]+)", line))
 
 
-async def test_grade_queries_drop_from_39_to_20(bot_dp, seeded, sql_trace, no_connection_during_telegram, capsys):
+async def test_grade_queries_drop_from_39_to_18(bot_dp, seeded, sql_trace, no_connection_during_telegram, capsys):
     main, bot = bot_dp
     await send_callback(main.dp, bot, SUP, f"nzr_grade:{EMP}:alo:20261026", SUP)
     metric = _metric(capsys, "grade_pick")
     assert metric["outcome"] == "ok"
-    expected, baseline = (24, 43) if db._DATABASE_URL else (20, 39)
+    expected, baseline = (22, 43) if db._DATABASE_URL else (18, 39)
     assert int(metric["db_queries"]) == expected < baseline  # PG also counts 4 adapter lastval() calls.
-    assert int(metric["pool_acquires"]) == 14 < 29
+    assert int(metric["pool_acquires"]) == 12 < 29
     assert sum("AS kind, session_date" in sql for sql, active in sql_trace if active) == 2
     assert not any("employee_contacts" in sql for sql, active in sql_trace if active)
     fsm = [sql for sql, _ in sql_trace if "FROM fsm_storage" in sql]
@@ -186,7 +186,7 @@ def test_day_snapshot_matches_legacy_and_query_count_is_constant(
     snapshot = nazoratchi_day.read_day_context(SUP, seeded)
     actual = nazoratchi_day.active_day(SUP, seeded, snapshot=snapshot)
     assert actual == expected
-    assert len(sql_trace) == 2  # work-day rule + one UNION; independent of days/branches.
+    assert len(sql_trace) == 1  # Fixed 06:00 boundary + one UNION; independent of days/branches.
     assert not sql_trace.opened
 
 

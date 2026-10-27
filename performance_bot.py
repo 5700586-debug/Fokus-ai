@@ -452,7 +452,11 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         rule_key, rule_value = parts[1].strip(), parts[2].strip()
-        rules_service.set_rule(rule_key, rule_value, message.from_user.id)
+        try:
+            rules_service.set_rule(rule_key, rule_value, message.from_user.id)
+        except ValueError as error:
+            await message.answer(str(error))
+            return
         await message.answer(f"✅ Qoida yangilandi: {rule_key} = {rule_value}")
 
     @dp.message(Command("listrules"))

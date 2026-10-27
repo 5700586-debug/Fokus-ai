@@ -8,6 +8,7 @@ Jarima va kunlik baho FAQAT ``bonus_bank``ga ta'sir qiladi
 audit sifatida qoladi).
 """
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -198,6 +199,19 @@ class EvaluationResult:
     old_grade_points: int | None = None
 
 
+def log_grade_event(employee_id: int, eval_date: str | None, stage: str, outcome: str,
+                    error_type: str = "none") -> None:
+    """No names, chat IDs, message bodies, points or exception text in diagnostics."""
+    try:
+        work_date = date.fromisoformat(eval_date).isoformat()
+    except (TypeError, ValueError):
+        work_date = "invalid"
+    evaluation_ref = hashlib.sha256(f"{employee_id}:{work_date}".encode()).hexdigest()[:16]
+    # Match HANDLER_METRICS: stdout remains visible even with the default WARNING log level.
+    print(f"GRADE_DIAGNOSTIC evaluation_ref={evaluation_ref} work_date={work_date} "
+          f"stage={stage} outcome={outcome} error_type={error_type}", flush=True)
+
+
 def record_daily_grade(
     employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
 ) -> EvaluationResult:
@@ -207,10 +221,16 @@ def record_daily_grade(
 
     grade_points = grade_points_map[grade_key]
     # Baho + tarix + bonus balansi + ledger — repository'da BITTA tranzaksiya (xato bo'lsa hammasi bekor).
-    saved = discipline_repo.save_daily_grade(
-        employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}",
-        session_branch=session_branch,
-    )
+    try:
+        saved = discipline_repo.save_daily_grade(
+            employee_id, supervisor_id, eval_date, grade_key, grade_points, f"Kunlik baho: {GRADE_LABELS[grade_key]}",
+            session_branch=session_branch,
+        )
+    except Exception as error:
+        log_grade_event(employee_id, eval_date, "save", "failed", type(error).__name__)
+        raise
+    change = "unchanged" if not saved["changed"] else "new" if saved["previous"] is None else "correction"
+    log_grade_event(employee_id, eval_date, "save", change)
     previous = saved["previous"]
     old_key = previous["grade_key"] if previous else None
     old_points = previous["grade_points"] if previous else None
@@ -290,28 +310,44 @@ async def notify_employee_of_grade(bot, employee_id: int, result: EvaluationResu
     """Baho DBga yozilgandan KEYIN xodimning shaxsiy chatiga xabar yuboradi. Faqat yuborish
     atrofidagi xato ushlanadi (baho/ledger bekor qilinmaydi); log'ga faqat operatsiya va xato turi."""
     if not result.changed:
+        log_grade_event(employee_id, result.eval_date, "notice", "skipped_unchanged")
         return NOTICE_UNCHANGED
+    log_grade_event(employee_id, result.eval_date, "notice", "started")
     profile = employees.get_profile(employee_id, include_contacts=False)
     if profile is None:
+        log_grade_event(employee_id, result.eval_date, "notice", "unknown_employee")
         return NOTICE_UNKNOWN_EMPLOYEE
 
     chat_id = employee_telegram_chat_id(employee_id, profile=profile)
     if chat_id is None:
+        log_grade_event(employee_id, result.eval_date, "notice", "not_linked")
         return NOTICE_NOT_LINKED
 
     try:
-        text = format_grade_notice(result, get_period_point_totals(employee_id, result.eval_date[:7]))
+        totals = get_period_point_totals(employee_id, result.eval_date[:7])
+    except Exception as error:  # noqa: BLE001
+        log_grade_event(employee_id, result.eval_date, "notice", "totals_failed", type(error).__name__)
+        return NOTICE_FAILED
+    try:
+        text = format_grade_notice(result, totals)
+    except Exception as error:  # noqa: BLE001
+        log_grade_event(employee_id, result.eval_date, "notice", "format_failed", type(error).__name__)
+        return NOTICE_FAILED
+    try:
+        log_grade_event(employee_id, result.eval_date, "notice", "telegram_attempt")
         await bot.send_message(chat_id, text, disable_notification=is_quiet_time(company_time.now()))
     except TelegramForbiddenError:
-        logger.error("grade_notice: yuborib bo'lmadi (bot bloklangan/ulanmagan)")
+        log_grade_event(employee_id, result.eval_date, "notice", "not_linked", "TelegramForbiddenError")
         return NOTICE_NOT_LINKED
     except TelegramBadRequest as error:
-        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
+        outcome = "not_linked" if "chat not found" in str(error).lower() else "failed"
+        log_grade_event(employee_id, result.eval_date, "notice", outcome, type(error).__name__)
         return NOTICE_NOT_LINKED if "chat not found" in str(error).lower() else NOTICE_FAILED
     except Exception as error:  # noqa: BLE001
-        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
+        log_grade_event(employee_id, result.eval_date, "notice", "failed", type(error).__name__)
         return NOTICE_FAILED
 
+    log_grade_event(employee_id, result.eval_date, "notice", "telegram_accepted")
     return NOTICE_SENT
 
 

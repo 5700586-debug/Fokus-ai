@@ -1180,8 +1180,10 @@ def register(dp: Dispatcher, openai_client) -> None:
         if grade_key not in discipline.GRADE_LABELS:
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
+        discipline.log_grade_event(user_id, work_date, "nzr_request", "received")
         profile = employees.get_profile(user_id, include_contacts=False)
         if profile is None:
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "unknown_employee")
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
@@ -1190,9 +1192,11 @@ def register(dp: Dispatcher, openai_client) -> None:
         snapshot = nazoratchi_day.read_day_context(callback.from_user.id, now)
         reason = nazoratchi_day.check_active(callback.from_user.id, work_date, now, snapshot=snapshot)
         if reason == "closed":
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "closed_day")
             await callback.answer("Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.", show_alert=True)
             return
         if reason is not None:
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "stale_day")
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
         if any(
@@ -1200,6 +1204,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             for item in snapshot["sessions"]
             if item["session_date"] == work_date
         ):
+            discipline.log_grade_event(user_id, work_date, "nzr_guard", "closed_branch")
             await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
             return
         # Birinchi muvaffaqiyatli baho shu nazoratchi+filial+ish kuni sessiyasini (bitta tranzaksiyada) ochadi: shunda
@@ -1210,17 +1215,21 @@ def register(dp: Dispatcher, openai_client) -> None:
             user_id, callback.from_user.id, work_date, grade_key,
             session_branch=branch if _branch_index(branch or "") is not None else None,
         )
-        outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
-        if outcome == discipline.NOTICE_UNCHANGED:
-            await callback.answer(discipline.grade_notice_reply(outcome))
-            return
+        try:
+            outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
+            if outcome == discipline.NOTICE_UNCHANGED:
+                await callback.answer(discipline.grade_notice_reply(outcome))
+                return
 
-        saved = f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}"
-        await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
+            saved = f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}"
+            await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
 
-        if callback.message:
-            text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
-            await callback.message.edit_text(text, reply_markup=keyboard)
+            if callback.message:
+                text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
+                await callback.message.edit_text(text, reply_markup=keyboard)
+        except Exception as error:
+            discipline.log_grade_event(user_id, work_date, "handler_after_save", "failed", type(error).__name__)
+            raise
 
     # --------------------------------------------------------- ball ayirish --
 

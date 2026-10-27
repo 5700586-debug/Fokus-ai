@@ -1,8 +1,30 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-19, manba: main HEAD `d824bfa`
+Tekshirilgan: 2026-10-27, manba: main HEAD `9e57520a0abd410563ec47802cfbce95ca4def60`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
+
+## Baho xabari diagnostikasi — DRAFT (2026-10-27, Asia/Tashkent)
+
+- PR #72 review yakuni (Sodiq taqdim etgan Job Summary, 2026-10-27): [DeepSeek run #10](https://github.com/5700586-debug/Fokus-ai/actions/runs/40562080339), kod head `16bac2e`: “Tekshirilgan fayllar: 5. Xato topilmadi.” Eski totals/format ogohlantirishi yo'qolgan. Diffda notify callback.answer'dan OLDIN — query-is-too-old birinchi notify'ni to'sa olmaydi. Sodiq tomondan PR tayyor; merge/deploy faqat Muhammadiy ruxsati bilan. Ushbu qayd faqat STATE'ni yangilaydi, kod o'zgarmaydi.
+
+- Base main `9e57520a0abd410563ec47802cfbce95ca4def60` (PR #71 MERGED). Render `dep-dbfpob3ncjis738hcl7g` shu commit bilan LIVE: 2026-10-26 23:31:36 +05; health 200, DB_STARTUP_PROBE OK. Deploy almashishidagi TelegramConflictError eski jarayon SIGTERM olgach takrorlanmadi. Quyidagi eski DRAFT bo'limlari tarixiy checkpoint, joriy merge holati emas.
+- Real post-deploy log: Yulduzlarim `total_ms=1157 db_queries=7 db_ms=716`, avvalgi ikki namuna 1508/1679 ms, 11 so'rov. Baho tuzatish `total_ms=3897 db_queries=23 db_ms=3306`; avvalgi bitta namuna 7364 ms/44 so'rov, ammo yangi baho va tuzatish bir xil ish hajmi emas — qat'iy foizli tezlashuv deb olinmaydi.
+- Founder yangi ish bahosining birinchi xabari kelmaganini bildirdi; skrinshotlarda faol ish kuni 17.10.2026, 3->2 tuzatish xabari 23:51, vaqt bonusi undan KEYIN 23:58 da tasdiqlangan. Demak xabar vaqt bonusini kutmagan. Birinchi xabar kelmaganining ildiz sababi ANIQLANMAGAN; eski logdagi 7 so'rovga qarab takroriy baho deb hukm qilish yetarli emas.
+- Branch `fix/grade-notice-diagnostics`: faqat diagnostika, biznes oqimi va matnlar o'zgarmaydi. Ikkala handlerda kun/filial guardi va request; umumiy service'da save new/correction/unchanged/failed, notice started/telegram_attempt/telegram_accepted/skipped/failed natijalari stdout'da `GRADE_DIAGNOSTIC`. Ism, raw user/chat ID, baho/maosh, xabar va exception matni yozilmaydi. evaluation_ref = xodim+ish kuni hashining 16 belgisi; tarixiy correlation uchun, maxfiy anonimlashtirish kafolati emas. `telegram_accepted` Telegram API qabul qilganini bildiradi, xodim o'qiganini emas. Logger INFO root WARNING'da yashirinishi sabab mavjud HANDLER_METRICS kabi stdout ishlatiladi.
+- Tasdiqlangan mavjud cheklov: save muvaffaqiyatli, birinchi yuborish xato bo'lsa baho saqlanadi; aynan shu bahoni qayta bosish notice'ni qayta yubormaydi (`changed=False`). Bu reproduksiya avtomatik testda bor, lekin aynan Founder voqeasining sababi degan dalil yo'q. Ushbu diagnostika PR'i avtomatik retry/outbox/qo'shimcha xabar/DB so'rovi qo'shmaydi, tarixni qayta yozmaydi.
+- Targeted Linux SQLite + Telegram mock: yangi diagnostika fayli **19 PASS**; oldingi bot flow (54) va SQL/connection regressiya (16) **70 PASS**. Birinchi yangi va 0 baho vaqt bonusisiz yuborilishi, ikki entrypoint, takror/tuzatish, network/blocked/bad-request va failure->repeat, stale-day guard, profil/chat yo'qligi, totals/save xatosi, maxfiy matn chiqmasligi va default log level tekshirildi. Hammasi sintetik, production DB/Telegram/OpenAI ishlatilmadi. git diff --check PASS. Mavjud ephemeral PostgreSQL workflow'ga yangi test fayli qo'shildi; haqiqiy CI natijasi PR tavsifida qayd etiladi. Full suite yo'q.
+- Keyingi qadam: DeepSeek diff review va CI natijalarini o'qish; draft PR review. Merge/deploy YO'Q. DeepSeek model/token/workflow o'zgarmaydi, slowness qayta ishlatilmaydi. Diagnostika deploy qilinmaguncha yangi loglar productionda paydo bo'lmaydi; foydalanuvchidan sinov bahosini takror qo'yish talab qilinmaydi. Oyligim, e'tirof/qo'shimcha ish navbati saqlangan.
+
+### PR #72 senior review tuzatishlari (2026-10-27)
+
+- Shu draft/branch, review base `52991192a1d5c578d78071b27e9e384233ae3eda`; yangi PR, merge/deploy yo'q. Oldingi checkpointdagi 19 yangi test endi 32 ta diagnostika testiga kengaydi.
+- `_bos` va `_nzr` (yangi 3 ball VA 0 baho): `_setup`dan keyin nazoratchi+filial+ish kuniga sessiya 0 va baho yo'qligi DB assertion bilan isbotlanadi; birinchi save'dan keyin bitta open sessiya, saqlangan baho va bitta notice/telegram_accepted. Vaqt bonusi 0 yozuv — mustaqil.
+- Har ikki handlerda try/except faqat `record_daily_grade` muvaffaqiyatli qaytgandan KEYIN boshlanadi; guard va save tashqarida. Tashqariga chiqadigan xatoda `handler_after_save failed error_type=...`, aynan shu exception qayta raise qilinadi. Notify ichida ushlangan xatolar NOTICE_FAILED/NOT_LINKED qaytaradi, shuning uchun handler qayta loglamaydi; takroriy eski `grade_notice` logger.error ham olib tashlandi. Bitta diagnostik error yozuvi assertion bilan tekshirildi.
+- `get_period_point_totals` -> log totals_failed, `format_grade_notice` -> format_failed; har ikkalasi avvalgidek NOTICE_FAILED qaytaradi. Telegram yuborishga urinish bo'lmaydi. Foydalanuvchi javobi/matni, SQL/write yo'li, retry/outbox o'zgarmagan.
+- Muhim tartib: ikkala handlerda callback.answer NOTIFYDAN KEYIN. Testda query-is-too-old xatosidan oldin telegram_accepted va bitta notice bor; shu callback xatosi birinchi notice yuborilishini to'sadi degan gumon kodga mos kelmaydi. Notify kirishidagi xato esa handler_after_save orqali ko'rinadi. Reraise testi uchun faqat testdagi umumiy dp.errors catch olib qo'yiladi; production error-handler o'zgarmaydi.
+- Linux SQLite + mock Telegram: **102 PASS** = 32 diagnostika + 54 discipline_bot_flows + 16 db_connection_reuse. Jumladan guard/save tashqaridaligi, save saqlanib qolishi, exception identity/reraise, totals/format/network/blocked/badrequest uchun error yozuvi takrorlanmasligi. git diff --check PASS. Oxirgi head haqiqiy PostgreSQL/DeepSeek natijalari PR tavsifida qayd etiladi; AI Summary o'qilmasdan eski warning yo'qoldi deb yozilmaydi.
+- DEPLOY FAQAT MUHAMMADIY RUXSATI BILAN. Deploydan keyingi navbatdagi ODDIY real bahoda Render GRADE_DIAGNOSTIC qatorlari o'qiladi; ataylab sinov bahosi qo'yilmaydi. Birinchi xabar kelmagan asl tarixiy hodisaning sababi hali tasdiqlanmagan.
 
 ## Tezlik: grade_pick va Yulduzlarim — DRAFT tayyorlash (2026-10-26)
 

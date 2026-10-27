@@ -1,8 +1,20 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-27, manba: main HEAD `9e57520a0abd410563ec47802cfbce95ca4def60`
+Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf12c8e`
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
+
+## PR-A: 06:00 ish kuni va baholanmagan bilan yopish — DRAFT (2026-10-28)
+
+- Branch `fix/day-auto-close`, base main `6011285c1d86d644a89997949bc7c5e7fdf12c8e` (PR #72 MERGED, oxirgi tekshiruvdagi Render deploy `dep-dbgf6vmc6qcc73fubrug` LIVE). Bu vazifada main/Render/production DB o'zgartirilmadi, real Telegram sinovi yo'q. Quyidagi eski DRAFT bo'limlari tarixiy checkpoint.
+- Tasdiqlangan PR-A: ish kuni FAQAT Asia/Tashkent 06:00 bilan aniqlanadi. 00:00–05:59 oldingi sana, 06:00 dan yangi sana; eski ochiq sessiyalar sanani orqaga tortmaydi, eski callback rad etiladi. Eski bos.work_day_start/deadline qiymatlari bu yangi qat'iy siyosatni o'zgartirmaydi.
+- `/kunniyop` mavjud filial oqimi orqali baholanmagan/grafigi yo'q xodimlar bilan ham yopadi. Yopilgan filial hisobotida ular “baholanmadi”; daily_evaluations qatori yo'qligi (0 bahodan farqli) saqlanadi. Barcha qamrov filiallari yopilganda kun yopiladi. Qo'lda erta yopilgan kun qayta ochilmaydi; keyingi 06:00 ni kutadi.
+- Mavjud scheduler job'i 06:00 cron (Asia/Tashkent) + startup'da darhol catch-up. Sessiyasi bor, muddati o'tgan post-cutover kunlar yopiladi; nazoratchi ishlamagan kunlarga sun'iy baho/sessiya yaratilmaydi. Yopishning o'zi baho, balans, ledger yoki audit yozmaydi, Telegram kunlik xabari yo'q. Eski avtomatik minus chaqiruvi o'chirildi; kompatibil service kirishi ham no-op, eski audit/ledger o'chirilmaydi/qaytarilmaydi. Boshqa nizom minuslari o'zgarmaydi.
+- Eski kunlar himoyasi: birinchi start'da mavjud `rules` jadvalida ichki `bos.auto_close_start_date` bir marta saqlanadi (yangi jadval/ustun/xodim maydoni yo'q). Restart marker'ni ko'chirmaydi; undan oldingi kunlar tick tomonidan yopilmaydi. Marker listrules'da ko'rinmaydi va setrule bilan o'zgartirilmaydi. Bu boshlanishdan oldingi eski sessiyalarni yangi tartibdan ajratish uchun zarur texnik metadata.
+- Founder `/eskikunlarniyop`: faqat shaxsiy chatda preview, DB/FSM'ga yozuvsiz; ko'rsatilgan sanalar/filiallar snapshoti + bir martalik xotira tokeni. Tasdiq yana huquq/chat/message/token va snapshot'ni tekshiradi. Yangi ko'rik eskisini almashtiradi, restartdan keyin ko'rikni qayta ochish kerak. O'zgargan/eski/begona/takroriy tasdiq yozmaydi. Bulk yopish bitta tranzaksiya; mavjud rules marker row'i parallel tick/tasdiqni seriallashtiradi. Haqiqiy SQL xatosida sessiyalar va kunlar to'liq rollback; tarix/baho/salary/ledger o'zgarmaydi.
+- Targeted Linux SQLite + Telegram mock: **390 PASS**, 18 tegishli fayl, jumladan 23 yangi PR-A testi. Chegara/tun/oy-yil almashishi, restart/misfire, parallel/idempotent yopish, haqiqiy SQL trigger xatosida rollback, preview read-only/stale/owner/restart himoyasi, 0 vs baholanmadi, oddiy va eski callback, bonus/fiks/ledger/payroll regressiyalari. Eski siyosatga bog'liq testlar yangi tasdiqlangan qoidaga moslandi; boundaryga aloqasiz bot testlarining soati kunduzga mahkamlandi (tungi flake yo'q), alohida boundary testlari bor. git diff --check PASS. Full suite yo'q. Haqiqiy ephemeral PostgreSQL CI natijasi PR tavsifida yoziladi.
+- Qolgan cheklov: ko'p worker bilan grading/auto-close o'rtasidagi alohida poyga tekshirilmagan (joriy production bitta bot jarayoni); parallel yopish transactionlari sinovdan o'tgan. Yopishdagi employee count mavjud joriy profillardan olinadi; eski employee roster snapshoti ixtiro qilinmagan. Tarixiy yetishmagan baholar taxmin bilan tiklanmaydi.
+- Keyingi: draft review va CI. Merge/deploy faqat Muhammadiy ruxsati bilan; shundan so'ng Founder haqiqiy eski-kunlar preview'ini ko'rib tasdiqlaydi. PR-B (baholanmadi kunni bonusdan chiqarish + oyiga bitta nazoratchi qatori) hozir YO'Q; bonus/fiks formulalari va oylik hisobotga tegilmadi. Production sinov bahosi qo'yilmaydi.
 
 ## Baho xabari diagnostikasi — DRAFT (2026-10-27, Asia/Tashkent)
 

@@ -569,10 +569,8 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 
 
 def penalize_supervisor_for_late_close(supervisor_id: int, audit_date: str, penalty_amount: int) -> bool:
-    """``audit_date`` — ISH KUNI (work_date). Audit + balans + ledger bitta tranzaksiyada, bir ish kuni uchun bir marta."""
-    return discipline_repo.record_supervisor_audit_with_penalty(
-        supervisor_id, audit_date, "day_not_closed", penalty_amount
-    )
+    """Compatibility only: Muhammadiy removed the late-close penalty. Historical audits stay intact."""
+    return False
 
 
 # ------------------------------------------------ nizom katalogi: o'qish, tanlash, iqtibos --

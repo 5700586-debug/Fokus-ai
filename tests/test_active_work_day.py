@@ -100,19 +100,19 @@ def _text(sent) -> str:
 # ----------------------------------------------------------- faol kun --
 
 
-async def test_open_day_is_continued_next_calendar_day_and_survives_midnight_and_restart(bot_dp, monkeypatch):
+async def test_old_open_day_continues_only_until_06_then_current_day_wins(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup_two_branches()
-    _pin(monkeypatch, D, 23, 50)
     nazoratchi_day.open_session(SUP, A, D)
-
-    for iso, hour, minute in ((D, 23, 59), (_shift(D, 1), 0, 10), (_shift(D, 1), 9, 0)):  # yarim tun va "restart" (yangi hisob)
+    for iso, hour, minute in ((D, 23, 59), (_shift(D, 1), 0, 10), (_shift(D, 1), 5, 59)):
         _pin(monkeypatch, iso, hour, minute)
-        day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
+        day = nazoratchi_day.active_day(SUP, company_time.now())
         assert (day.work_date, day.closed) == (D, False)
-
+    _pin(monkeypatch, _shift(D, 1), 6)
+    day = nazoratchi_day.active_day(SUP, company_time.now())
+    assert day.work_date == _shift(D, 1) and not day.resumed
     sent = await send(main.dp, bot, SUP, text="/baholash")
-    assert f"📅 Ish kuni: 10.03.2026" in sent[0].text and "Avval shu ish kunini yakunlaymiz." in sent[0].text
+    assert "11.03.2026" in sent[0].text and "Avval shu ish kunini" not in sent[0].text
 
 
 async def test_entering_alone_never_closes_penalizes_or_creates_sessions(bot_dp, monkeypatch):
@@ -129,7 +129,7 @@ async def test_entering_alone_never_closes_penalizes_or_creates_sessions(bot_dp,
     assert discipline.get_salary(SUP)["bonus_bank"] == 0
 
 
-async def test_one_closed_branch_does_not_close_the_day_or_open_the_next(bot_dp, monkeypatch):
+async def test_partial_old_day_stays_in_history_without_blocking_the_new_day(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup_two_branches()
     _pin(monkeypatch, _shift(D, 1))
@@ -142,9 +142,9 @@ async def test_one_closed_branch_does_not_close_the_day_or_open_the_next(bot_dp,
 
     assert _closures() == 0
     day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
-    assert (day.work_date, day.resumed) == (D, True)  # keyingi kun ochilmadi
+    assert (day.work_date, day.resumed) == (_shift(D, 1), False)  # Old partial day no longer blocks today.
     sent = await send(main.dp, bot, SUP, text="/baholash")
-    assert [b.text for row in sent[0].reply_markup.inline_keyboard for b in row][0].startswith("✅")  # A yopilgan belgisi
+    assert not [b.text for row in sent[0].reply_markup.inline_keyboard for b in row][0].startswith("✅")  # Today A is new.
 
 
 async def test_closing_all_coverage_branches_closes_day_then_next_work_date_opens_without_inventing_days(bot_dp, monkeypatch):
@@ -158,7 +158,7 @@ async def test_closing_all_coverage_branches_closes_day_then_next_work_date_open
     future = _shift(today, 2)
     nazoratchi_day.open_session(SUP, A, future)  # kelajak sanasi e'tiborsiz qoladi
     nazoratchi_day.open_session(SUP, A, D)
-    assert nazoratchi_day.active_day(SUP, discipline_bot._now_company()).work_date == D
+    assert nazoratchi_day.active_day(SUP, discipline_bot._now_company()).work_date == today
 
     assert nazoratchi_day.close_session(SUP, A, D).closed and nazoratchi_day.close_session(SUP, B, D).closed
 
@@ -226,12 +226,12 @@ async def test_stale_foreign_future_and_duplicate_callbacks_write_nothing(bot_dp
     main, bot = bot_dp
     _setup_two_branches()
     monkeypatch.setitem(roles._USERS, SUP2, {"role": "nazoratchi", "added_by": FOUNDER_ID, "added_at": "2026-01-01T00:00:00+00:00"})
-    _pin(monkeypatch, _shift(D, 1))
+    _pin(monkeypatch, D)
     _work(111, D)
     nazoratchi_day.open_session(SUP, A, D)
     grade = f"bos:grade:111:{discipline.GRADE_NORMA}"
 
-    for caller, ymd in ((SUP, _ymd(_shift(D, 1))), (SUP, _ymd(_shift(D, 5))), (SUP2, _ymd(D))):  # eskirgan/kelajak/begona
+    for caller, ymd in ((SUP, _ymd(_shift(D, 1))), (SUP, _ymd(_shift(D, 5))), (SUP2, _ymd(_shift(D, -1)))):  # eskirgan/kelajak/begona
         sent = await send_callback(main.dp, bot, caller, data=f"{grade}:{ymd}", target_chat_id=caller)
         assert "Bu tugma eskirgan" in _text(sent) or "yopilgan" in _text(sent)
     assert discipline.get_daily_grade(111, D) is None and discipline.get_daily_grade(111, _shift(D, 1)) is None
@@ -259,20 +259,17 @@ async def test_closed_branch_session_does_not_accept_new_grades(bot_dp, monkeypa
     assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_NORMA
 
 
-async def test_blockers_are_named_and_never_bypassed(bot_dp, monkeypatch):
+async def test_ungraded_people_are_named_but_do_not_block_close(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup_two_branches()
     _employee(113, A, "Nograf")
-    _pin(monkeypatch, _shift(D, 1))
-    _work(111, D)  # ishda, baholanmagan; 113 — grafik yo'q
-    nazoratchi_day.open_session(SUP, A, D)
-
+    _pin(monkeypatch, D)
+    _work(111, D)
     sent = await send_callback(main.dp, bot, SUP, data=f"bos:close:0:{_ymd(D)}", target_chat_id=SUP)
-
     text = _text(sent)
-    assert "Yopib bo'lmaydi" in text and "Alisher" in text and "Nograf" in text and "10.03.2026" in text
-    assert discipline.get_daily_grade(111, D) is None and discipline.get_daily_grade(113, D) is None  # avtomatik baho yo'q
-    assert _closures() == 0 and discipline_repo.get_branch_session(SUP, A, D)["status"] == "open"
+    assert "nazorati yopildi" in text and "Alisher" in text and "Nograf" in text and "baholanmadi" in text
+    assert discipline.get_daily_grade(111, D) is None and discipline.get_daily_grade(113, D) is None
+    assert _closures() == 0 and discipline_repo.get_branch_session(SUP, A, D)["status"] == "closed"
 
 
 # ------------------------------------------------------- PR #54 bilan uyg'unlik --
@@ -299,7 +296,7 @@ async def test_resumed_open_day_window_does_not_cause_extra_penalty_with_the_aut
         audits = [row["audit_date"] for row in conn.execute("SELECT audit_date FROM supervisor_audit").fetchall()]
     finally:
         conn.close()
-    assert audits == [_shift(D, 1)] and discipline.get_salary(SUP)["bonus_bank"] == -40
+    assert audits == [] and discipline.get_salary(SUP)["bonus_bank"] == 0
 
 
 # ------------------------------------- yopilgan tarixiy kun qayta ochilmaydi --
@@ -350,7 +347,7 @@ async def test_new_branch_or_employee_never_reopens_a_closed_historical_or_curre
     assert _snapshot() == before  # closure, baho va sessiyalar o'zgarmagan, soxta closure yo'q
 
 
-async def test_oldest_really_open_day_is_chosen_after_closed_history(bot_dp, monkeypatch):
+async def test_old_open_days_do_not_override_current_day_after_closed_history(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup_two_branches()
     d1, d2, d3 = D, _shift(D, 1), _shift(D, 2)
@@ -363,7 +360,7 @@ async def test_oldest_really_open_day_is_chosen_after_closed_history(bot_dp, mon
 
     day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
 
-    assert (day.work_date, day.resumed) == (d2, True)  # d1 yopilgan (qayta ochilmaydi), eng eski haqiqiy ochiq kun d2
+    assert (day.work_date, day.resumed) == (_shift(D, 4), False)  # Old history is kept without hijacking today.
 
 
 async def test_unclosed_day_still_requires_every_coverage_branch(bot_dp, monkeypatch):
@@ -511,14 +508,14 @@ async def test_first_card_grade_opens_session_so_day_survives_midnight_and_resta
     assert _sessions_of(A, D) == ["open"] and _sessions_of(B, D) == []
     _pin(monkeypatch, _shift(D, 1), 0, 20)  # yarim tundan keyin; "restart" — holat faqat bazadan o'qiladi
     day = nazoratchi_day.active_day(SUP, discipline_bot._now_company())
-    assert (day.work_date, day.resumed) == (D, True)
+    assert (day.work_date, day.resumed) == (D, False)
 
     # D kartasi tugmasi yarim tundan keyin ham D ga yozadi (D faol)
     await send_callback(main.dp, bot, SUP, data=f"nzr_grade:111:{discipline.GRADE_ALO}:{_ymd(D)}", target_chat_id=SUP)
     assert discipline.get_daily_grade(111, D)["grade_key"] == discipline.GRADE_ALO
     assert discipline.get_daily_grade(111, _shift(D, 1)) is None
     sent = await send(main.dp, bot, SUP, text="/baholash")
-    assert "📅 Ish kuni: 10.03.2026" in sent[0].text and "Avval shu ish kunini yakunlaymiz." in sent[0].text
+    assert "📅 Ish kuni: 10.03.2026" in sent[0].text and "Avval shu ish kunini yakunlaymiz." not in sent[0].text
 
 
 async def test_existing_repeated_and_parallel_grading_never_duplicate_or_reopen_the_session(bot_dp, monkeypatch):

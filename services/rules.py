@@ -201,8 +201,10 @@ def get_fixed_shift_template(mode: str) -> tuple[str, str] | None:
 
 
 def set_rule(rule_key: str, rule_value: str, updated_by: int) -> None:
+    if rule_key == "bos.auto_close_start_date":
+        raise ValueError("Bu ichki belgi /setrule orqali o'zgartirilmaydi.")
     performance_repo.set_rule(rule_key, rule_value, updated_by)
 
 
 def list_rules() -> dict[str, str]:
-    return performance_repo.list_rules()
+    return {key: value for key, value in performance_repo.list_rules().items() if key != "bos.auto_close_start_date"}

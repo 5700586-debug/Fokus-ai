@@ -124,7 +124,7 @@ async def test_employee_statuses_are_shown_with_emoji(bot_dp):
 # ------------------------------------------------------------ 4. sessiyani yopish --
 
 
-async def test_close_blocked_by_pending_and_no_schedule_but_not_by_off(bot_dp):
+async def test_close_allows_pending_and_no_schedule_and_keeps_day_off(bot_dp):
     main, bot = bot_dp
     _supervisor()
     _employee(111, BRANCH_A, "Pending")
@@ -133,13 +133,12 @@ async def test_close_blocked_by_pending_and_no_schedule_but_not_by_off(bot_dp):
     today = _today()
     attendance_service.set_scheduled_work_shift(111, today, "09:00", "18:00", "test")
     attendance_service.set_scheduled_day_off(113, today, "test")
-
     sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
-    text = sent[0].text
-    assert "Yopib bo'lmaydi. Hali baholanmaganlar:" in text
-    assert "Pending T" in text and "Nograf T" in text
-    assert "Dam T" not in text  # damdagi xodim yopishga to'sqinlik qilmaydi
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).closed is False
+    text = _joined(sent)
+    assert "nazorati yopildi" in text and "baholanmadi" in text
+    assert "Pending T" in text and "Nograf T" in text and "Damda: Dam T" in text
+    assert discipline.get_daily_grade(111, today) is None and discipline.get_daily_grade(114, today) is None
+    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).already_closed
 
 
 async def test_close_succeeds_after_all_required_graded_and_session_closed(bot_dp):
@@ -171,83 +170,46 @@ async def test_close_succeeds_after_all_required_graded_and_session_closed(bot_d
 
 
 async def test_each_branch_session_is_separate(bot_dp):
-    main, bot = bot_dp
     _supervisor()
     _employee(111, BRANCH_A, "Pending")
     _employee(222, BRANCH_B, "Botir")
     today = _today()
-    attendance_service.set_scheduled_work_shift(111, today, "09:00", "18:00", "test")
-    attendance_service.set_scheduled_work_shift(222, today, "09:00", "18:00", "test")
-    discipline.record_daily_grade(222, SUPERVISOR, today, discipline.GRADE_NORMA)
-    nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, today)  # nazoratchi A filialini ochgan (hali yopmagan)
-
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_B, today).closed is True  # B yopildi
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).closed is False  # A hali baholanmagan
-    assert discipline.get_closure(SUPERVISOR, today) is None  # A ochiq — butun kun yopilmadi
-
-    discipline.record_daily_grade(111, SUPERVISOR, today, discipline.GRADE_NORMA)
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).closed is True
-    assert discipline.get_closure(SUPERVISOR, today) is not None  # hamma ochilgan sessiya yopildi
+    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_B, today).closed
+    assert discipline.get_closure(SUPERVISOR, today) is None
+    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).closed
+    assert discipline.get_closure(SUPERVISOR, today) is not None
+    assert discipline.get_daily_grade(111, today) is None
 
 
 # ------------------------------------------------------ 5/6. eski yopilmagan sessiya --
 
 
-async def test_previous_unclosed_day_is_continued_automatically_before_a_new_day(bot_dp):
+async def test_previous_unclosed_day_does_not_capture_current_day(bot_dp):
     main, bot = bot_dp
     _supervisor()
     _employee(111, BRANCH_A, "Pending")
     yesterday = (company_time.today() - timedelta(days=1)).isoformat()
-    attendance_service.set_scheduled_work_shift(111, yesterday, "09:00", "18:00", "test")
     nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, yesterday)
-
-    sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
-    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text and "Avval shu ish kunini yakunlaymiz." in sent[0].text
-    callbacks = [b.callback_data for row in sent[0].reply_markup.inline_keyboard for b in row]
-    assert f"bos:br:0:{_ymd(yesterday)}" in callbacks and not any(_ymd(_today()) in c for c in callbacks)  # sana tanlash yo'q
-
-    # "Filialni tanlash" ham faol (eski) kunga qaytaradi — yangi kun ochilmaydi.
-    sent = await send_callback(main.dp, bot, SUPERVISOR, data="bos:today", target_chat_id=SUPERVISOR)
-    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text
-    from repositories import discipline as discipline_repo
-
-    assert discipline_repo.get_branch_session(SUPERVISOR, BRANCH_A, yesterday)["status"] == "open"
-
-    # Bugungi sana tugmalari (eskirgan/boshqa kun) hech narsa yozmaydi.
-    sent = await send_callback(
-        main.dp, bot, SUPERVISOR, data=f"bos:grade:111:{discipline.GRADE_NORMA}:{_ymd(_today())}", target_chat_id=SUPERVISOR
-    )
-    assert "Bu tugma eskirgan" in sent[0].text
-    assert discipline.get_daily_grade(111, _today()) is None and discipline.get_daily_grade(111, yesterday) is None
-
-    sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:br:0:{_ymd(yesterday)}", target_chat_id=SUPERVISOR)
-    assert f"📅 Ish kuni: {_display(yesterday)}" in sent[0].text and "Baholanmagan: 1" in sent[0].text
-    assert "🔵 Pending T — baholanmagan" in sent[0].text
-    await send_callback(
-        main.dp, bot, SUPERVISOR, data=f"bos:grade:111:{discipline.GRADE_NORMA}:{_ymd(yesterday)}", target_chat_id=SUPERVISOR
-    )
-    sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd(yesterday)}", target_chat_id=SUPERVISOR)
-    assert "nazorati yopildi" in sent[0].text and "ish kuni yopildi" in sent[0].text
-    assert discipline.get_daily_grade(111, yesterday) is not None and discipline.get_daily_grade(111, _today()) is None
-
-    # Faqat yopilgach keyingi (joriy) ish kuni chiqadi.
     sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
     assert f"📅 Ish kuni: {_display(_today())}" in sent[0].text and "Avval shu ish kunini" not in sent[0].text
+    old = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:grade:111:alo:{_ymd(yesterday)}", target_chat_id=SUPERVISOR)
+    assert "eskirgan" in _joined(old)
+    await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:grade:111:alo:{_ymd()}", target_chat_id=SUPERVISOR)
+    assert discipline.get_daily_grade(111, _today()) is not None and discipline.get_daily_grade(111, yesterday) is None
+    from repositories import discipline as discipline_repo
+    assert discipline_repo.get_branch_session(SUPERVISOR, BRANCH_A, yesterday)["status"] == "open"
 
 
-async def test_unclosed_days_of_several_branches_use_the_oldest_day_and_one_work_date(bot_dp):
+async def test_several_old_open_branches_do_not_change_the_current_work_date(bot_dp):
     main, bot = bot_dp
     _supervisor()
     old, newer = ((company_time.today() - timedelta(days=n)).isoformat() for n in (2, 1))
     nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, newer)
     nazoratchi_day.open_session(SUPERVISOR, BRANCH_A, old)
     nazoratchi_day.open_session(SUPERVISOR, BRANCH_B, old)
-
-    sent = await send(main.dp, bot, SUPERVISOR, text="/kunniyop")
-
-    assert f"📅 Ish kuni: {_display(old)}" in sent[0].text
-    callbacks = [b.callback_data for row in sent[0].reply_markup.inline_keyboard for b in row]
-    assert callbacks == [f"bos:close:{i}:{_ymd(old)}" for i in range(len(RECRUITING_BRANCH_NAMES))]
+    sent = await send(main.dp, bot, SUPERVISOR, text="/baholash")
+    assert f"📅 Ish kuni: {_display(_today())}" in sent[0].text
+    assert "Avval shu ish kunini" not in sent[0].text
 
 
 # ---------------------------------------------------- 7. oylik ball (/score) --
@@ -340,3 +302,10 @@ async def test_branch_head_gets_only_own_branch_shortage_with_full_card_nazoratc
     assert _has_money(_texts_for(bot, 777)[0])  # o'z filiali rahbari to'liq ko'radi
     assert _texts_for(bot, 778) == []  # boshqa filial rahbari ko'rmaydi
     assert _texts_for(bot, NAZORATCHI_ID) == []  # nazoratchi ko'rmaydi
+
+
+@pytest.fixture(autouse=True)
+def _daytime_clock_for_non_boundary_tests(monkeypatch):
+    # Boundary/night tests explicitly override this; ordinary callbacks use one stable work day.
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)

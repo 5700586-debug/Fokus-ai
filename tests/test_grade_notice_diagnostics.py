@@ -261,3 +261,10 @@ async def test_guard_and_save_exceptions_are_outside_post_save_handler(bot_dp, m
         failures = [e for e in events if e["error_type"] != "none"]
         assert len(failures) == 1 and failures[0]["stage"] == "save"
     assert not _notices(bot.sent) and _count("daily_evaluations") == 0
+
+
+@pytest.fixture(autouse=True)
+def _daytime_clock_for_non_boundary_tests(monkeypatch):
+    # Boundary/night tests explicitly override this; ordinary callbacks use one stable work day.
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)

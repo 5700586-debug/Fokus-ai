@@ -7,14 +7,14 @@
   [A'lo-3] yoki jarima (-10/-20/-30) -> jarimada nizom raqami majburiy
   so'raladi va bazadagi nizom bilan solishtiriladi.
 - Kunlik ("Bugungi Poyga") va oylik ("Oylik Turnir") reyting dashboardlari.
-- Kun o'z vaqtida yopilmasa, ``start_scheduler`` orqali nazoratchidan
-  avtomatik -40 ball audit qilinadi (qarang: ``services/rules.py``).
+- Ish kuni 06:00 da minus va kunlik xabarsiz avtomatik yopiladi.
 - Xodim jarimaga e'tiroz bildirsa, AI dalil/nizomni solishtirib Founder'ga
   qaror taklifi tayyorlaydi — yakuniy qarorni doim Founder qabul qiladi.
 """
 
 import asyncio
 import logging
+import secrets
 from datetime import date, datetime, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ _MANAGEMENT_ROLES = {"founder", "nazoratchi"}
 # yozuvini qayta ishlashi mumkin.
 _PENDING_PENALTY_APPLICATIONS: set[int] = set()
 _PENDING_CATALOG_IMPORTS: set[int] = set()
+_LEGACY_CLOSE_PREVIEWS: dict[tuple[int, int], dict] = {}
 _LISTNIZOM_SINGLE_LIMIT = 3800
 _LISTNIZOM_PAGE_SIZE = 8
 
@@ -843,7 +844,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                 ]]),
             )
         else:
-            statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=callback.from_user.id)
+            statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=callback.from_user.id, closed=True)
             chunks = close_report.build_close_report(branch, review_date, statuses, result.evaluated, result.total)
             day_closed = nazoratchi_day.day_fully_closed(callback.from_user.id, review_date)
             footer = (
@@ -886,6 +887,71 @@ def register(dp: Dispatcher, openai_client) -> None:
         board = discipline.get_monthly_leaderboard(today.strftime("%Y-%m"))
         await message.answer(
             _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")
+        )
+
+    @dp.message(Command("eskikunlarniyop"))
+    async def legacy_day_close_preview(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        if message.chat.type != "private":
+            await message.answer("Bu amalni botning shaxsiy chatida oching.")
+            return
+        key = (message.from_user.id, message.chat.id)
+        _LEGACY_CLOSE_PREVIEWS.pop(key, None)
+        try:
+            preview = await asyncio.to_thread(nazoratchi_day.preview_legacy_close, _now_company())
+        except ValueError as error:
+            await message.answer(str(error))
+            return
+        if not preview["rows"]:
+            await message.answer("Yopilmagan eski kunlar yo'q.")
+            return
+        # A short one-use token is kept only in memory: preview does not write to DB/FSM.
+        token = secrets.token_hex(8)
+        pairs = sorted({(row["session_date"], row["branch"]) for row in preview["rows"]})
+        text = "🔎 Eski kunlarni yopish ko'rigi (hech narsa yozilmadi):\n" + "\n".join(
+            f"• {_display_date(day)} — {branch}" for day, branch in pairs
+        )
+        text += "\n\nBaholar va tarix saqlanadi. Baholanmaganlarga baho yoki minus yozilmaydi."
+        # Chunk without losing any reviewed date/branch; confirmation stays on the final chunk.
+        lines, chunks, current = text.splitlines(), [], ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 3500:
+                chunks.append(current)
+                current = ""
+            current += ("\n" if current else "") + line
+        chunks.append(current)
+        for chunk in chunks[:-1]:
+            await message.answer(chunk)
+        sent = await message.answer(chunks[-1], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Eski kunlarni yopish", callback_data=f"bos:legacy_close:{token}")
+        ]]))
+        _LEGACY_CLOSE_PREVIEWS[key] = {"token": token, "version": preview["version"], "message_id": sent.message_id}
+
+    @dp.callback_query(F.data.startswith("bos:legacy_close:"))
+    async def legacy_day_close_confirm(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        if callback.message is None or callback.message.chat.type != "private":
+            await callback.answer("Shaxsiy chatda qayta oching.", show_alert=True)
+            return
+        key = (callback.from_user.id, callback.message.chat.id)
+        preview = _LEGACY_CLOSE_PREVIEWS.get(key)
+        token = callback.data.split(":", 2)[2]
+        if (not preview or not secrets.compare_digest(token, preview["token"])
+                or callback.message.message_id != preview["message_id"]):
+            await callback.answer("Ko'rik eskirgan. /eskikunlarniyop orqali qayta oching.", show_alert=True)
+            return
+        _LEGACY_CLOSE_PREVIEWS.pop(key)
+        await callback.answer()
+        try:
+            result = await asyncio.to_thread(nazoratchi_day.confirm_legacy_close, _now_company(), preview["version"])
+        except ValueError as error:
+            await callback.message.edit_text(str(error), reply_markup=None)
+            return
+        await callback.message.edit_text(
+            f"✅ Eski kunlar yopildi: {result['days']} kun, {result['sessions']} filial sessiyasi.\nTarix saqlandi.",
+            reply_markup=None,
         )
 
     # ------------------------------------------------------- nizom/maosh --
@@ -1685,59 +1751,11 @@ async def _agreement_issue_reminder_tick(bot) -> None:
 
 
 async def _day_close_tick(bot) -> None:
-    from roles import list_users_by_role
-    from services import attendance as attendance_service
-    from services import day_close_deadline
-
-    tz = _resolve_timezone()
-    now = datetime.now(tz)
-    deadline = rules_service.get_bos_day_close_deadline()
+    """Silent close only: no evaluation, supervisor penalty or daily Telegram message."""
     try:
-        due = day_close_deadline.due_work_date(
-            now, deadline, rules_service.get_bos_work_day_start(), rules_service.get_bos_close_policy_effective_at()
-        )
-    except ValueError as error:
-        print(f"Kun yopish muddati/chegarasi noto'g'ri formatda, tekshiruv o'tkazib yuborildi: {error!r}")
-        return
-    if due is None:
-        return
-
-    work_date = due[0].isoformat()
-    penalty_amount = rules_service.get_bos_supervisor_late_penalty()
-    for supervisor_id in list_users_by_role("nazoratchi"):
-        if discipline.get_closure(supervisor_id, work_date) is not None:
-            continue
-
-        # Nazoratchining O'Z grafigida shu ish kuni dam bo'lsa jarima yo'q. Filial ishlamagan kun haqida ishonchli
-        # ma'lumot manbai yo'q — taxmin qilinmaydi (qarang STATE).
-        shift = attendance_service.get_shift_for_date(supervisor_id, work_date)
-        if shift is not None and shift.get("status") == "off":
-            continue
-
-        try:
-            if not discipline.penalize_supervisor_for_late_close(supervisor_id, work_date, penalty_amount):
-                continue
-        except Exception as error:  # to'liq bekor qilingan (qisman audit/balans/ledger yo'q); keyingi tick qayta urinadi
-            print(f"Kun yopilmagani jarimasini yozib bo'lmadi (supervisor={supervisor_id}, work_date={work_date}): {error!r}")
-            continue
-
-        try:
-            await bot.send_message(
-                supervisor_id,
-                f"⚠️ {work_date} kunini {deadline} gacha yopmadingiz — sizdan -{penalty_amount} "
-                "ball avtomatik yechildi (audit qayd etildi).",
-            )
-        except Exception as error:
-            print(f"Nazoratchiga avtomatik jarima xabarini yuborib bo'lmadi: {error!r}")
-
-        try:
-            await bot.send_message(
-                FOUNDER_ID,
-                f"🔔 Nazoratchi (user_id: {supervisor_id}) {work_date} kunini {deadline} gacha "
-                f"yopmadi — avtomatik -{penalty_amount} ball audit qilindi.",
-            )
-        except Exception as error:
-            print(f"Founder'ga audit xabarini yuborib bo'lmadi: {error!r}")
+        await asyncio.to_thread(nazoratchi_day.auto_close_expired, _now_company())
+    except Exception as error:
+        logger.error("Ish kunini avtomatik yopish xatosi: %s", type(error).__name__)
 
 
 def start_scheduler(bot):
@@ -1746,8 +1764,10 @@ def start_scheduler(bot):
     """
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-    scheduler = AsyncIOScheduler(timezone=_resolve_timezone())
-    scheduler.add_job(_day_close_tick, "interval", minutes=5, args=[bot], id="bos_day_close_audit")
+    nazoratchi_day.ensure_auto_close_policy(_now_company())
+    scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
+    scheduler.add_job(_day_close_tick, "cron", hour=6, minute=0, args=[bot], id="bos_day_close_audit",
+                      next_run_time=_now_company(), coalesce=True, misfire_grace_time=None)
     scheduler.add_job(_agreement_issue_reminder_tick, "interval", minutes=10, args=[bot], id="salary_agreement_issue_reminder")
     scheduler.start()
     return scheduler

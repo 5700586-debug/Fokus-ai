@@ -845,50 +845,41 @@ async def _bos_on(main, bot, grade_key: str, ymd: str):
     )
 
 
-async def test_old_month_grade_notice_shows_eval_date_and_that_months_totals(bot_dp, monkeypatch):
+async def test_old_month_callback_cannot_create_a_grade_or_notice(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup()
     _freeze_now(monkeypatch, 2026, 11, 5)
-
-    sent = await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")  # noyabrda kiritilgan oktabr bahosi
-
-    assert _notices(sent)[0].text == (
-        "📅 Sana: 28.10.2026\n⭐ Baho: 3 — A'lo\n"
-        "2026-10 uchun bonus: 3\n2026-10 uchun minus: 0\n2026-10 uchun jami: 3"
-    )
-    assert "Shu oy" not in _notices(sent)[0].text  # joriy (noyabr) yig'indisi qo'shilmagan
-    assert discipline.get_period_point_totals(EMPLOYEE)["bonus"] == 0  # noyabr hisobiga tushmagan
+    sent = await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
+    assert _notices(sent) == [] and any("eskirgan" in text for text in _answers(sent))
+    assert discipline.get_daily_grade(EMPLOYEE, "2026-10-28") is None
+    assert discipline.get_period_point_totals(EMPLOYEE)["bonus"] == 0
 
 
-async def test_correcting_an_old_month_grade_updates_only_that_month_in_the_message(bot_dp, monkeypatch):
+async def test_old_month_callback_cannot_correct_history_or_current_balance(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup()
+    discipline.record_daily_grade(EMPLOYEE, NAZORATCHI, "2026-10-28", discipline.GRADE_ALO)
     _freeze_now(monkeypatch, 2026, 11, 5)
-    await _nzr(main, bot, discipline.GRADE_ALO)  # noyabr (bugungi) bahosi — 3 (oktabr kuni hali ochilmagan: faol kun = noyabr)
-    await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
-
-    sent = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")  # oktabr 3 -> 2
-
-    assert len(_notices(sent)) == 1
-    assert _notices(sent)[0].text == (
-        "📅 Sana: 28.10.2026\n✏️ Tuzatildi: 3 → 2\n"
-        "2026-10 uchun bonus: 2\n2026-10 uchun minus: 0\n2026-10 uchun jami: 2"
-    )
-    assert discipline.get_period_point_totals(EMPLOYEE, "2026-10")["bonus"] == 2
-    november = discipline.get_period_point_totals(EMPLOYEE, "2026-11")
-    assert (november["bonus"], november["minus"], november["net"]) == (3, 0, 3)  # noyabr o'zgarmagan
+    await _nzr(main, bot, discipline.GRADE_ALO)
+    sent = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")
+    assert _notices(sent) == [] and any("eskirgan" in text for text in _answers(sent))
+    assert discipline.get_period_point_totals(EMPLOYEE, "2026-10")["bonus"] == 3
+    assert discipline.get_period_point_totals(EMPLOYEE, "2026-11")["bonus"] == 3
 
 
-async def test_current_month_notice_keeps_shu_oy_wording_and_night_silence_for_old_month_correction(bot_dp, monkeypatch):
+async def test_current_month_notice_is_silent_but_old_month_callback_is_rejected(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup()
     _freeze_now(monkeypatch, 2026, 11, 5, hour=23)
-
     current = await _nzr(main, bot, discipline.GRADE_ALO)
     assert _notices(current)[0].text.endswith("Shu oy bonus: 3\nShu oy minus: 0\nShu oy jami: 3")
-    assert bool(_notices(current)[0].disable_notification) is True  # 23:00 — ovozsiz
-
-    await _bos_on(main, bot, discipline.GRADE_ALO, "20261028")
+    assert bool(_notices(current)[0].disable_notification) is True
     old = await _bos_on(main, bot, discipline.GRADE_NORMA, "20261028")
-    assert "2026-10 uchun jami: 2" in _notices(old)[0].text
-    assert bool(_notices(old)[0].disable_notification) is True
+    assert _notices(old) == [] and any("eskirgan" in text for text in _answers(old))
+
+
+@pytest.fixture(autouse=True)
+def _daytime_clock_for_non_boundary_tests(monkeypatch):
+    # Boundary/night tests explicitly override this; ordinary callbacks use one stable work day.
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)

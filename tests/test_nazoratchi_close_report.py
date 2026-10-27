@@ -93,7 +93,7 @@ def test_missing_grade_is_not_turned_into_zero(rule):
     block = "\n".join(
         report._employee_lines(nazoratchi_day.employee_status(employees.get_profile(111), _today()), _today())
     )
-    assert "ish: qo'yilmagan" in block and "ish: 0" not in block
+    assert "ish: baholanmadi" in block and "ish: 0" not in block
 
 
 def test_minus_with_reason_is_separate_and_cancelled_minus_excluded(rule):
@@ -211,14 +211,17 @@ async def test_bot_sends_report_only_after_successful_close(bot_dp, rule):
     _grade(113, discipline.GRADE_ALO)
 
     blocked = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
-    assert "Yopib bo'lmaydi" in blocked[0].text
-    assert not any("nazorati yopildi" in (getattr(m, "text", "") or "") for m in blocked)
-
-    _grade(111, discipline.GRADE_NORMA)
-    closed = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
-    text = closed[0].text
-    assert f"✅ {BRANCH_A} nazorati yopildi" in text and "baholangan: 2/2" in text
+    text = blocked[0].text
+    assert "baholanmadi" in text and discipline.get_daily_grade(111, _today()) is None
+    assert f"✅ {BRANCH_A} nazorati yopildi" in text and "baholangan: 1/2" in text
     assert "• Pending T" in text and "• Nograf T" in text
 
     again = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
     assert "allaqachon yopilgan" in again[0].text and "• " not in again[0].text
+
+
+@pytest.fixture(autouse=True)
+def _daytime_clock_for_non_boundary_tests(monkeypatch):
+    # Boundary/night tests explicitly override this; ordinary callbacks use one stable work day.
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)

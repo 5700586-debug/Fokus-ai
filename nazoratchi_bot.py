@@ -1215,17 +1215,21 @@ def register(dp: Dispatcher, openai_client) -> None:
             user_id, callback.from_user.id, work_date, grade_key,
             session_branch=branch if _branch_index(branch or "") is not None else None,
         )
-        outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
-        if outcome == discipline.NOTICE_UNCHANGED:
-            await callback.answer(discipline.grade_notice_reply(outcome))
-            return
+        try:
+            outcome = await discipline.notify_employee_of_grade(callback.bot, user_id, result)
+            if outcome == discipline.NOTICE_UNCHANGED:
+                await callback.answer(discipline.grade_notice_reply(outcome))
+                return
 
-        saved = f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}"
-        await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
+            saved = f"✅ Baho qayd etildi: {discipline.GRADE_LABELS[grade_key]}"
+            await callback.answer(saved if outcome == discipline.NOTICE_SENT else discipline.grade_notice_reply(outcome))
 
-        if callback.message:
-            text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
-            await callback.message.edit_text(text, reply_markup=keyboard)
+            if callback.message:
+                text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
+                await callback.message.edit_text(text, reply_markup=keyboard)
+        except Exception as error:
+            discipline.log_grade_event(user_id, work_date, "handler_after_save", "failed", type(error).__name__)
+            raise
 
     # --------------------------------------------------------- ball ayirish --
 

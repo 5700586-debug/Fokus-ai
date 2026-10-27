@@ -324,21 +324,27 @@ async def notify_employee_of_grade(bot, employee_id: int, result: EvaluationResu
         return NOTICE_NOT_LINKED
 
     try:
-        text = format_grade_notice(result, get_period_point_totals(employee_id, result.eval_date[:7]))
+        totals = get_period_point_totals(employee_id, result.eval_date[:7])
+    except Exception as error:  # noqa: BLE001
+        log_grade_event(employee_id, result.eval_date, "notice", "totals_failed", type(error).__name__)
+        return NOTICE_FAILED
+    try:
+        text = format_grade_notice(result, totals)
+    except Exception as error:  # noqa: BLE001
+        log_grade_event(employee_id, result.eval_date, "notice", "format_failed", type(error).__name__)
+        return NOTICE_FAILED
+    try:
         log_grade_event(employee_id, result.eval_date, "notice", "telegram_attempt")
         await bot.send_message(chat_id, text, disable_notification=is_quiet_time(company_time.now()))
     except TelegramForbiddenError:
         log_grade_event(employee_id, result.eval_date, "notice", "not_linked", "TelegramForbiddenError")
-        logger.error("grade_notice: yuborib bo'lmadi (bot bloklangan/ulanmagan)")
         return NOTICE_NOT_LINKED
     except TelegramBadRequest as error:
         outcome = "not_linked" if "chat not found" in str(error).lower() else "failed"
         log_grade_event(employee_id, result.eval_date, "notice", outcome, type(error).__name__)
-        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
         return NOTICE_NOT_LINKED if "chat not found" in str(error).lower() else NOTICE_FAILED
     except Exception as error:  # noqa: BLE001
         log_grade_event(employee_id, result.eval_date, "notice", "failed", type(error).__name__)
-        logger.error("grade_notice: yuborib bo'lmadi (%s)", type(error).__name__)
         return NOTICE_FAILED
 
     log_grade_event(employee_id, result.eval_date, "notice", "telegram_accepted")

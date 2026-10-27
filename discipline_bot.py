@@ -655,25 +655,29 @@ def register(dp: Dispatcher, openai_client) -> None:
             employee_id, callback.from_user.id, review_date, grade_key,
             session_branch=grade_branch if _branch_index(grade_branch or "") is not None else None,
         )
-        outcome = await discipline.notify_employee_of_grade(callback.bot, employee_id, result)
-        if outcome == discipline.NOTICE_UNCHANGED:
-            await callback.answer(discipline.grade_notice_reply(outcome))
-            return
+        try:
+            outcome = await discipline.notify_employee_of_grade(callback.bot, employee_id, result)
+            if outcome == discipline.NOTICE_UNCHANGED:
+                await callback.answer(discipline.grade_notice_reply(outcome))
+                return
 
-        name = _employee_name(employee_id)
-        label = discipline.GRADE_LABELS[grade_key]
-        confirmation = (
-            f"✅ {name} — {label} ({result.grade_points} ball) qayd etildi.\n"
-            f"💰 Bonus banki: {result.bonus_bank_balance} ball"
-        )
-        profile = employees.get_profile(employee_id)
-        branch = profile.get("branch") if profile else None
-        if branch and _branch_index(branch) is not None:
-            text, keyboard = _branch_screen(branch, review_date, callback.from_user.id, prefix=confirmation + "\n\n")
-            await callback.message.edit_text(text, reply_markup=keyboard)
-        else:
-            await callback.message.edit_text(confirmation)
-        await callback.answer(discipline.grade_notice_reply(outcome))
+            name = _employee_name(employee_id)
+            label = discipline.GRADE_LABELS[grade_key]
+            confirmation = (
+                f"✅ {name} — {label} ({result.grade_points} ball) qayd etildi.\n"
+                f"💰 Bonus banki: {result.bonus_bank_balance} ball"
+            )
+            profile = employees.get_profile(employee_id)
+            branch = profile.get("branch") if profile else None
+            if branch and _branch_index(branch) is not None:
+                text, keyboard = _branch_screen(branch, review_date, callback.from_user.id, prefix=confirmation + "\n\n")
+                await callback.message.edit_text(text, reply_markup=keyboard)
+            else:
+                await callback.message.edit_text(confirmation)
+            await callback.answer(discipline.grade_notice_reply(outcome))
+        except Exception as error:
+            discipline.log_grade_event(employee_id, review_date, "handler_after_save", "failed", type(error).__name__)
+            raise
 
     @dp.callback_query(F.data.startswith("bos:penalty_menu:"))
     async def baholash_penalty_menu(callback: CallbackQuery) -> None:

@@ -9,7 +9,7 @@ on:
         description: Tekshiruv turi
         required: true
         type: choice
-        options: [slowness]
+        options: [slowness, architecture]
         default: slowness
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
   review:
     if: >-
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.mode == 'slowness')
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (github.event.inputs.mode == 'slowness' || github.event.inputs.mode == 'architecture'))
     runs-on: ubuntu-latest
     timeout-minutes: 8
     continue-on-error: true

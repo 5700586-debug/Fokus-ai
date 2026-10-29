@@ -59,11 +59,15 @@ async def test_one_render_computes_active_day_and_time_bonus_once_with_matching_
 async def test_grade_press_still_validates_on_the_server_and_rerenders_once(bot_dp, monkeypatch):
     main, bot = bot_dp
     _setup()
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 28, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     sent = await send_callback(main.dp, bot, SUP, data=f"nzr_emp:{EMP}", target_chat_id=SUP)
     card = next(m for m in sent if getattr(m, "reply_markup", None) is not None)
     button = next(b.callback_data for row in card.reply_markup.inline_keyboard for b in row if ":alo:" in b.callback_data)
 
-    stale = await send_callback(main.dp, bot, SUP, data=button[:-1] + "9", target_chat_id=SUP)  # boshqa sana
+    stale = await send_callback(main.dp, bot, SUP, data=button[:-8] + "20261027", target_chat_id=SUP)  # boshqa sana
     assert "Bu tugma eskirgan" in " ".join(getattr(m, "text", "") or "" for m in stale)
 
     calls = {"n": 0}

@@ -909,22 +909,19 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.message.answer(text)
         await callback.answer()
 
-    @dp.message(Command("eskikunlarniyop"))
-    async def legacy_day_close_preview(message: Message) -> None:
-        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+    async def _send_legacy_close_preview(target: Message, user_id: int) -> None:
+        if target.chat.type != "private":
+            await target.answer("Bu amalni botning shaxsiy chatida oching.")
             return
-        if message.chat.type != "private":
-            await message.answer("Bu amalni botning shaxsiy chatida oching.")
-            return
-        key = (message.from_user.id, message.chat.id)
+        key = (user_id, target.chat.id)
         _LEGACY_CLOSE_PREVIEWS.pop(key, None)
         try:
             preview = await asyncio.to_thread(nazoratchi_day.preview_legacy_close, _now_company())
         except ValueError as error:
-            await message.answer(str(error))
+            await target.answer(str(error))
             return
         if not preview["rows"]:
-            await message.answer("Yopilmagan eski kunlar yo'q.")
+            await target.answer("Yopilmagan eski kunlar yo'q.")
             return
         # A short one-use token is kept only in memory: preview does not write to DB/FSM.
         token = secrets.token_hex(8)
@@ -942,11 +939,25 @@ def register(dp: Dispatcher, openai_client) -> None:
             current += ("\n" if current else "") + line
         chunks.append(current)
         for chunk in chunks[:-1]:
-            await message.answer(chunk)
-        sent = await message.answer(chunks[-1], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            await target.answer(chunk)
+        sent = await target.answer(chunks[-1], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Eski kunlarni yopish", callback_data=f"bos:legacy_close:{token}")
         ]]))
         _LEGACY_CLOSE_PREVIEWS[key] = {"token": token, "version": preview["version"], "message_id": sent.message_id}
+
+
+    @dp.message(Command("eskikunlarniyop"))
+    async def legacy_day_close_preview(message: Message) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        await _send_legacy_close_preview(message, message.from_user.id)
+
+    @dp.callback_query(F.data == "fset:legacy")
+    async def legacy_settings_callback(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        await _send_legacy_close_preview(callback.message, callback.from_user.id)
+        await callback.answer()
 
     @dp.callback_query(F.data.startswith("bos:legacy_close:"))
     async def legacy_day_close_confirm(callback: CallbackQuery) -> None:
@@ -1026,26 +1037,36 @@ def register(dp: Dispatcher, openai_client) -> None:
         else:
             await message.answer(f"❌ {rule_number}-nizom topilmadi.")
 
-    @dp.message(Command("listnizom"))
-    async def list_rules_handler(message: Message) -> None:
-        if not message.from_user or not is_authorized(message.from_user.id):
-            return
-
-        if await start_or_resume_rule_learning(message.bot, message.from_user.id):
+    async def _send_rule_list(target: Message, user_id: int) -> None:
+        if await start_or_resume_rule_learning(target.bot, user_id):
             return
 
         rules = discipline.list_rules()
         if not rules:
-            await message.answer("Hali nizomlar kiritilmagan.")
+            await target.answer("Hali nizomlar kiritilmagan.")
             return
 
         lines = [f"{rule['rule_number']}. {rule['title']} — {rule['content']}" for rule in rules]
         text = "📖 Korxona nizomlari:\n\n" + "\n".join(lines)
         if all(rule.get("catalog_kind") is None for rule in rules) and len(text) <= _LISTNIZOM_SINGLE_LIMIT:
-            await message.answer(text)
+            await target.answer(text)
             return
         screen_text, screen_markup = _catalog_sources_screen()
-        await message.answer(screen_text, reply_markup=screen_markup)
+        await target.answer(screen_text, reply_markup=screen_markup)
+
+
+    @dp.message(Command("listnizom"))
+    async def list_rules_handler(message: Message) -> None:
+        if not message.from_user or not is_authorized(message.from_user.id):
+            return
+        await _send_rule_list(message, message.from_user.id)
+
+    @dp.callback_query(F.data == "fset:nizom")
+    async def rules_settings_callback(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        await _send_rule_list(callback.message, callback.from_user.id)
+        await callback.answer()
 
     def _item_label(entry: dict) -> str:
         title = entry["title"]

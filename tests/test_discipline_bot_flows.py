@@ -939,3 +939,58 @@ def test_founder_reports_are_navigation_labels():
     assert "📊 Hisobotlar" in main._FOUNDER_MENU_LABELS
     assert "📊 Hisobotlar" in main._SANDBOX_ESCAPE_TEXTS
     assert "📊 Hisobotlar" in main._TOP_LEVEL_NAV_TEXTS
+
+
+async def test_founder_settings_menu_and_employee_legacy_text(bot_dp):
+    main, bot = bot_dp
+    founder = await send(main.dp, bot, FOUNDER_ID, text="⚙️ Sozlamalar")
+    buttons = [b.text for row in founder[0].reply_markup.inline_keyboard for b in row]
+    assert buttons == ["📜 Nizomlar", "🛠 Qoidalar", "📅 Eski kunlarni yopish", "✍️ Qo'lda sozlash"]
+    _set_role(111, "kassir")
+    employee = await send(main.dp, bot, 111, text="⚙️ Sozlamalar")
+    assert employee[0].text == "⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi."
+
+
+async def test_founder_settings_callbacks_match_commands(bot_dp):
+    main, bot = bot_dp
+    for command, callback_data in (("/listnizom", "fset:nizom"), ("/listrules", "fset:rules")):
+        command_result = await send(main.dp, bot, FOUNDER_ID, text=command)
+        callback_result = await send_callback(main.dp, bot, FOUNDER_ID, data=callback_data, target_chat_id=FOUNDER_ID)
+        assert any(getattr(m, "text", None) == command_result[0].text for m in callback_result)
+    stale = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:old", target_chat_id=FOUNDER_ID)
+    assert any("Bu tugma eskirgan." in str(m) for m in stale)
+
+
+async def test_settings_legacy_preview_and_confirm_uses_same_token(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    confirmed = []
+
+    monkeypatch.setattr(
+        discipline_bot.nazoratchi_day, "preview_legacy_close",
+        lambda now: {"rows": [{"session_date": "2026-10-20", "branch": "SATURN Charhiy"}],
+                     "version": "snapshot-test"},
+    )
+    def fake_confirm(now, version):
+        confirmed.append(version)
+        return {"days": 1, "sessions": 1}
+    monkeypatch.setattr(discipline_bot.nazoratchi_day, "confirm_legacy_close", fake_confirm)
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:legacy", target_chat_id=FOUNDER_ID)
+    preview = next(
+        item for item in sent
+        if (getattr(item, "text", None) or "").startswith("🔎 Eski kunlarni yopish ko'rigi")
+    )
+    button = preview.reply_markup.inline_keyboard[0][0]
+    assert button.text == "✅ Eski kunlarni yopish"
+    key = (FOUNDER_ID, FOUNDER_ID)
+    state = discipline_bot._LEGACY_CLOSE_PREVIEWS[key]
+    assert button.callback_data == "bos:legacy_close:" + state["token"]
+    assert state["message_id"] == sent.index(preview) + 1
+
+    result = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=button.callback_data,
+        target_chat_id=FOUNDER_ID, message_id=state["message_id"],
+    )
+    assert confirmed == ["snapshot-test"]
+    assert any("✅ Eski kunlar yopildi" in (getattr(item, "text", None) or "") for item in result)
+    assert key not in discipline_bot._LEGACY_CLOSE_PREVIEWS

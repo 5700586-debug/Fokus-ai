@@ -459,18 +459,25 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         await message.answer(f"✅ Qoida yangilandi: {rule_key} = {rule_value}")
 
+    def _rules_text() -> str:
+        rules = rules_service.list_rules()
+        if not rules:
+            return "Qoidalar topilmadi."
+        lines = "\n".join(f"{key} = {value}" for key, value in sorted(rules.items()))
+        return f"⚙️ Joriy qoidalar:\n{lines}"
+
     @dp.message(Command("listrules"))
     async def listrules_handler(message: Message) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_LIST_RULES):
             return
+        await message.answer(_rules_text())
 
-        rules = rules_service.list_rules()
-        if not rules:
-            await message.answer("Qoidalar topilmadi.")
+    @dp.callback_query(F.data == "fset:rules")
+    async def rules_settings_callback(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_LIST_RULES):
             return
-
-        lines = "\n".join(f"{key} = {value}" for key, value in sorted(rules.items()))
-        await message.answer(f"⚙️ Joriy qoidalar:\n{lines}")
+        await callback.message.answer(_rules_text())
+        await callback.answer()
 
     # -------------------------------------------------------- /processmonth --
 

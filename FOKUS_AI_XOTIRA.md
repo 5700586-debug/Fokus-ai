@@ -169,3 +169,17 @@ Manba: Saturn ichki tartib qoidalari. Nizom matnlarining yagona manbasi — `com
 - ✅ Bir hafta ichida 3 marta kechiksa — haftalik bonus berilmaydi. Ruxsatsiz, sababsiz va xabarsiz 1–2 soat kechiksa — −6.
 - ✅ Nizomlar: 26 ta band (26-band 2026-08-29 qo'shilgan).
 - ✅ (Bot qoidasi, nizom emas) AI ball yozmaydi — faqat tavsiya; ballni inspektor/nazoratchi yozadi.
+
+## 13. Sanoq va Inno Market (Muhammadiy tasdiqlagan, 2026-10-29 — hali qurilmagan, navbatdagi katta qadam)
+To'liq daftar: Claude Docs "Sanoq va Inno Market".
+- ✅ Birinchi filial: To'rala. Kompyuterga mini ilova o'rnatiladi; internet bor; ilova doim yoqiq; Inno Market qoldig'ini shu soniyada o'qiydi.
+- ✅ Inno Market'ga yozish imkoni 100% bo'ladi; tuzatish faqat inventarizatsiya hujjati bilan (tarix saqlanadi). Qurish tartibi: avval o'qish, keyin darhol yozish.
+- ✅ Sanoq paytida tovar sotilsa — kiritish paytida qoldiq qayta o'qiladi va tuzatiladi. Internet uzilsa savdo to'xtamaydi, ilova kutadi; tezkor sanoq o'sha payt ishlamaydi.
+- ✅ Xodimlar: har bo'lim xodimiga har kuni 20–30 tur; tovarni tizim tanlaydi; qoldiq xodimga ochiq ko'rinadi; pik paytda sanoq berilmaydi.
+- ✅ Birinchi aylanma tezroq (kompyuter qoldig'ini tuzatish uchun), xodimga kuniga 30 daqiqadan oshmasin; keyin algoritm har bo'limni oyiga aylantiradi (tez sotiladigan/qimmat tovarlar tez-tez).
+- ✅ Sanalgan tovar aylanma tugaguncha (keyin kamida 2 hafta) xodim ro'yxatiga qaytmaydi. Kerak bo'lsa shtrix-kod skaneri.
+- ✅ Nazoratchi: har kelganda har bir baholanayotgan xodim bo'limidan tasodifiy 1 ta tovar sanaydi; filialni tanlaganda bot kompyuter holatini ko'rsatadi (🟢 ulangan / 🔴 ulanmagan). Bu tekshiruv xodim ro'yxatiga ta'sir qilmaydi.
+- ✅ Qayta sanatilmaydi — bir marta sanaladi, qabul qilinadi.
+- ✅ Farq 100 000 so'mgacha — avtomatik qabul. 100 000 so'mdan oshsa — filial rahbariga kuniga bitta ro'yxat (har qatorga Ha/Yo'q yoki "Hammasini tasdiqlash").
+- ✅ Farq haqida Muhammadiyga alohida xabar yo'q; oy oxirida har filial bo'yicha bitta qator — qancha so'mlik tuzatish bo'lgani.
+- ✅ Bosqichlar: 1) To'rala kompyuterida Inno Market bazasini ko'rish (o'zgartirmasdan) 2) mini ilova (o'qish → yozish) 3) xodim sanog'i 4) nazoratchi tekshiruvi 5) skaner. Har biri alohida PR, merge Muhammadiy "ha"sidan keyin.

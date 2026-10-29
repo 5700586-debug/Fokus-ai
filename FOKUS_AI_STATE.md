@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## S2 rasm-dalil — Draft (2026-10-30)
+
+- Branch `feat/evidence-photo`: minus uchun Telegram rasm MAJBURIY — 4 minus oqimi (`bos:pen`, karta nizom tugmasi, katalog varianti, "Boshqa holat" AI mosligi) ma'lumotni FSM'ga qo'yadi, rasm kelgachgina `services/evidence_photo.apply_pending_penalty` minusni `discipline_penalties.evidence_file_id` bilan yozadi. Rasm o'rniga matn/menyu yoki ❌ Bekor qilish — minus yo'q; 15 daqiqadan eski kutish qo'llanmaydi.
+- 0 ball (`bajarilmagan`) — baho darhol saqlanadi, keyin ixtiyoriy rasm (`daily_evaluations.evidence_file_id`, faqat baho hali 0 va kun faol bo'lsa). Xodimga rasm + avvalgi matn (izoh ≤1024, e'tiroz tugmasi saqlanadi); Founder e'tiroz kartasidan keyin dalil rasmini ham oladi.
+- Faqat `file_id` saqlanadi, rasm yuklab olinmaydi. Strukturaviy test: bot handlerlarida `apply_penalty` to'g'ridan-to'g'ri chaqirilmaydi. Merge/deploy faqat Actions + DeepSeek'dan keyin.
+
 ## Strict day close — Draft, 2026-10-29
 
 - Branch `feat/strict-day-close`: 2026-11-01 dan (rules: `bos.strict_close_start`) baholanmagan filialni yopishda >=5 belgili izoh, `day_close_notes`; oxirgi filial bilan kun to'liq va baholanmagan 0 bo'lsa idempotent +5 audit/ledger.

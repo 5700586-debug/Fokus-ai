@@ -4,7 +4,7 @@ Bu testlar AI'ning o'zbek tilini tushunishini ISBOTLAMAYDI — faqat server teks
 import json
 
 import pytest
-from aiogram.methods import SendMessage
+from aiogram.methods import SendMessage, SendPhoto
 
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from services import company_rules_import as importer
@@ -72,7 +72,11 @@ async def _start(main, bot, user_id: int, text: str):
 
 
 async def _cb(main, bot, data: str):
-    return await send_callback(main.dp, bot, NAZORATCHI, data=data, target_chat_id=NAZORATCHI)
+    sent = await send_callback(main.dp, bot, NAZORATCHI, data=data, target_chat_id=NAZORATCHI)
+    if any("dalil rasmini" in (getattr(m, "text", None) or "") for m in sent):
+        # S2: minus faqat dalil rasmi bilan yoziladi — tasdiqdan keyin nazoratchi rasm yuboradi.
+        sent = sent + await send(main.dp, bot, NAZORATCHI, photo_file_id="evidence-1")
+    return sent
 
 
 def _screen(sent):
@@ -315,9 +319,11 @@ async def test_employee_notice_is_neutral_and_keeps_appeal_button(bot_dp, monkey
 
     after = await _cb(main, bot, _apply_data(sent[0]))
 
-    notice = next(m for m in after if isinstance(m, SendMessage) and m.chat_id == EMPLOYEE)
-    assert f"-{entry['default_penalty_amount']} ball" in notice.text and entry["title"] in notice.text
-    assert "terminalni bilmaydi" in notice.text and "e'tiroz" in notice.text
+    # S2: xodimga minus nazoratchi dalil rasmi bilan (izohda avvalgi matn) boradi.
+    notice = next(m for m in after if isinstance(m, SendPhoto) and m.chat_id == EMPLOYEE)
+    assert notice.photo == "evidence-1"
+    assert f"-{entry['default_penalty_amount']} ball" in notice.caption and entry["title"] in notice.caption
+    assert "terminalni bilmaydi" in notice.caption and "e'tiroz" in notice.caption
     assert any(c.startswith("nzr_appeal:") for c in _kb(notice))
 
 

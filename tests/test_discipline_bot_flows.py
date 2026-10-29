@@ -17,6 +17,11 @@ _DENIAL_TEXTS = {
 }
 
 
+
+def _t(m):
+    """Matn yoki rasm izohi (S2: xodimga minus rasm bilan boradi)."""
+    return getattr(m, "text", None) or getattr(m, "caption", None)
+
 def _assert_denied(sent) -> None:
     assert len(sent) == 1, sent
     assert sent[0].text in _DENIAL_TEXTS, sent[0].text
@@ -115,12 +120,15 @@ async def test_penalty_flow_happy_path_notifies_employee(bot_dp, monkeypatch):
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
     sent = await send(main.dp, bot, 1, text="3-nizom")
+    assert any("dalil rasmini" in (_t(m) or "") for m in sent)
+    assert discipline.get_salary(111)["bonus_bank"] == 0  # rasm kelmaguncha minus yozilmaydi
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")
 
-    texts = [m.text for m in sent]
+    texts = [_t(m) for m in sent]
     assert any("ball ayirildi" in (t or "") for t in texts)
     assert discipline.get_salary(111)["bonus_bank"] == -20
 
-    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111]
+    employee_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == 111]
     assert any("ball ayirildi" in (t or "") for t in employee_texts)
 
 
@@ -299,11 +307,12 @@ async def test_rule_learning_line_appears_in_both_penalty_messages(bot_dp, monke
     _mock_openai_text(monkeypatch, main, "✅ Mos keladi.")
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
     expected_line = "\n📚 Nizom holati: nizom o'rganilishi boshlanmagan"
-    supervisor_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 1 and m.text]
-    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111 and m.text]
+    supervisor_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == 1 and _t(m)]
+    employee_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == 111 and _t(m)]
 
     assert any(t.endswith(expected_line) for t in supervisor_texts)
     assert any(t.endswith(expected_line) for t in employee_texts)
@@ -325,14 +334,15 @@ async def test_rule_learning_lookup_error_does_not_break_penalty_flow(bot_dp, mo
     monkeypatch.setattr(discipline_bot.discipline, "get_penalty_learning_context", _raise)
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
-    texts = [m.text for m in sent if m.text]
+    texts = [_t(m) for m in sent if _t(m)]
     assert any("ball ayirildi" in t for t in texts)
     assert not any("Nizom holati" in t for t in texts)
     assert discipline.get_salary(111)["bonus_bank"] == -20
 
-    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111 and m.text]
+    employee_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == 111 and _t(m)]
     assert any("ball ayirildi" in t for t in employee_texts)
 
 
@@ -368,11 +378,12 @@ async def test_founder_alert_sent_once_when_understood_before_penalty(bot_dp, mo
     monkeypatch.setattr(discipline_bot.discipline, "get_penalty_learning_context", _counting_get_context)
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
     assert call_count == 1
 
-    founder_texts = [m.text for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and m.text]
+    founder_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and _t(m)]
     assert founder_texts == [
         "🚨 Nizom buzilishi\nXodim: 111\n"
         f"Nizom: {_RULE_NUMBER} — Kechikish\n"
@@ -391,9 +402,10 @@ async def test_no_founder_alert_when_not_learned(bot_dp, monkeypatch):
     _mock_openai_text(monkeypatch, main, "✅ Mos keladi.")
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
-    founder_texts = [m.text for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and m.text]
+    founder_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and _t(m)]
     assert founder_texts == []
 
 
@@ -411,9 +423,10 @@ async def test_no_founder_alert_when_learning_incomplete(bot_dp, monkeypatch):
     rule_learning.get_current_rule(_RULE_LEARNING_EMPLOYEE_ID)  # progress bor, tugallanmagan
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
-    founder_texts = [m.text for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and m.text]
+    founder_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and _t(m)]
     assert founder_texts == []
 
 
@@ -428,9 +441,10 @@ async def test_no_founder_alert_when_founder_is_the_actor(bot_dp, monkeypatch):
     _understand_rule_before_penalty()
 
     await send_callback(main.dp, bot, FOUNDER_ID, data="bos:pen:111:20", target_chat_id=FOUNDER_ID)
-    sent = await send(main.dp, bot, FOUNDER_ID, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, FOUNDER_ID, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, FOUNDER_ID, photo_file_id="evidence-1")
 
-    founder_texts = [m.text for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and m.text]
+    founder_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and _t(m)]
     assert not any("Nizom buzilishi" in t for t in founder_texts)
 
 
@@ -455,16 +469,17 @@ async def test_founder_alert_send_error_does_not_break_penalty_flow(bot_dp, monk
     monkeypatch.setattr(bot, "send_message", _selective_fail)
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:20", target_chat_id=1)
-    sent = await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    await send(main.dp, bot, 1, text=f"{_RULE_NUMBER}-nizom")
+    sent = await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
 
-    texts = [m.text for m in sent if m.text]
+    texts = [_t(m) for m in sent if _t(m)]
     assert any("ball ayirildi" in t for t in texts)
     assert discipline.get_salary(111)["bonus_bank"] == -20
 
-    employee_texts = [m.text for m in sent if getattr(m, "chat_id", None) == 111 and m.text]
+    employee_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == 111 and _t(m)]
     assert any("ball ayirildi" in t for t in employee_texts)
 
-    founder_texts = [m.text for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and m.text]
+    founder_texts = [_t(m) for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and _t(m)]
     assert founder_texts == []
 
 
@@ -507,6 +522,7 @@ async def test_appeal_full_flow_approved_refunds_bonus_bank(bot_dp, monkeypatch)
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:10", target_chat_id=1)
     await send(main.dp, bot, 1, text="3-nizom")
+    await send(main.dp, bot, 1, photo_file_id="evidence-1")
     assert discipline.get_salary(111)["bonus_bank"] == -10
 
     sent = await send(main.dp, bot, 111, text="/apellyatsiya")
@@ -517,7 +533,12 @@ async def test_appeal_full_flow_approved_refunds_bonus_bank(bot_dp, monkeypatch)
     await send_callback(main.dp, bot, 111, data=penalty_callback_data, target_chat_id=111)
 
     sent = await send(main.dp, bot, 111, text="Men kasal edim, dalilim bor")
-    founder_messages = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID]
+    # S2: Founderga e'tiroz kartasi + nazoratchi dalil rasmi (alohida, tugmasiz) boradi.
+    evidence_photos = [m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and getattr(m, "photo", None) == "evidence-1"]
+    assert len(evidence_photos) == 1
+    founder_messages = [
+        m for m in sent if getattr(m, "chat_id", None) == FOUNDER_ID and getattr(m, "reply_markup", None) is not None
+    ]
     assert len(founder_messages) == 1
     decide_keyboard = founder_messages[0].reply_markup.inline_keyboard
     approve_callback_data = decide_keyboard[0][0].callback_data
@@ -525,7 +546,7 @@ async def test_appeal_full_flow_approved_refunds_bonus_bank(bot_dp, monkeypatch)
 
     sent = await send_callback(main.dp, bot, FOUNDER_ID, data=approve_callback_data, target_chat_id=FOUNDER_ID)
     employee_messages = [m for m in sent if getattr(m, "chat_id", None) == 111]
-    assert any("qondirildi" in (m.text or "") for m in employee_messages)
+    assert any("qondirildi" in (_t(m) or "") for m in employee_messages)
     assert discipline.get_salary(111)["bonus_bank"] == 0
 
 
@@ -593,7 +614,7 @@ def _notices(sent, chat_id: int = EMPLOYEE) -> list:
 
 
 def _answers(sent) -> list[str]:
-    return [m.text for m in sent if isinstance(m, AnswerCallbackQuery)]
+    return [_t(m) for m in sent if isinstance(m, AnswerCallbackQuery)]
 
 
 def _count(table: str, where: str = "1=1") -> int:
@@ -914,13 +935,13 @@ async def test_month_board_workday_boundary(bot_dp, monkeypatch, hour, minute, e
 async def test_founder_reports_menu_and_callbacks(bot_dp):
     main, bot = bot_dp
     menu = await send(main.dp, bot, FOUNDER_ID, text="📊 Hisobotlar")
-    assert any("Hisobotlar" in m.text for m in menu)
+    assert any("Hisobotlar" in _t(m) for m in menu)
     monthly_command = await send(main.dp, bot, FOUNDER_ID, text="/oylikturnir")
     monthly_cb = await send_callback(main.dp, bot, FOUNDER_ID, data="frep:month", target_chat_id=FOUNDER_ID)
-    assert any(m.text == monthly_command[0].text for m in monthly_cb if hasattr(m, "text"))
+    assert any(_t(m) == monthly_command[0].text for m in monthly_cb if hasattr(m, "text"))
     daily_command = await send(main.dp, bot, FOUNDER_ID, text="/bugungiporga")
     daily_cb = await send_callback(main.dp, bot, FOUNDER_ID, data="frep:today", target_chat_id=FOUNDER_ID)
-    assert any(m.text == daily_command[0].text for m in daily_cb if hasattr(m, "text"))
+    assert any(_t(m) == daily_command[0].text for m in daily_cb if hasattr(m, "text"))
 
 
 async def test_founder_reports_denied_and_stale(bot_dp):

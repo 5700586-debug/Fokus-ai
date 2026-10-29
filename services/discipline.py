@@ -448,6 +448,7 @@ def apply_penalty(
     comment: str | None,
     ai_note: str | None,
     option_id: int | None = None,
+    evidence_file_id: str | None = None,
 ) -> dict:
     rule = discipline_repo.get_rule_by_number(rule_number)
     if rule is None:
@@ -489,7 +490,8 @@ def apply_penalty(
             raise ValueError(f"jarima miqdori noto'g'ri: {amount}")
 
     saved = discipline_repo.create_penalty_with_balance(
-        employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note
+        employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note,
+        evidence_file_id=evidence_file_id,
     )
     penalty_id, balance = saved["penalty_id"], saved["balance"]
 

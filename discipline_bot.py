@@ -33,6 +33,8 @@ from services import chat_cleanup, dialog_cleanup, discipline, discipline_ai, na
 from services import company_rules_import as discipline_import
 from services import rules as rules_service
 from services import salary_agreement
+from services import evidence_photo
+import evidence_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -578,7 +580,60 @@ def discipline_repo_note_exists(supervisor_id: int, work_date: str, branch: str)
             discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None)
 
 
+async def _finish_bos_penalty(message: Message, pending: dict, evidence_file_id: str) -> None:
+    """/baholash minus oqimi: dalil rasmi kelgach minusni yozadi va avvalgi natija/xabarlarni yuboradi."""
+    try:
+        result = evidence_photo.apply_pending_penalty(pending, message.from_user.id, evidence_file_id)
+    except (ValueError, PermissionError, KeyError) as error:
+        await message.answer(f"❌ Ball ayirilmadi: {error}")
+        return
+    nazoratchi_id = pending["supervisor_id"]
+    employee_id = pending["employee_id"]
+    amount = pending["amount"]
+    rule_number = pending["rule_number"]
+    rule = result["rule"]
+    rule_learning_context, rule_learning_line = _rule_learning_status(result["penalty_id"])
+
+    name = _employee_name(employee_id)
+    await message.answer(
+        f"🚫 {name} uchun -{amount} ball ayirildi ({rule_number}-nizom).\n"
+        f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
+        "ℹ️ Fiks oylikka ta'sir qilmaydi."
+        f"{rule_learning_line}"
+    )
+
+    try:
+        await evidence_handlers.send_evidence_notice(
+            message.bot, employee_id, evidence_file_id,
+            f"⚠️ Sizga -{amount} ball ayirildi ({rule_number}-nizom: {rule['title']}).\n"
+            "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring."
+            f"{rule_learning_line}",
+        )
+    except Exception as error:
+        print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
+
+    if (
+        rule_learning_context is not None
+        and rule_learning_context["status"] == "understood_before_penalty"
+        and nazoratchi_id != FOUNDER_ID
+    ):
+        founder_text = (
+            f"🚨 Nizom buzilishi\nXodim: {name}\nNizom: {rule_number} — {rule['title']}\n"
+            f"Ball: -{amount}\n📚 Xodim bu nizomni oldin tushunganini tasdiqlagan."
+        )
+        try:
+            await message.bot.send_message(FOUNDER_ID, founder_text)
+        except Exception as error:
+            print(
+                f"Founderga nizom buzilishi ogohlantirishini yuborib bo'lmadi "
+                f"(penalty_id={result['penalty_id']}): {error!r}"
+            )
+
+
 def register(dp: Dispatcher, openai_client) -> None:
+    # S2 rasm-dalil handlerlari boshqa xabar handlerlaridan OLDIN ro'yxatdan o'tadi.
+    evidence_handlers.register(dp)
+    evidence_handlers.register_finisher("bos", _finish_bos_penalty)
 
     # ------------------------------------------------------- /baholash --
 
@@ -663,7 +718,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.answer()
 
     @dp.callback_query(F.data.startswith("bos:grade:"))
-    async def baholash_pick_grade(callback: CallbackQuery) -> None:
+    async def baholash_pick_grade(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
@@ -702,6 +757,12 @@ def register(dp: Dispatcher, openai_client) -> None:
             else:
                 await callback.message.edit_text(confirmation)
             await callback.answer(discipline.grade_notice_reply(outcome))
+            if grade_key == discipline.GRADE_BAJARILMAGAN and result.changed and callback.message:
+                # S2: 0 ball uchun dalil rasmi ixtiyoriy — baho allaqachon saqlangan.
+                await evidence_handlers.request_grade_photo(
+                    callback.message, state, employee_id=employee_id,
+                    supervisor_id=callback.from_user.id, eval_date=review_date,
+                )
         except Exception as error:
             discipline.log_grade_event(employee_id, review_date, "handler_after_save", "failed", type(error).__name__)
             raise
@@ -776,54 +837,14 @@ def register(dp: Dispatcher, openai_client) -> None:
 
             waiting = await message.answer("⏳ AI nizomni tasdiqlayapti...")
             ai_note = await discipline_ai.confirm_rule_match(openai_client, text, rule)
+            await waiting.edit_text(ai_note)
 
-            result = discipline.apply_penalty(
-                employee_id,
-                nazoratchi_id,
-                _today().isoformat(),
-                amount,
-                rule_number,
-                comment=text,
-                ai_note=ai_note,
+            # S2: minus FAQAT dalil rasmi kelgach yoziladi (qarang ``_finish_bos_penalty``).
+            await evidence_handlers.request_penalty_photo(
+                message, state, source="bos", supervisor_id=nazoratchi_id,
+                employee_id=employee_id, penalty_date=_today().isoformat(), amount=amount,
+                rule_number=rule_number, comment=text, ai_note=ai_note, option_id=None,
             )
-
-            rule_learning_context, rule_learning_line = _rule_learning_status(result["penalty_id"])
-
-            name = _employee_name(employee_id)
-            await waiting.edit_text(
-                f"{ai_note}\n\n"
-                f"🚫 {name} uchun -{amount} ball ayirildi ({rule_number}-nizom).\n"
-                f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
-                "ℹ️ Fiks oylikka ta'sir qilmaydi."
-                f"{rule_learning_line}"
-            )
-
-            try:
-                await message.bot.send_message(
-                    employee_id,
-                    f"⚠️ Sizga -{amount} ball ayirildi ({rule_number}-nizom: {rule['title']}).\n"
-                    "Rozi bo'lmasangiz /apellyatsiya buyrug'i orqali e'tiroz bildiring."
-                    f"{rule_learning_line}",
-                )
-            except Exception as error:
-                print(f"Xodimga jarima xabarini yuborib bo'lmadi ({employee_id}): {error!r}")
-
-            if (
-                rule_learning_context is not None
-                and rule_learning_context["status"] == "understood_before_penalty"
-                and nazoratchi_id != FOUNDER_ID
-            ):
-                founder_text = (
-                    f"🚨 Nizom buzilishi\nXodim: {name}\nNizom: {rule_number} — {rule['title']}\n"
-                    f"Ball: -{amount}\n📚 Xodim bu nizomni oldin tushunganini tasdiqlagan."
-                )
-                try:
-                    await message.bot.send_message(FOUNDER_ID, founder_text)
-                except Exception as error:
-                    print(
-                        f"Founderga nizom buzilishi ogohlantirishini yuborib bo'lmadi "
-                        f"(penalty_id={result['penalty_id']}): {error!r}"
-                    )
         finally:
             _PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
@@ -1672,6 +1693,13 @@ def register(dp: Dispatcher, openai_client) -> None:
             discipline.mark_appeal_delivered(penalty_id, getattr(sent, "message_id", None))
         except Exception as error:
             print(f"Yetkazilganlik belgisini yozib bo'lmadi (Founderga yetgan): {error!r}")
+        evidence_file_id = penalty.get("evidence_file_id")
+        if evidence_file_id:
+            # S2: nazoratchi dalil rasmi Founderga ham ko'rsatiladi (yetkazilganlikka ta'sir qilmaydi).
+            try:
+                await bot.send_photo(FOUNDER_ID, evidence_file_id, caption=f"📷 Dalil rasmi (minus #{penalty_id})")
+            except Exception as error:
+                print(f"Founderga dalil rasmini yuborib bo'lmadi (penalty_id={penalty_id}): {error!r}")
         return "delivered"
 
     def _redeliver_keyboard(penalty_id: int) -> InlineKeyboardMarkup:

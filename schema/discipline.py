@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS daily_evaluations (
     eval_date TEXT NOT NULL,
     grade_key TEXT NOT NULL,
     grade_points INTEGER NOT NULL,
+    evidence_file_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT,
     UNIQUE(employee_id, eval_date)
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS discipline_penalties (
     rule_number INTEGER NOT NULL REFERENCES company_rules(rule_number),
     comment TEXT,
     ai_note TEXT,
+    evidence_file_id TEXT,
     appeal_status TEXT NOT NULL DEFAULT 'none',
     appeal_reason TEXT,
     appeal_voice_file_id TEXT,

@@ -167,6 +167,16 @@ CREATE TABLE IF NOT EXISTS daily_closures (
     UNIQUE(supervisor_id, closure_date)
 );
 
+CREATE TABLE IF NOT EXISTS day_close_notes (
+    supervisor_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    ungraded_count INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(supervisor_id, work_date, branch)
+);
+
 CREATE TABLE IF NOT EXISTS supervisor_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supervisor_id INTEGER NOT NULL,
@@ -205,5 +215,6 @@ INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUE
     ('bos.grade_points.chala', '1', NULL, NULL),
     ('bos.grade_points.norma', '2', NULL, NULL),
     ('bos.grade_points.alo', '3', NULL, NULL),
-    ('bos.penalty_amounts', '10,20,30', NULL, NULL);
+    ('bos.penalty_amounts', '10,20,30', NULL, NULL),
+    ('bos.strict_close_start', '2026-11-01', NULL, NULL);
 """

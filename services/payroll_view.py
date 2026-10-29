@@ -125,10 +125,11 @@ def month_view(employee_id: int, year_month: str) -> dict:
         unavailable["fixed"] = reason
         limitations.append(reason)
 
-    work_bonus = sum(e["grade_points"] for e in sources["evaluations"]) if sources["evaluations"] else None
+    full_bonus = -sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] == "day_full_bonus")
+    work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus) if sources["evaluations"] or sources["audits"] else None
     if work_bonus is None:
         unavailable["work_bonus"] = f"{NO_DATA}: shu oyda kunlik ish bahosi yo'q"
-    minus = sum(p["amount"] for p in sources["penalties"]) + sum(a["penalty_amount"] for a in sources["audits"])
+    minus = sum(p["amount"] for p in sources["penalties"]) + sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] != "day_full_bonus")
     if sources["time_bonus_days"]:
         limitations.append("Vaqt bonusi berilgan, lekin uning yulduz qiymati tizimda saqlanmaydi — hisobga kirmaydi")
     unavailable["recognition"] = f"{NO_DATA}: e'tirof manbasi yo'q"

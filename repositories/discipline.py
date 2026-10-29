@@ -910,7 +910,59 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 # -------------------------------------------------------- supervisor audit --
 
 
-def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int) -> bool:
+
+def strict_close_day_report(work_date: str) -> dict:
+    conn = get_connection()
+    try:
+        sessions = conn.execute(
+            "SELECT supervisor_id, branch, status, evaluated_count, total_count "
+            "FROM nazoratchi_branch_sessions WHERE session_date = ?",
+            (work_date,),
+        ).fetchall()
+        audits = conn.execute(
+            "SELECT supervisor_id, event_type FROM supervisor_audit "
+            "WHERE audit_date = ? AND event_type IN ('day_full_bonus', 'auto_close_minus')",
+            (work_date,),
+        ).fetchall()
+        notes = conn.execute(
+            "SELECT supervisor_id, branch, ungraded_count, note FROM day_close_notes WHERE work_date = ?",
+            (work_date,),
+        ).fetchall()
+        return {"sessions": [dict(x) for x in sessions], "audits": [dict(x) for x in audits],
+                "notes": [dict(x) for x in notes]}
+    finally:
+        conn.close()
+
+
+def save_day_close_note(supervisor_id: int, work_date: str, branch: str, ungraded_count: int, note: str) -> None:
+    if len(note.strip()) < 5:
+        raise ValueError("Izoh kamida 5 belgi bo'lishi kerak.")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO day_close_notes (supervisor_id, work_date, branch, ungraded_count, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(supervisor_id, work_date, branch) DO UPDATE SET "
+            "ungraded_count = excluded.ungraded_count, note = excluded.note",
+            (supervisor_id, work_date, branch, ungraded_count, note.strip(), _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_day_close_note(supervisor_id: int, work_date: str, branch: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM day_close_notes WHERE supervisor_id = ? AND work_date = ? AND branch = ?",
+            (supervisor_id, work_date, branch),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int, reason: str = "Kun o\u0027z vaqtida yopilmadi") -> bool:
     """Audit yozuvi + ``salaries.bonus_bank`` minusi + ``bonus_bank_ledger`` BITTA tranzaksiyada. Bir nazoratchi+ish kuni+hodisa
     uchun faqat bir marta (``UNIQUE`` + ``INSERT OR IGNORE``): takroriy/parallel chaqiruv ``False`` qaytaradi va hech narsa
     yozmaydi. Istalgan yozuv xato bersa hammasi bekor."""
@@ -925,7 +977,7 @@ def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, ev
         if cursor.rowcount <= 0:
             return False
         _apply_bonus_delta(
-            conn, supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
+            conn, supervisor_id, -penalty_amount, reason, "supervisor_audit", None
         )
         conn.commit()
         return True
@@ -1068,6 +1120,18 @@ def list_open_branch_sessions(supervisor_id: int, before_date: str | None = None
 _AUTO_CLOSE_START = "bos.auto_close_start_date"
 
 
+def strict_close_start() -> str:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT rule_value FROM rules WHERE rule_key = ?",
+            ("bos.strict_close_start",),
+        ).fetchone()
+        return row["rule_value"] if row else "2026-11-01"
+    finally:
+        conn.close()
+
+
 def auto_close_start(current_day: str | None = None) -> str | None:
     conn = get_connection()
     try:
@@ -1160,6 +1224,28 @@ def close_expired_review_days(before_day: str, *, expected_version: str | None =
                 (supervisor_id, day, counts["evaluated"], counts["total"], _now()),
             )
             closed_days += changed.rowcount
+        if expected_version is None:
+            strict = conn.execute(
+                "SELECT rule_value FROM rules WHERE rule_key = ?",
+                ("bos.strict_close_start",),
+            ).fetchone()
+            strict_start = strict["rule_value"] if strict else "2026-11-01"
+            for supervisor_id, day in sorted({
+                (r["supervisor_id"], r["session_date"]) for r in rows
+                if r["session_date"] >= max("2026-11-01", strict_start)
+                and r["status"] == "open"
+            }):
+                audit = conn.execute(
+                    "INSERT OR IGNORE INTO supervisor_audit "
+                    "(supervisor_id, audit_date, event_type, penalty_amount, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (supervisor_id, day, "auto_close_minus", 5, _now()),
+                )
+                if audit.rowcount > 0:
+                    _apply_bonus_delta(
+                        conn, supervisor_id, -5, "Kun 06:00 gacha yopilmadi (-5)",
+                        "supervisor_audit", None,
+                    )
         conn.commit()
         return {"days": closed_days, "sessions": closed_sessions}
     except BaseException:

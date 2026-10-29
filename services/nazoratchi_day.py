@@ -187,7 +187,7 @@ class CloseResult:
     off_count: int = 0
 
 
-def close_session(supervisor_id: int, branch: str, review_date: str) -> CloseResult:
+def close_session(supervisor_id: int, branch: str, review_date: str, note: str | None = None) -> CloseResult:
     """Baholanmaganlar ham qolishi mumkin; ularga baho/ball yozilmaydi."""
     session = open_session(supervisor_id, branch, review_date)
     if session["status"] == "closed":
@@ -195,12 +195,25 @@ def close_session(supervisor_id: int, branch: str, review_date: str) -> CloseRes
     statuses = branch_statuses(branch, review_date, exclude_user_id=supervisor_id)
     evaluated = sum(1 for item in statuses if item.status == STATUS_EVALUATED)
     off_count = sum(1 for item in statuses if item.status == STATUS_OFF)
+    pending = branch_pending_count(branch, review_date, supervisor_id)
+    if review_date >= discipline_repo.strict_close_start() and pending:
+        if note is not None:
+            discipline_repo.save_day_close_note(supervisor_id, review_date, branch, pending, note)
+        if not discipline_repo.get_day_close_note(supervisor_id, review_date, branch):
+            return CloseResult(closed=False, blockers=[s for s in statuses if s.status in BLOCKING_STATUSES])
     if not discipline_repo.close_branch_session(session["id"], evaluated, len(statuses)):
         return CloseResult(closed=False, already_closed=True)
 
     # Qo'lda yopishda barcha qamrov filiallari yopilgach kunning o'zi yakunlanadi.
     if day_fully_closed(supervisor_id, review_date):
         discipline.close_day(supervisor_id, review_date, len(statuses))
+        if review_date >= discipline_repo.strict_close_start() and all(
+            branch_pending_count(name, review_date, supervisor_id) == 0
+            for name in coverage_branches(supervisor_id)
+        ):
+            discipline_repo.record_supervisor_audit_with_penalty(
+                supervisor_id, review_date, "day_full_bonus", -5, "Kun to'liq yopildi (+5)"
+            )
 
     return CloseResult(closed=True, evaluated=evaluated, total=len(statuses), off_count=off_count)
 

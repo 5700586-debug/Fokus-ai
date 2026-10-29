@@ -25,7 +25,7 @@ def month_sources(employee_id: int, start: str, end_exclusive: str, conn=None) -
         ]
         audits = [
             dict(r) for r in conn.execute(
-                "SELECT penalty_amount FROM supervisor_audit WHERE supervisor_id = ? AND audit_date >= ? AND audit_date < ?",
+                "SELECT event_type, penalty_amount FROM supervisor_audit WHERE supervisor_id = ? AND audit_date >= ? AND audit_date < ?",
                 (employee_id, start, end_exclusive),
             ).fetchall()
         ]

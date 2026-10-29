@@ -167,6 +167,16 @@ CREATE TABLE IF NOT EXISTS daily_closures (
     UNIQUE(supervisor_id, closure_date)
 );
 
+CREATE TABLE IF NOT EXISTS day_close_notes (
+    supervisor_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    ungraded_count INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(supervisor_id, work_date, branch)
+);
+
 CREATE TABLE IF NOT EXISTS supervisor_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supervisor_id INTEGER NOT NULL,

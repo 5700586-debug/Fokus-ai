@@ -27,7 +27,7 @@ def anyio_backend():
 def _base_mystars(user: int):
     """PR #58 ning HAQIQIY baseline'i (main 555fef4, PR #57 dan keyin): har o'qish alohida ulanishda; profil kontaktlari bilan
     o'qiladi; oxirgi 2 kun har kun uchun alohida voqealar+sabab so'rovi; oylik soat diapazon bo'yicha (PR #57); 'kecha'
-    'oxirgi 2 kun'dan olinadi. Mustaqil o'lchovda (555fef4 worktree) 31 kunlik ma'lumotda 12 execute / 10 pool."""
+    'oxirgi 2 kun'dan olinadi. Mustaqil o'lchovda (555fef4 worktree) 31 kunlik ma'lumotda oldin 12, hozir 11 execute / 10 pool (eski yo'l ham optimallashtirilgan)."""
     profile = employees.get_profile(user)
     recent = [svc.get_day_summary(user, (company_time.today() - timedelta(days=i)).isoformat()) for i in range(2)]
     yesterday_iso = (company_time.today() - timedelta(days=1)).isoformat()
@@ -77,7 +77,7 @@ def test_single_connection_path_returns_exactly_the_real_base_result_with_fewer_
     assert dash["profile"]["full_name"] == base["full_name"] and dash["points"] == base["points"]
     assert dash["hours"] == base["hours"] and dash["yesterday"] == base["yesterday"] and dash["recent_days"] == base["recent_days"]
     print(f"{today}: yangi sql={q_new} pool={p_new}; haqiqiy base (555fef4) sql={q_base} pool={p_base}")
-    assert (q_base, p_base) == (12, 10) and (q_new, p_new) == (9, 1)  # kunlar soniga bog'liq emas
+    assert (q_base, p_base) == (11, 10) and (q_new, p_new) == (9, 1)  # kunlar soniga bog'liq emas
 
 
 @pytest.mark.parametrize("today", ["2026-03-01", "2026-03-31", "2026-04-02", "2027-01-02"])

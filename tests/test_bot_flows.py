@@ -94,6 +94,8 @@ async def test_founder_start_shows_new_greeting_and_seven_menu_buttons(bot_dp):
         "🏬 Do'konlar",
         "💰 Smenalarni ko'rish",
         "🚨 Bugungi muammolar",
+        "📊 Hisobotlar",
+        "💵 Oylik kelishuvi",
         "⚙️ Sozlamalar",
     ]
 

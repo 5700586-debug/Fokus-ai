@@ -93,7 +93,8 @@ def test_card_shows_red_flags_prominently_when_present():
 
 def test_card_shows_no_red_flag_section_when_none_present():
     text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(), _rubric_version(), [])
-    assert "🚩 Red Flag" not in text
+    assert "🚩 Red Flag: aniqlanmadi" in text
+    assert "Muddati o'tgan" not in text
 
 
 def test_card_shows_clarify_questions_when_present():

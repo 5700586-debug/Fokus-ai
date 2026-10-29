@@ -6,7 +6,7 @@ from aiogram import Dispatcher, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from services import evidence_photo, permissions
 
@@ -21,12 +21,11 @@ class EvidenceStates(StatesGroup):
     waiting_optional_grade_photo = State()
 
 
-def _cancel_keyboard(optional: bool = False) -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=CANCEL)]]
+def _cancel_keyboard(optional: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=CANCEL, callback_data="ev:cancel")]]
     if optional:
-        rows.insert(0, [KeyboardButton(text=SKIP)])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
-
+        rows.insert(0, [InlineKeyboardButton(text=SKIP, callback_data="ev:skip")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 async def request_penalty_photo(
     target: Message,
@@ -67,16 +66,28 @@ async def send_evidence_notice(
 
 
 def register(dp: Dispatcher) -> None:
+    """Register BEFORE all other message handlers so pending photo states win."""
+    @dp.callback_query(F.data.in_({"ev:cancel", "ev:skip"}))
+    async def evidence_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        current = await state.get_state()
+        if current not in (EvidenceStates.waiting_photo.state, EvidenceStates.waiting_optional_grade_photo.state):
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        if callback.data == "ev:skip" and current != EvidenceStates.waiting_optional_grade_photo.state:
+            await callback.answer("Bu tugma bu yerda ishlamaydi.", show_alert=True)
+            return
+        await state.clear()
+        await callback.answer()
+        if callback.message:
+            await callback.message.answer("✅ Baho saqlangan. Rasm o'tkazib yuborildi." if current == EvidenceStates.waiting_optional_grade_photo.state else "Minus bekor qilindi — rasm yuborilmadi")
+
     @dp.message(StateFilter(EvidenceStates.waiting_photo))
     async def evidence_penalty_photo(message: Message, state: FSMContext) -> None:
         if message.from_user is None:
             return
-        if message.text == CANCEL or (message.text or "").startswith("/"):
-            await state.clear()
-            await message.answer("❌ Bekor qilindi. Minus yozilmadi.")
-            return
         if not message.photo:
-            await message.answer("Rasm yuboring yoki Bekor qiling.", reply_markup=_cancel_keyboard())
+            await state.clear()
+            await message.answer("Minus bekor qilindi — rasm yuborilmadi")
             return
 
         actor_id = message.from_user.id
@@ -124,12 +135,9 @@ def register(dp: Dispatcher) -> None:
 
     @dp.message(StateFilter(EvidenceStates.waiting_optional_grade_photo))
     async def optional_grade_photo(message: Message, state: FSMContext) -> None:
-        if message.text in (CANCEL, SKIP) or (message.text or "").startswith("/"):
+        if not message.photo:
             await state.clear()
             await message.answer("✅ Baho saqlangan. Dalil rasmi o'tkazib yuborildi.")
-            return
-        if not message.photo:
-            await message.answer("Rasm yuboring yoki O'tkazib yuboring.", reply_markup=_cancel_keyboard(True))
             return
         # Grade evidence persistence is wired only with the grade-side guarded repository update.
         # Never claim that a file_id was saved before the grade handlers wire that update.

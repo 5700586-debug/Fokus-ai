@@ -46,7 +46,7 @@ def test_kassir_questions_do_not_ask_protected_characteristics():
         "din", "millat", "etnik", "homilador", "oilaviy holat", "nogironlik",
         "yosh", "jins", "siyosiy", "pasport", "manzil", "surat",
     )
-    for _key, text in recruiting_questions.KASSIR_QUESTIONS + recruiting_questions.SOTUVCHI_QUESTIONS:
+    for _key, text in recruiting_questions.ROLE_QUESTIONS['kassir'] + recruiting_questions.ROLE_QUESTIONS['sotuvchi']:
         lowered = text.lower()
         for word in forbidden_words:
             assert word not in lowered, (word, text)
@@ -56,8 +56,8 @@ def test_kassir_and_sotuvchi_question_keys_are_unique():
     # ``COMMON_QUESTIONS`` (masalan "ishga kech qolish") ATAYLAB ikkala
     # lavozimda ham ishlatiladi — shu sabab faqat HAR BIR ro'yxat o'z
     # ICHIDA takrorlanmasligini tekshiramiz, ikkalasi orasida emas.
-    kassir_keys = [k for k, _ in recruiting_questions.KASSIR_QUESTIONS]
-    sotuvchi_keys = [k for k, _ in recruiting_questions.SOTUVCHI_QUESTIONS]
+    kassir_keys = [k for k, _ in recruiting_questions.ROLE_QUESTIONS['kassir']]
+    sotuvchi_keys = [k for k, _ in recruiting_questions.ROLE_QUESTIONS['sotuvchi']]
     assert len(kassir_keys) == len(set(kassir_keys))
     assert len(sotuvchi_keys) == len(set(sotuvchi_keys))
 

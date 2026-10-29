@@ -978,7 +978,7 @@ async def test_settings_legacy_preview_and_confirm_uses_same_token(bot_dp, monke
     sent = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:legacy", target_chat_id=FOUNDER_ID)
     preview = next(
         item for item in sent
-        if getattr(item, "text", "").startswith("🔎 Eski kunlarni yopish ko'rigi")
+        if (getattr(item, "text", None) or "").startswith("🔎 Eski kunlarni yopish ko'rigi")
     )
     button = preview.reply_markup.inline_keyboard[0][0]
     assert button.text == "✅ Eski kunlarni yopish"
@@ -992,5 +992,5 @@ async def test_settings_legacy_preview_and_confirm_uses_same_token(bot_dp, monke
         target_chat_id=FOUNDER_ID, message_id=state["message_id"],
     )
     assert confirmed == ["snapshot-test"]
-    assert any("✅ Eski kunlar yopildi" in getattr(item, "text", "") for item in result)
+    assert any("✅ Eski kunlar yopildi" in (getattr(item, "text", None) or "") for item in result)
     assert key not in discipline_bot._LEGACY_CLOSE_PREVIEWS

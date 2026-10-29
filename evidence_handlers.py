@@ -176,4 +176,6 @@ def register(dp: Dispatcher) -> None:
             await send_evidence_notice(message.bot, employee_id, file_id, f"📅 {day}: Bajarilmagan (0 ball) — dalil rasmi")
         except Exception as error:  # noqa: BLE001 - dalil saqlangan; yetkazish xatosi bahoni bekor qilmaydi
             logger.warning("Dalil rasmini xodimga yuborib bo'lmadi: %s", type(error).__name__)
+            await message.answer("✅ Dalil saqlandi, lekin xodimga yuborib bo'lmadi.")
+            return
         await message.answer("✅ Dalil saqlandi va xodimga yuborildi.")

@@ -209,8 +209,8 @@ async def test_shared_menu_exposes_the_schedule_change_command(bot_dp):
     sent = await send(main.dp, bot, EMPLOYEE_ID, text="⭐ Mening natijalarim")
     buttons = [btn.text for row in sent[0].reply_markup.keyboard for btn in row]
 
-    assert "/grafik" in buttons
-    assert "Grafikni o'zgartirish" in (sent[0].text or "")
+    assert any("Grafikni o'zgartirish" in button for button in buttons)
+    assert "/grafik" in (sent[0].text or "")
 
 
 # ------------------------------------------- "🏠 Asosiy menyu" grafik so'rovi bosqichlarida --

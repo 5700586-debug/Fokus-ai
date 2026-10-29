@@ -574,7 +574,8 @@ def _month_board_text(user_id: int) -> str:
 
 def discipline_repo_note_exists(supervisor_id: int, work_date: str, branch: str) -> bool:
     from repositories import discipline as discipline_repo
-    return (work_date < discipline_repo.strict_close_start() or\n            discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None)
+    return (work_date < discipline_repo.strict_close_start() or
+            discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None)
 
 
 def register(dp: Dispatcher, openai_client) -> None:
@@ -1862,7 +1863,7 @@ async def _day_close_tick(bot) -> None:
                 s["branch"], work_date, supervisor_id
             ) for s in sessions)
             outcome = "-5" if "auto_close_minus" in audits else "+5" if "day_full_bonus" in audits else "0"
-            line = f"{supervisor_id}: {outcome} ball, baholanmagan {ungraded}"
+            line = f"{_employee_name(supervisor_id)}: {outcome} ball, baholanmagan {ungraded}"
             if notes:
                 line += "; izoh: " + "; ".join(f"{n['branch']}: {n['note']}" for n in notes)
             lines.append(line)

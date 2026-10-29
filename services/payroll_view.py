@@ -126,7 +126,7 @@ def month_view(employee_id: int, year_month: str) -> dict:
         limitations.append(reason)
 
     full_bonus = -sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] == "day_full_bonus")
-    work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus) if sources["evaluations"] or full_bonus else None
+    work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus) if sources["evaluations"] or sources["audits"] else None
     if work_bonus is None:
         unavailable["work_bonus"] = f"{NO_DATA}: shu oyda kunlik ish bahosi yo'q"
     minus = sum(p["amount"] for p in sources["penalties"]) + sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] != "day_full_bonus")

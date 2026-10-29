@@ -209,11 +209,19 @@ async def test_tick_sends_morning_message_once_time_threshold_reached(monkeypatc
     assert len(bot.sent) == 1  # faqat ertalabki xabar chegarasidan o'tdi
 
 
-async def test_tick_sends_morning_as_photo_not_old_text(monkeypatch):
+async def test_tick_sends_morning_as_photo_not_old_text(monkeypatch, tmp_path):
     """Regressiya: 08:00 chegarasidan o'tganda ENDI eski matnli
     ``send_morning_message`` emas, yangi rasmli xabar yuboriladi."""
     from aiogram.methods import SendPhoto
 
+    from services import daily_greetings
+    import base64
+    image_path = tmp_path / "greeting.png"
+    image_path.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lWQAAAAASUVORK5CYII="
+    ))
+    monkeypatch.setattr(daily_greetings, "get_morning_image_path", lambda: image_path)
+    monkeypatch.setattr(daily_greetings, "get_night_image_path", lambda: image_path)
     bot = RecordingBot(token="123456:TEST-TOKEN")
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -231,12 +239,20 @@ async def test_tick_sends_morning_as_photo_not_old_text(monkeypatch):
     assert isinstance(bot.sent[0], SendPhoto)
 
 
-async def test_tick_sends_night_as_photo_not_old_financial_text(monkeypatch):
+async def test_tick_sends_night_as_photo_not_old_financial_text(monkeypatch, tmp_path):
     """Regressiya (talab #9): 21:00 chegarasidan o'tganda eski moliyaviy
     "Kun yakuni" (savdo/reja/o'rtacha chek) ENDI xodimlar guruhiga
     avtomatik ketmaydi — o'rniga moliyasiz rasmli tungi xabar boradi."""
     from aiogram.methods import SendPhoto
 
+    from services import daily_greetings
+    import base64
+    image_path = tmp_path / "greeting.png"
+    image_path.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lWQAAAAASUVORK5CYII="
+    ))
+    monkeypatch.setattr(daily_greetings, "get_morning_image_path", lambda: image_path)
+    monkeypatch.setattr(daily_greetings, "get_night_image_path", lambda: image_path)
     bot = RecordingBot(token="123456:TEST-TOKEN")
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -287,9 +303,17 @@ async def test_tick_skips_night_image_when_disabled_via_rule():
     assert bot.sent == []
 
 
-async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached(monkeypatch):
+async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached(monkeypatch, tmp_path):
     from aiogram.methods import SendPhoto
 
+    from services import daily_greetings
+    import base64
+    image_path = tmp_path / "greeting.png"
+    image_path.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lWQAAAAASUVORK5CYII="
+    ))
+    monkeypatch.setattr(daily_greetings, "get_morning_image_path", lambda: image_path)
+    monkeypatch.setattr(daily_greetings, "get_night_image_path", lambda: image_path)
     bot = RecordingBot(token="123456:TEST-TOKEN")
     from datetime import datetime
     from zoneinfo import ZoneInfo

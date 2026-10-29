@@ -606,6 +606,20 @@ def get_evaluation_history(employee_id: int, eval_date: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def count_graded_dates(start_date: str, end_date_exclusive: str) -> int:
+    """Count distinct calendar dates having actual daily evaluation rows, including zero grades."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT eval_date) AS n FROM daily_evaluations "
+            "WHERE eval_date >= ? AND eval_date < ?",
+            (start_date, end_date_exclusive),
+        ).fetchone()
+        return int(row["n"])
+    finally:
+        conn.close()
+
+
 def get_evaluations_for_date(eval_date: str) -> list[dict]:
     conn = get_connection()
     try:

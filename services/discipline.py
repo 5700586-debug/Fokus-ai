@@ -409,6 +409,10 @@ def get_daily_grade(employee_id: int, eval_date: str) -> dict | None:
     return discipline_repo.get_daily_evaluation(employee_id, eval_date)
 
 
+def count_graded_dates(start_date: str, end_date_exclusive: str) -> int:
+    return discipline_repo.count_graded_dates(start_date, end_date_exclusive)
+
+
 def get_daily_leaderboard(eval_date: str) -> list[dict]:
     rows = discipline_repo.get_evaluations_for_date(eval_date)
     return [{"employee_id": row["employee_id"], "grade_points": row["grade_points"]} for row in rows]

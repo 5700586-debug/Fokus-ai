@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## PR-B — Draft (2026-10-29)
+
+- Branch `fix/pr-b-ungraded-month-line`: payroll_view formulasi o'zgarmadi; baholanmagan kun yozuv emas, 0 baho esa haqiqiy yozuv.
+- `/oylikturnir` oxirida faqat `ACTION_MANAGE_DISCIPLINE_RULES` huquqlilarga N kalendar kun va distinct eval_date M soni. Ish kuni 06:00; birinchi kuni o'tgan oy to'liq ko'rsatiladi.
+- Bir dona repository SELECT COUNT(DISTINCT eval_date) (? placeholder), targeted test qo'shildi. Testlar GitHub Actions'da foydalanuvchi tomonidan bajariladi. Merge/deploy yo'q.
+
 ## Grading Mini App tayyorgarligi — DRAFT (2026-10-29)
 
 - Branch: `refactor/grading-miniapp-prep`, base `519e19b`. Faqat mavjud baholash servis guardi, BOS handlerdan servicega ko'chirilgan tekshiruvlar va sof WebApp initData verifier. Endpoint/Mini App yo'q, botning javob matnlari va baho qiymatlari o'zgartirilmaydi.

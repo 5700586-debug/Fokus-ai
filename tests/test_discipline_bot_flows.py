@@ -883,3 +883,29 @@ def _daytime_clock_for_non_boundary_tests(monkeypatch):
     # Boundary/night tests explicitly override this; ordinary callbacks use one stable work day.
     fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
     monkeypatch.setattr(company_time, "now", lambda: fixed)
+
+
+async def test_month_board_founder_and_employee_visibility(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+    monkeypatch.setattr(discipline_bot.discipline, "count_graded_dates", lambda start, end: 2)
+    founder = await send(main.dp, bot, FOUNDER_ID, text="/oylikturnir")
+    assert any("Nazoratchi " in item.text and " kundan 2 kunini baholadi" in item.text for item in founder)
+    employee = await send(main.dp, bot, 111, text="/oylikturnir")
+    assert all("Nazoratchi " not in item.text for item in employee)
+
+
+@pytest.mark.parametrize("hour,minute,expected", [
+    (6, 30, "Oktabr: Nazoratchi 31 kundan 2 kunini baholadi"),
+    (5, 59, "Nazoratchi 30 kundan 2 kunini baholadi"),
+])
+async def test_month_board_workday_boundary(bot_dp, monkeypatch, hour, minute, expected):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    main, bot = bot_dp
+    fixed = datetime(2026, 11, 1, hour, minute, tzinfo=ZoneInfo("Asia/Tashkent"))
+    monkeypatch.setattr(discipline_bot.company_time, "now", lambda: fixed)
+    monkeypatch.setattr(discipline_bot, "_today", lambda: fixed.date())
+    monkeypatch.setattr(discipline_bot.discipline, "count_graded_dates", lambda start, end: 2)
+    sent = await send(main.dp, bot, FOUNDER_ID, text="/oylikturnir")
+    assert any(expected in item.text for item in sent)

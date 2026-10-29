@@ -50,7 +50,9 @@ def test_success_writes_penalty_balance_and_ledger_consistently():
         ledger = conn.execute("SELECT change_amount, ref_type, ref_id, balance_after FROM bonus_bank_ledger").fetchone()
     finally:
         conn.close()
-    assert tuple(ledger) == (-10, "penalty", result["penalty_id"], -10)
+    assert (ledger["change_amount"], ledger["ref_type"], ledger["ref_id"], ledger["balance_after"]) == (
+        -10, "penalty", result["penalty_id"], -10
+    )
 
 
 @pytest.mark.parametrize(

@@ -100,7 +100,7 @@ async def test_daily_greeting_messages_have_no_financial_block(monkeypatch):
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import company_time
-    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)
@@ -197,7 +197,7 @@ async def test_tick_sends_morning_message_once_time_threshold_reached(monkeypatc
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import company_time
-    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "23:59", updated_by=FOUNDER_ID)
@@ -218,7 +218,7 @@ async def test_tick_sends_morning_as_photo_not_old_text(monkeypatch):
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import company_time
-    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "23:59", updated_by=FOUNDER_ID)
@@ -241,7 +241,7 @@ async def test_tick_sends_night_as_photo_not_old_financial_text(monkeypatch):
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import company_time
-    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "23:59", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)
@@ -294,7 +294,7 @@ async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached(mo
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import company_time
-    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 8, 25, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)

@@ -414,6 +414,10 @@ def _rule_learning_owned_progress(callback: CallbackQuery) -> dict | None:
     return progress
 
 
+class CloseNoteStates(StatesGroup):
+    waiting = State()
+
+
 class PenaltyStates(StatesGroup):
     waiting_rule = State()
 
@@ -566,6 +570,11 @@ def _month_board_text(user_id: int) -> str:
         graded = discipline.count_graded_dates(first.isoformat(), end.isoformat())
         text += f"\n\n{label}Nazoratchi {days} kundan {graded} kunini baholadi"
     return text
+
+
+def discipline_repo_note_exists(supervisor_id: int, work_date: str, branch: str) -> bool:
+    from repositories import discipline as discipline_repo
+    return discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None
 
 
 def register(dp: Dispatcher, openai_client) -> None:
@@ -830,7 +839,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await message.answer(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data.startswith("bos:close:"))
-    async def close_branch_handler(callback: CallbackQuery) -> None:
+    async def close_branch_handler(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_CLOSE_DAY):
             return
 
@@ -845,6 +854,18 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
 
         branch = RECRUITING_BRANCH_NAMES[index]
+        pending = nazoratchi_day.branch_pending_count(branch, review_date, callback.from_user.id)
+        if review_date >= "2026-11-01" and pending and not discipline_repo_note_exists(
+            callback.from_user.id, review_date, branch
+        ):
+            await state.set_state(CloseNoteStates.waiting)
+            await state.update_data(close_branch=branch, close_date=review_date)
+            await callback.message.answer(
+                f"✍️ {branch}: {pending} xodim baholanmagan. "
+                "Filialni yopish uchun kamida 5 belgili izoh yozing."
+            )
+            await callback.answer()
+            return
         result = nazoratchi_day.close_session(callback.from_user.id, branch, review_date)
 
         if result.already_closed:
@@ -880,6 +901,32 @@ def register(dp: Dispatcher, openai_client) -> None:
                     await callback.message.answer(chunk)
                 await callback.message.answer(chunks[-1] + footer, reply_markup=next_kb)
         await callback.answer()
+
+    @dp.message(StateFilter(CloseNoteStates.waiting))
+    async def close_note_reply(message: Message, state: FSMContext) -> None:
+        if not await permissions.ensure_permission(message, permissions.ACTION_CLOSE_DAY):
+            await state.clear()
+            return
+        note = (message.text or "").strip()
+        if len(note) < 5:
+            await message.answer("Izoh kamida 5 belgi bo'lsin.")
+            return
+        data = await state.get_data()
+        branch, review_date = data.get("close_branch"), data.get("close_date")
+        if branch not in RECRUITING_BRANCH_NAMES or not review_date:
+            await state.clear()
+            return
+        if nazoratchi_day.check_active(message.from_user.id, review_date, _now_company()):
+            await state.clear()
+            await message.answer("Bu ish kuni yopilgan yoki eskirgan.")
+            return
+        result = nazoratchi_day.close_session(message.from_user.id, branch, review_date, note=note)
+        await state.clear()
+        await message.answer(
+            f"✅ {branch} nazorati yopildi. Izoh saqlandi." if result.closed
+            else "ℹ️ Filial allaqachon yopilgan." if result.already_closed
+            else nazoratchi_day.blockers_text(result.blockers)
+        )
 
     # ------------------------------------------------------- dashboardlar --
 

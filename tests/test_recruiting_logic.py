@@ -134,7 +134,7 @@ def test_score_application_recognizes_reassuring_follow_up():
         _answer("kassir_narx_farqi", "Narxni tekshirib, xaridorga tushuntiraman"),
         _answer("kassir_janjal", "Xotirjam tinglab, yechim topishga harakat qilaman"),
         _answer("kassir_javobgarlik", "Kassa egasi javobgar bo'lishi kerak deb o'ylayman"),
-        _answer("kassir_muddat", "Darhol chetga olib, rahbarga xabar beraman"),
+        _answer("core_muddat", "Darhol chetga olib, rahbarga xabar beraman"),
     ]
 
     result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
@@ -168,7 +168,7 @@ def test_score_application_missing_availability_alone_does_not_force_mismatch():
         _answer("sotuvchi_norozilik", "Xotirjam tinglab, yechim topaman"),
         _answer("sotuvchi_qoshimcha", "Mos bo'lsa, bosim qilmasdan taklif qilaman"),
         _answer("sotuvchi_javon", "Darhol tartibga keltiraman"),
-        _answer("sotuvchi_muddat", "Chetga olib, rahbarga aytaman"),
+        _answer("core_muddat", "Chetga olib, rahbarga aytaman"),
         _answer("sotuvchi_kelishmovchilik", "Ochiq gaplashib, hurmat bilan hal qilaman"),
     ]
 
@@ -194,7 +194,7 @@ def test_expired_product_sell_intent_is_critical_red_flag_and_forces_human_revie
         _answer("kassir_login", "Hech kimga bermayman, faqat o'zim ishlataman"),
         _answer("kassir_javobgarlik", "Kassa egasi javobgar bo'lishi kerak deb o'ylayman"),
         _answer("kassir_janjal", "Xotirjam tinglab, yechim topaman"),
-        _answer("kassir_muddat", "Muddati o'tgan bo'lsa ham sotsam bo'ladi, hech kim bilmaydi"),
+        _answer("core_muddat", "Muddati o'tgan bo'lsa ham sotsam bo'ladi, hech kim bilmaydi"),
     ]
 
     result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
@@ -214,7 +214,7 @@ def test_shortage_avoidance_is_critical_red_flag_and_not_scored_positively():
         _answer("kassir_kamomad", "Bu mening ishim emas, hech kimga aytmayman, boshqasining aybi"),
         _answer("kassir_narx_farqi", "Narxni tekshirib, xaridorga tushuntiraman"),
         _answer("kassir_login", "Hech kimga bermayman"),
-        _answer("kassir_muddat", "Darhol olib tashlab, rahbarga aytaman"),
+        _answer("core_muddat", "Darhol olib tashlab, rahbarga aytaman"),
     ]
 
     result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
@@ -247,15 +247,15 @@ def test_reassuring_follow_up_after_expired_product_red_flag_clears_it():
     fikridan qaytmasa (E misolidagi kabi), RED holicha qoladi."""
     application = {"prev_employer_text": "tajribam bor"}
     retracted = [
-        _answer("kassir_muddat", "Sotib yuboraman"),
-        _answer("kassir_muddat", "Yo'q xato tushundim, albatta olib tashlayman va rahbarga aytaman", is_follow_up=True),
+        _answer("core_muddat", "Sotib yuboraman"),
+        _answer("core_muddat", "Yo'q xato tushundim, albatta olib tashlayman va rahbarga aytaman", is_follow_up=True),
     ]
     result_retracted = recruiting_scoring.score_application("kassir", application, retracted, math_correct=None)
     assert result_retracted["red_flags"] == []
 
     not_retracted = [
-        _answer("kassir_muddat", "Sotib yuboraman"),
-        _answer("kassir_muddat", "Ha albatta sotib yuboraman, muammo emas", is_follow_up=True),
+        _answer("core_muddat", "Sotib yuboraman"),
+        _answer("core_muddat", "Ha albatta sotib yuboraman, muammo emas", is_follow_up=True),
     ]
     result_not_retracted = recruiting_scoring.score_application("kassir", application, not_retracted, math_correct=None)
     assert any(f["key"] == "expired_product" for f in result_not_retracted["red_flags"])

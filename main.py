@@ -1034,8 +1034,37 @@ async def founder_reports_handler(message: Message) -> None:
 async def settings_handler(message: Message) -> None:
     if not await ensure_authorized(message):
         return
+    if not permissions.has_permission(message.from_user.id, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+        await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
+        return
+    await message.answer("⚙️ Sozlamalar", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 Nizomlar", callback_data="fset:nizom")],
+        [InlineKeyboardButton(text="🛠 Qoidalar", callback_data="fset:rules")],
+        [InlineKeyboardButton(text="📅 Eski kunlarni yopish", callback_data="fset:legacy")],
+        [InlineKeyboardButton(text="✍️ Qo'lda sozlash", callback_data="fset:help")],
+    ]))
 
-    await message.answer("⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi.")
+
+@dp.callback_query(F.data == "fset:help")
+async def founder_settings_help(callback: CallbackQuery) -> None:
+    if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+        return
+    await callback.message.answer(
+        "✍️ Qo'lda sozlash:\n"
+        "/addnizom <raqam> <sarlavha>|<matn>\n"
+        "/setnizombahosi <raqam> <ball>\n"
+        "/setrule <key> <qiymat>\n"
+        "/setrole <user_id> <rol>\n"
+        "/removeuser <user_id>"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("fset:"))
+async def founder_settings_unknown(callback: CallbackQuery) -> None:
+    if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+        return
+    await callback.answer("Bu tugma eskirgan.", show_alert=True)
 
 
 # Founderning yangi sodda menyusidagi tugmalar — mavjud buyruqlarni faqat

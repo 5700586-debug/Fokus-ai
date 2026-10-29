@@ -4,7 +4,6 @@ Only a Telegram file_id is persisted. Callers must stage pending data in FSM and
 wait for a photo before calling apply_pending_penalty.
 """
 
-import employees
 from services import discipline, permissions
 
 
@@ -18,8 +17,6 @@ def apply_pending_penalty(pending: dict, actor_id: int, evidence_file_id: str) -
     amount = pending.get("amount")
     if not all(isinstance(value, int) and not isinstance(value, bool) for value in (employee_id, rule_number, amount)):
         raise ValueError("Minus ma'lumotlari noto'g'ri.")
-    if employees.get_profile(employee_id) is None:
-        raise ValueError("Xodim topilmadi.")
     if not permissions.has_permission(actor_id, permissions.ACTION_EVALUATE_EMPLOYEE):
         raise PermissionError("Ball ayirishga ruxsat yo'q.")
     # apply_penalty() itself revalidates the current rule, option, and amount.

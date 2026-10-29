@@ -452,13 +452,113 @@ class SlownessTests(unittest.TestCase):
 
     def test_workflow_dispatch_is_main_only_and_keeps_pr_events(self):
         self.assertIn("  workflow_dispatch:\n", WORKFLOW)
-        self.assertIn("options: [slowness]", WORKFLOW)
+        self.assertIn("options: [slowness, architecture]", WORKFLOW)
         self.assertIn("github.ref == 'refs/heads/main'", WORKFLOW)
         self.assertIn("github.event.inputs.mode == 'slowness'", WORKFLOW)
+        self.assertIn("github.event.inputs.mode == 'architecture'", WORKFLOW)
         self.assertIn("types: [opened, synchronize, reopened]", WORKFLOW)
         self.assertNotIn("schedule:", WORKFLOW)
         self.assertNotIn(": write", WORKFLOW)
         self.assertIn("?ref=main", WORKFLOW)
+
+
+
+def arch_answer(content, finish="stop"):
+    return {"choices": [{"finish_reason": finish, "message": {"content": json.dumps(content)}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+
+
+class ArchitectureTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.event_path = Path(self.tmp.name) / "manual.json"
+        self.event_path.write_text(json.dumps({"inputs": {"mode": "architecture"}}))
+        self.sha = "c" * 40
+        self.env = dict(GITHUB_EVENT_PATH=str(self.event_path), GITHUB_EVENT_NAME="workflow_dispatch",
+                        GITHUB_REF="refs/heads/main", GITHUB_REPOSITORY="owner/repo",
+                        GH_TOKEN="mock-gh", DEEPSEEK_API_KEY="mock-deepseek",
+                        DEEPSEEK_MODEL="model-from-env")
+        self.good = {"separation": [{"file": "health_server.py", "line": 2, "evidence": "faqat GET /",
+                                     "note": "API yo'q"}],
+                     "reuse": [{"file": "health_server.py", "line": 2, "name": "_health", "limits": "faqat health"}],
+                     "missing": [{"item": "initData tekshiruvi", "status": "yo'q", "note": "ko'rinmadi"}],
+                     "risks": [{"text": "Avval API qatlamini ajratish"}]}
+        self.response = arch_answer(self.good)
+
+    def mock_http(self, url, token, payload=None):
+        if url.endswith("/commits/main"):
+            return {"sha": self.sha}
+        if "/contents/" in url:
+            path = url.split("/contents/", 1)[1].split("?", 1)[0]
+            if path != "health_server.py":
+                raise review.Skip("API xatosi")
+            source = "def _health():\n    return 'ok'\n"
+            return {"type": "file", "encoding": "base64",
+                    "content": base64.b64encode(source.encode()).decode()}
+        if url == "https://api.deepseek.com/chat/completions":
+            return self.response
+        raise AssertionError("Unexpected URL")
+
+    def test_architecture_mode_is_selected_and_reports_sections(self):
+        with patch.object(review, "http_json", side_effect=self.mock_http) as call:
+            summary = review.run(self.env)
+        self.assertIn("baholash arxitekturasi", summary)
+        self.assertNotIn("sekinlik tekshiruvi", summary)
+        self.assertIn("Tekshirilgan fayllar: health\\_server\\.py", summary)
+        self.assertIn("discipline\\_bot\\.py: tekshirilmadi", summary)
+        self.assertIn("Javob holati: to'liq", summary)
+        self.assertIn("initData", summary)
+        gets = [c.args[0] for c in call.call_args_list if "/contents/" in c.args[0]]
+        self.assertEqual(len(gets), len(review.ARCH_FILES))
+        self.assertTrue(all(url.endswith("?ref=" + self.sha) for url in gets))
+        payload = [c for c in call.call_args_list if "deepseek.com/" in c.args[0]][0].args[2]
+        self.assertEqual(payload["model"], "model-from-env")
+        self.assertEqual(payload["max_tokens"], review.ARCH_MAX_OUTPUT)
+        self.assertLessEqual(sum(len(m["content"]) for m in payload["messages"]), review.MAX_INPUT)
+
+    def test_slowness_mode_still_selected(self):
+        self.event_path.write_text(json.dumps({"inputs": {"mode": "slowness"}}))
+        with patch.object(review, "run_slowness", return_value="S") as slow, \
+                patch.object(review, "run_architecture") as arch:
+            self.assertEqual(review.run(self.env), "S")
+        slow.assert_called_once()
+        arch.assert_not_called()
+
+    def test_truncated_answer_warns_and_is_not_shown_as_conclusion(self):
+        self.response = arch_answer(self.good, finish="length")
+        with patch.object(review, "http_json", side_effect=self.mock_http):
+            summary = review.run(self.env)
+        self.assertIn("⚠️ Javob to'liq emas", summary)
+        self.assertNotIn("Javob holati: to'liq", summary)
+        self.assertNotIn("initData", summary)
+
+    def test_wrong_branch_never_calls_api(self):
+        with patch.object(review, "http_json") as call:
+            self.assertIn("tekshirilmadi", review.run({**self.env, "GITHUB_REF": "refs/heads/x"}))
+            call.assert_not_called()
+
+    def test_invalid_lines_and_status_are_dropped(self):
+        bad = dict(self.good)
+        bad["reuse"] = [{"file": "x.py", "line": 1, "name": "n", "limits": "l"}]
+        bad["missing"] = [{"item": "a", "status": "balki", "note": "b"}]
+        sections, dropped = review.architecture_findings(arch_answer(bad), {"health_server.py": {2}})
+        self.assertEqual(sections["reuse"], [])
+        self.assertEqual(sections["missing"], [])
+        self.assertEqual(dropped, 2)
+
+    def test_budget_is_hard_and_secret_files_skipped(self):
+        fake = "sk-" + "x" * 25
+        def source(root, sha, path, token):
+            if path == "health_server.py":
+                return f"def _health():\n    return '{fake}'\n"
+            return "def baholash_start():\n    return '" + "y" * 70000 + "'\n"
+        with patch.object(review, "snapshot_source", side_effect=source):
+            user, refs, notes = review.architecture_input("root", self.sha, "mock")
+        self.assertLessEqual(len(review.ARCH_SYSTEM) + len(user), review.MAX_INPUT)
+        self.assertNotIn(fake, user)
+        self.assertIn(("health_server.py", "tekshirilmadi: maxfiy shubha"), notes)
+        self.assertIn(("discipline_bot.py", "tekshirilmadi: hajm chegarasi"), notes)
 
 
 if __name__ == "__main__":

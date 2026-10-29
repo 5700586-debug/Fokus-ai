@@ -4,6 +4,15 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## DeepSeek "architecture" rejimi — DRAFT (2026-10-29)
+
+- Branch `feature/deepseek-architecture-mode`. Faqat `.github/workflows/deepseek-review.yml`, `scripts/deepseek_review.py`, `tests/test_deepseek_review.py` va shu STATE o'zgardi. Bot kodi, DB, Render, baholash qoidalari o'zgarmadi; merge/deploy yo'q (faqat Muhammadiy ruxsati bilan).
+- Qo'lda ishga tushirish: Actions → DeepSeek advisory review → Run workflow (main) → mode=`architecture`. Faqat main snapshotidagi qat'iy ro'yxatdagi baholash bo'laklari GitHub API orqali matn sifatida o'qiladi (checkout/import/bot/DB yo'q): discipline_bot.py (/baholash, /kunniyop, /eskikunlarniyop handlerlari), services/discipline.py, repositories/discipline.py, services/nazoratchi_day.py, health_server.py, services/permissions.py. Har fayl avval to'liq maxfiy-skanerdan o'tadi.
+- Savollar: baholash mantiqi tugma kodidan ajratilganmi (fayl:qator); bitta "Baholash" (bugun + eski kunlar) Mini App ekrani uchun qayta ishlatiladigan funksiyalar; serverda endpoint/initData/RBAC/saqlash/takroriy himoya bor-yo'qligi. Mini App yozilmaydi.
+- Limitlar: kirish 60 000 belgi (joriy main bo'yicha ~49 800), javob 4 000 token (faqat shu rejim; PR-review va slowness 2 000 da qoldi), model env'dagi deepseek-flash, timeout/retry o'zgarmagan. `finish_reason != stop` bo'lsa Job Summary'da "⚠️ Javob to'liq emas" va xulosa ko'rsatilmaydi. Tekshirilgan/tekshirilmagan fayllar va token sarfi Summary'da.
+- Targeted Linux: `python -m unittest discover -s tests -p test_deepseek_review.py` — 48 PASS (avvalgi 42 + yangi 6). git diff --check PASS. Full suite va haqiqiy pullik DeepSeek so'rovi bajarilmadi.
+- Keyingi: draft PR review → Muhammadiy ruxsati bilan merge → bir marta qo'lda architecture run → hisobot asosida Mini App qarori.
+
 ## PR-A: 06:00 ish kuni va baholanmagan bilan yopish — DRAFT (2026-10-28)
 
 - Branch `fix/day-auto-close`, base main `6011285c1d86d644a89997949bc7c5e7fdf12c8e` (PR #72 MERGED, oxirgi tekshiruvdagi Render deploy `dep-dbgf6vmc6qcc73fubrug` LIVE). Bu vazifada main/Render/production DB o'zgartirilmadi, real Telegram sinovi yo'q. Quyidagi eski DRAFT bo'limlari tarixiy checkpoint.

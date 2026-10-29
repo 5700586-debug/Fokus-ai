@@ -56,6 +56,8 @@ from repositories import discipline as discipline_repo
 from services import audit
 from services import one_on_one as one_on_one_service
 from services import schedule_range
+import evidence_handlers
+from services import evidence_photo
 from services import dialog_cleanup, discipline, nazoratchi_day, discipline_ai, permissions, rules as rules_service, tasks as tasks_service, time_bonus as time_bonus_service
 
 
@@ -1162,7 +1164,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.message.edit_text(text, reply_markup=keyboard)
 
     @dp.callback_query(F.data.startswith(_CB_GRADE_PREFIX))
-    async def grade_pick(callback: CallbackQuery) -> None:
+    async def grade_pick(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
@@ -1227,6 +1229,12 @@ def register(dp: Dispatcher, openai_client) -> None:
             if callback.message:
                 text, keyboard = _render_card(profile, callback.from_user.id, grade_render=True)
                 await callback.message.edit_text(text, reply_markup=keyboard)
+                if grade_key == discipline.GRADE_BAJARILMAGAN and result.changed:
+                    # S2: 0 ball uchun dalil rasmi ixtiyoriy — baho allaqachon saqlangan.
+                    await evidence_handlers.request_grade_photo(
+                        callback.message, state, employee_id=user_id,
+                        supervisor_id=callback.from_user.id, eval_date=work_date,
+                    )
         except Exception as error:
             discipline.log_grade_event(user_id, work_date, "handler_after_save", "failed", type(error).__name__)
             raise
@@ -1260,7 +1268,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         await callback.answer()
 
     @dp.callback_query(F.data.startswith(_CB_PENALTY_APPLY_PREFIX))
-    async def penalty_apply(callback: CallbackQuery) -> None:
+    async def penalty_apply(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
             return
 
@@ -1292,29 +1300,16 @@ def register(dp: Dispatcher, openai_client) -> None:
                 return
 
             amount = rule["default_penalty_amount"]
-            today = company_time.today().isoformat()
-            result = discipline.apply_penalty(
-                user_id, nazoratchi_id, today, amount, rule_number, comment=None, ai_note=None
+            if callback.message is None:
+                await callback.answer("Xabar topilmadi — qaytadan boshlang.", show_alert=True)
+                return
+            # S2: minus FAQAT dalil rasmi kelgach yoziladi (qarang ``_finish_rule_penalty``).
+            await callback.answer()
+            await evidence_handlers.request_penalty_photo(
+                callback.message, state, source="nzr_rule", supervisor_id=nazoratchi_id,
+                employee_id=user_id, penalty_date=company_time.today().isoformat(), amount=amount,
+                rule_number=rule_number, comment=None, ai_note=None, option_id=None,
             )
-            await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
-
-            full_name = " ".join(part for part in (profile.get("familiya"), profile.get("ism")) if part) or "-"
-            if callback.message:
-                await callback.message.edit_text(
-                    f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
-                    f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
-                    "ℹ️ Fiks oylikka ta'sir qilmaydi.",
-                    reply_markup=_card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
-                )
-
-            try:
-                await callback.bot.send_message(
-                    user_id,
-                    f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
-                    reply_markup=_employee_notice_keyboard(result["penalty_id"]),
-                )
-            except Exception as error:  # noqa: BLE001
-                print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
         finally:
             discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
@@ -1597,6 +1592,77 @@ def register(dp: Dispatcher, openai_client) -> None:
         await state.update_data(penalty_other_employee_id=ids[0])
         await _present_confirm(callback, state, ids[0], entry, option, _choice_quote(entry, option))
 
+    # ---------------------------------------------- S2: dalil rasmi kelgach minusni yozish --
+
+    async def _finish_rule_penalty(message: Message, pending: dict, evidence_file_id: str) -> None:
+        """Karta nizom tugmasi va "Boshqa holat" AI mosligi: rasm kelgach minus + avvalgi xabarlar."""
+        try:
+            result = evidence_photo.apply_pending_penalty(pending, message.from_user.id, evidence_file_id)
+        except (ValueError, PermissionError, KeyError) as error:
+            await message.answer(f"❌ Ball ayirilmadi: {error}")
+            return
+        user_id, amount, rule = pending["employee_id"], pending["amount"], result["rule"]
+        profile = employees.get_profile(user_id)
+        full_name = " ".join(part for part in ((profile or {}).get("familiya"), (profile or {}).get("ism")) if part) or "-"
+        markup = (
+            _card_keyboard(profile, message.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None)
+            if profile is not None else None
+        )
+        await message.answer(
+            f"👤 {full_name}\n\n🚫 -{amount} ball ayirildi ({rule['title']}).\n"
+            f"💰 Bonus banki: {result['bonus_bank_balance']} ball\n"
+            "ℹ️ Fiks oylikka ta'sir qilmaydi.",
+            reply_markup=markup,
+        )
+        try:
+            await evidence_handlers.send_evidence_notice(
+                message.bot, user_id, evidence_file_id,
+                f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
+                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+
+    async def _finish_catalog_penalty(message: Message, pending: dict, evidence_file_id: str) -> None:
+        """Nizom katalogi varianti: rasm kelgach minus + avvalgi xabarlar."""
+        try:
+            result = evidence_photo.apply_pending_penalty(pending, message.from_user.id, evidence_file_id)
+        except (ValueError, PermissionError, KeyError) as error:
+            await message.answer(f"❌ Ball ayirilmadi: {error}")
+            return
+        user_id, amount, original = pending["employee_id"], pending["amount"], pending.get("comment")
+        entry = result["rule"]
+        option = None
+        if pending.get("option_id") is not None:
+            resolved = _resolve(pending["rule_number"], pending["option_id"])
+            if resolved is not None:
+                entry, option = resolved
+        profile = employees.get_profile(user_id)
+        markup = (
+            _card_keyboard(profile, message.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None)
+            if profile is not None else None
+        )
+        await message.answer(
+            f"✅ {_rule_label(entry)} — {entry['title']}\n➖ -{amount} ball qayd etildi."
+            + (" Yozma ogohlantirish alohida beriladi." if option and option["written_warning"] else "")
+            + f"\n💰 Bonus banki: {result['bonus_bank_balance']} ball\nℹ️ Fiks oylikka ta'sir qilmaydi.",
+            reply_markup=markup,
+        )
+        try:
+            await evidence_handlers.send_evidence_notice(
+                message.bot, user_id, evidence_file_id,
+                f"⚠️ Sizga -{amount} ball yozildi.\n📚 Band: {_rule_label(entry)} — {entry['title']}\n"
+                f"📝 Holat (nazoratchi yozuvi): {(original or '-')[:300]}\n«{_choice_quote(entry, option)}»\n"
+                "Agar rozi bo'lmasangiz, quyidagi tugma orqali e'tiroz bildirishingiz mumkin.",
+                reply_markup=_employee_notice_keyboard(result["penalty_id"]),
+            )
+        except Exception as error:  # noqa: BLE001
+            print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+
+    evidence_handlers.register_finisher("nzr_rule", _finish_rule_penalty)
+    evidence_handlers.register_finisher("nzr_match", _finish_rule_penalty)
+    evidence_handlers.register_finisher("nzr_cat", _finish_catalog_penalty)
+
     @dp.callback_query(F.data.startswith(_CB_CAT_APPLY))
     async def cat_apply(callback: CallbackQuery, state: FSMContext) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_EVALUATE_EMPLOYEE):
@@ -1637,39 +1703,18 @@ def register(dp: Dispatcher, openai_client) -> None:
                 return
             amount = option["points"] if option else entry["default_penalty_amount"]
             original = data.get("penalty_other_text")
-            try:
-                result = discipline.apply_penalty(
-                    user_id, nazoratchi_id, company_time.today().isoformat(), amount, rule_number,
-                    comment=original, ai_note="Nizom katalogidan nazoratchi tanladi va tasdiqladi.",
-                    option_id=option["id"] if option else None,
-                )
-            except ValueError as error:
-                await callback.answer(f"Qo'llab bo'lmadi: {error}", show_alert=True)
+            if callback.message is None:
+                await callback.answer("Xabar topilmadi — qaytadan boshlang.", show_alert=True)
                 return
-            await state.clear()
-            await callback.answer(f"✅ -{amount} ball qayd etildi.")
-            try:
-                await _edit(
-                    callback,
-                    f"✅ {_rule_label(entry)} — {entry['title']}\n➖ -{amount} ball qayd etildi."
-                    + (" Yozma ogohlantirish alohida beriladi." if option and option["written_warning"] else "")
-                    + f"\n💰 Bonus banki: {result['bonus_bank_balance']} ball\nℹ️ Fiks oylikka ta'sir qilmaydi.",
-                    _card_keyboard(profile, callback.from_user.id, show_time_bonus_button=time_bonus_service.get_today_status(user_id) is None),
-                )
-            except Exception as error:  # noqa: BLE001
-                print(f"Natija ekranini tahrirlab bo'lmadi (minus saqlangan): {error!r}")
-            else:
-                await _dlg_finish(callback.bot, data, callback.message)
-            try:
-                await callback.bot.send_message(
-                    user_id,
-                    f"⚠️ Sizga -{amount} ball yozildi.\n📚 Band: {_rule_label(entry)} — {entry['title']}\n"
-                    f"📝 Holat (nazoratchi yozuvi): {(original or '-')[:300]}\n«{_choice_quote(entry, option)}»\n"
-                    "Agar rozi bo'lmasangiz, quyidagi tugma orqali e'tiroz bildirishingiz mumkin.",
-                    reply_markup=_employee_notice_keyboard(result["penalty_id"]),
-                )
-            except Exception as error:  # noqa: BLE001
-                print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
+            # S2: minus FAQAT dalil rasmi kelgach yoziladi (qarang ``_finish_catalog_penalty``).
+            await callback.answer()
+            await evidence_handlers.request_penalty_photo(
+                callback.message, state, source="nzr_cat", supervisor_id=nazoratchi_id,
+                employee_id=user_id, penalty_date=company_time.today().isoformat(), amount=amount,
+                rule_number=rule_number, comment=original,
+                ai_note="Nizom katalogidan nazoratchi tanladi va tasdiqladi.",
+                option_id=option["id"] if option else None,
+            )
         finally:
             discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 
@@ -1774,28 +1819,17 @@ def register(dp: Dispatcher, openai_client) -> None:
                 return
 
             amount = rule["default_penalty_amount"]
-            today = company_time.today().isoformat()
-            result = discipline.apply_penalty(
-                user_id, nazoratchi_id, today, amount, rule_number,
-                comment=original_text, ai_note="AI 'Boshqa holat' matnini shu nizom bandiga mos topdi.",
+            if callback.message is None:
+                await callback.answer("Xabar topilmadi — qaytadan boshlang.", show_alert=True)
+                return
+            # S2: minus FAQAT dalil rasmi kelgach yoziladi (qarang ``_finish_rule_penalty``).
+            await callback.answer()
+            await evidence_handlers.request_penalty_photo(
+                callback.message, state, source="nzr_match", supervisor_id=nazoratchi_id,
+                employee_id=user_id, penalty_date=company_time.today().isoformat(), amount=amount,
+                rule_number=rule_number, comment=original_text,
+                ai_note="AI 'Boshqa holat' matnini shu nizom bandiga mos topdi.", option_id=None,
             )
-            await callback.answer(f"✅ -{amount} ball qayd etildi ({rule['title']}).")
-
-            if callback.message:
-                await callback.message.edit_text(
-                    f"✅ {rule['title']} bo'yicha -{amount} ball qayd etildi.\n"
-                    f"💰 Bonus banki: {result['bonus_bank_balance']} ball",
-                    reply_markup=None,
-                )
-
-            try:
-                await callback.bot.send_message(
-                    user_id,
-                    f"⚠️ Sizga -{amount} ball ayirildi.\nQoida: {rule['title']}\nSabab: {rule['content']}",
-                    reply_markup=_employee_notice_keyboard(result["penalty_id"]),
-                )
-            except Exception as error:  # noqa: BLE001
-                print(f"Xodimga ball ayirish xabarini yuborib bo'lmadi ({user_id}): {error!r}")
         finally:
             discipline_bot._PENDING_PENALTY_APPLICATIONS.discard(nazoratchi_id)
 

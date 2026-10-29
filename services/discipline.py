@@ -215,6 +215,12 @@ def log_grade_event(employee_id: int, eval_date: str | None, stage: str, outcome
 def record_daily_grade(
     employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
 ) -> EvaluationResult:
+    # Server-side day guard: UI checks alone cannot protect direct callers.
+    from services import nazoratchi_day
+    status = nazoratchi_day.check_active(supervisor_id, eval_date, company_time.now())
+    if status is not None:
+        raise ValueError("Baholash kuni yopilgan." if status == "closed" else "Eski yoki faol bo'lmagan kunga baho qo'yib bo'lmaydi.")
+
     grade_points_map = get_grade_points()
     if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")

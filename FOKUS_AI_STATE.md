@@ -4,6 +4,11 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Founder sozlamalar menyusi — DRAFT (2026-10-29)
+
+- Branch `feat/founder-settings-menu`: Sozlamalar Founder uchun 4 inline tugma; xodimga avvalgi «tez orada». Nizomlar, qoidalar va eski kunlar preview'i mavjud buyruq oqimlari bilan umumiy yordamchilar orqali qayta ishlatiladi; tasdiq handleri o'zgarmadi.
+- Har bir callback alohida ACTION bilan tekshiriladi; notanish fset callbackga bitta fallback. Targeted testlar qo'shildi; Actions natijasi kutiladi. Main/Render o'zgarmadi, merge faqat ruxsat bilan.
+
 ## Founder hisobotlar menyusi — DRAFT (2026-10-29)
 
 - Branch `feat/founder-reports-menu`: asosiy Founder menyusida `📊 Hisobotlar`, ikki inline report; faqat ACTION_MANAGE_DISCIPLINE_RULES. Mavjud /oylikturnir va /bugungiporga matnlari umumiy formatter orqali qayta ishlatiladi; eski buyruqlar saqlanadi.

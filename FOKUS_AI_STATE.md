@@ -4,6 +4,11 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Founder hisobotlar menyusi — DRAFT (2026-10-29)
+
+- Branch `feat/founder-reports-menu`: asosiy Founder menyusida `📊 Hisobotlar`, ikki inline report; faqat ACTION_MANAGE_DISCIPLINE_RULES. Mavjud /oylikturnir va /bugungiporga matnlari umumiy formatter orqali qayta ishlatiladi; eski buyruqlar saqlanadi.
+- Sandbox/nav label to'plamlari Founder menyusidan avtomatik keladi. Faqat targeted test qo'shildi, Actions tekshiruvi kutiladi. Main/Render o'zgarmaydi; merge faqat ruxsat bilan.
+
 ## PR-B — Draft (2026-10-29)
 
 - Branch `fix/pr-b-ungraded-month-line`: payroll_view formulasi o'zgarmadi; baholanmagan kun yozuv emas, 0 baho esa haqiqiy yozuv.

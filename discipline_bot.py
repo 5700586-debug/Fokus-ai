@@ -633,6 +633,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         employee_id = int(parts[2])
         grade_key = parts[3]
         review_date = _iso_from_ymd(parts[4]) if len(parts) > 4 else None
+        discipline.log_grade_event(employee_id, review_date, "bos_request", "received")
         if not await _guard_active_day(callback, review_date):
             discipline.log_grade_event(employee_id, review_date, "bos_guard", "inactive_day")
             return

@@ -94,7 +94,7 @@ async def test_start_shows_founder_category_for_founder(bot_dp):
 
     assert buttons == {
         "👤 Xodim qo'shish", "📢 Ishga e'lon berish", "👥 Xodimlar", "🏬 Do'konlar",
-        "💰 Smenalarni ko'rish", "🚨 Bugungi muammolar", "💵 Oylik kelishuvi", "⚙️ Sozlamalar",
+        "💰 Smenalarni ko'rish", "🚨 Bugungi muammolar", "📊 Hisobotlar", "💵 Oylik kelishuvi", "⚙️ Sozlamalar",
     }
 
 

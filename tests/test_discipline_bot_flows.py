@@ -909,3 +909,33 @@ async def test_month_board_workday_boundary(bot_dp, monkeypatch, hour, minute, e
     monkeypatch.setattr(discipline_bot.discipline, "count_graded_dates", lambda start, end: 2)
     sent = await send(main.dp, bot, FOUNDER_ID, text="/oylikturnir")
     assert any(expected in item.text for item in sent)
+
+
+async def test_founder_reports_menu_and_callbacks(bot_dp):
+    main, bot = bot_dp
+    menu = await send(main.dp, bot, FOUNDER_ID, text="📊 Hisobotlar")
+    assert any("Hisobotlar" in m.text for m in menu)
+    monthly_command = await send(main.dp, bot, FOUNDER_ID, text="/oylikturnir")
+    monthly_cb = await send_callback(main.dp, bot, FOUNDER_ID, data="frep:month", target_chat_id=FOUNDER_ID)
+    assert any(m.text == monthly_command[0].text for m in monthly_cb if hasattr(m, "text"))
+    daily_command = await send(main.dp, bot, FOUNDER_ID, text="/bugungiporga")
+    daily_cb = await send_callback(main.dp, bot, FOUNDER_ID, data="frep:today", target_chat_id=FOUNDER_ID)
+    assert any(m.text == daily_command[0].text for m in daily_cb if hasattr(m, "text"))
+
+
+async def test_founder_reports_denied_and_stale(bot_dp):
+    main, bot = bot_dp
+    _set_role(111, "kassir")
+    menu = await send(main.dp, bot, 111, text="📊 Hisobotlar")
+    assert not any("🏆 Oylik turnir" in str(m) for m in menu)
+    denied = await send_callback(main.dp, bot, 111, data="frep:month", target_chat_id=111)
+    assert not any("🏆 Oylik Turnir" in getattr(m, "text", "") for m in denied)
+    stale = await send_callback(main.dp, bot, FOUNDER_ID, data="frep:other", target_chat_id=FOUNDER_ID)
+    assert any("Bu tugma eskirgan." in str(m) for m in stale)
+
+
+def test_founder_reports_are_navigation_labels():
+    import main
+    assert "📊 Hisobotlar" in main._FOUNDER_MENU_LABELS
+    assert "📊 Hisobotlar" in main._SANDBOX_ESCAPE_TEXTS
+    assert "📊 Hisobotlar" in main._TOP_LEVEL_NAV_TEXTS

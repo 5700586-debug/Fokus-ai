@@ -540,6 +540,34 @@ async def begin_appeal(callback: CallbackQuery, state: FSMContext, penalty_id: i
         dialog_cleanup.track(key, callback.message)
 
 
+def _today_board_text() -> str:
+    today = _today()
+    board = discipline.get_daily_leaderboard(today.isoformat())
+    return _format_board(f"🏆 Bugungi Poyga — {today.strftime('%d.%m.%Y')}", board, "grade_points")
+
+
+def _month_board_text(user_id: int) -> str:
+    today = _today()
+    board = discipline.get_monthly_leaderboard(today.strftime("%Y-%m"))
+    text = _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")
+    if permissions.has_permission(user_id, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+        work_date = date.fromisoformat(nazoratchi_day.current_work_date(company_time.now()))
+        first = work_date.replace(day=1)
+        if work_date == first:
+            end = first
+            first = (first - timedelta(days=1)).replace(day=1)
+            month_names = ("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
+                           "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
+            label = month_names[first.month - 1] + ": "
+        else:
+            end = work_date
+            label = ""
+        days = (end - first).days
+        graded = discipline.count_graded_dates(first.isoformat(), end.isoformat())
+        text += f"\n\n{label}Nazoratchi {days} kundan {graded} kunini baholadi"
+    return text
+
+
 def register(dp: Dispatcher, openai_client) -> None:
 
     # ------------------------------------------------------- /baholash --
@@ -859,37 +887,27 @@ def register(dp: Dispatcher, openai_client) -> None:
     async def today_board_handler(message: Message) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
-
-        today = _today()
-        board = discipline.get_daily_leaderboard(today.isoformat())
-        await message.answer(
-            _format_board(f"🏆 Bugungi Poyga — {today.strftime('%d.%m.%Y')}", board, "grade_points")
-        )
+        await message.answer(_today_board_text())
 
     @dp.message(Command("oylikturnir"))
     async def month_board_handler(message: Message) -> None:
         if not message.from_user or not is_authorized(message.from_user.id):
             return
+        await message.answer(_month_board_text(message.from_user.id))
 
-        today = _today()
-        board = discipline.get_monthly_leaderboard(today.strftime("%Y-%m"))
-        text = _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")
-        if permissions.has_permission(message.from_user.id, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
-            work_date = date.fromisoformat(nazoratchi_day.current_work_date(company_time.now()))
-            first = work_date.replace(day=1)
-            if work_date == first:
-                end = first
-                first = (first - timedelta(days=1)).replace(day=1)
-                month_names = ("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
-                               "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
-                label = month_names[first.month - 1] + ": "
-            else:
-                end = work_date
-                label = ""
-            days = (end - first).days
-            graded = discipline.count_graded_dates(first.isoformat(), end.isoformat())
-            text += f"\n\n{label}Nazoratchi {days} kundan {graded} kunini baholadi"
-        await message.answer(text)
+    @dp.callback_query(F.data.startswith("frep:"))
+    async def founder_report_callback(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        if callback.data == "frep:month":
+            text = _month_board_text(callback.from_user.id)
+        elif callback.data == "frep:today":
+            text = _today_board_text()
+        else:
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        await callback.message.answer(text)
+        await callback.answer()
 
     @dp.message(Command("eskikunlarniyop"))
     async def legacy_day_close_preview(message: Message) -> None:

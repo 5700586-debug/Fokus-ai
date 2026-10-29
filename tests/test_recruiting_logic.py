@@ -311,7 +311,7 @@ async def test_decide_follow_up_uses_ai_first_when_available():
     assert result == "Buni aniqroq tushuntira olasizmi?"
 
 
-async async def test_decide_follow_up_falls_back_to_deterministic_when_ai_fails():
+async def test_decide_follow_up_falls_back_to_deterministic_when_ai_fails():
     result = await recruiting_followup.decide_follow_up(
         _FailingClient(), "Muddati o'tgan mahsulotni ko'rsangiz nima qilasiz?",
         "Bilmayman", question_key="core_muddat"
@@ -319,7 +319,7 @@ async async def test_decide_follow_up_falls_back_to_deterministic_when_ai_fails(
     assert result is not None
     assert "muddati" in result.lower()
 
-async async def test_decide_follow_up_ai_null_response_falls_back_to_deterministic():
+async def test_decide_follow_up_ai_null_response_falls_back_to_deterministic():
     client = _FakeClient('{"follow_up": null}')
     result = await recruiting_followup.decide_follow_up(
         client, "Muddati o'tgan mahsulotni ko'rsangiz nima qilasiz?",

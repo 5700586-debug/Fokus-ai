@@ -1189,6 +1189,28 @@ def close_expired_review_days(before_day: str, *, expected_version: str | None =
                 (supervisor_id, day, counts["evaluated"], counts["total"], _now()),
             )
             closed_days += changed.rowcount
+        if expected_version is None:
+            strict = conn.execute(
+                "SELECT rule_value FROM rules WHERE rule_key = ?",
+                ("bos.strict_close_start",),
+            ).fetchone()
+            strict_start = strict["rule_value"] if strict else "2026-11-01"
+            for supervisor_id, day in sorted({
+                (r["supervisor_id"], r["session_date"]) for r in rows
+                if r["session_date"] >= max("2026-11-01", strict_start)
+                and r["status"] == "open"
+            }):
+                audit = conn.execute(
+                    "INSERT OR IGNORE INTO supervisor_audit "
+                    "(supervisor_id, audit_date, event_type, penalty_amount, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (supervisor_id, day, "auto_close_minus", 5, _now()),
+                )
+                if audit.rowcount > 0:
+                    _apply_bonus_delta(
+                        conn, supervisor_id, -5, "Kun 06:00 gacha yopilmadi (-5)",
+                        "supervisor_audit", None,
+                    )
         conn.commit()
         return {"days": closed_days, "sessions": closed_sessions}
     except BaseException:

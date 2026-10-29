@@ -87,20 +87,20 @@ def test_card_shows_red_flags_prominently_when_present():
     text = recruiting_card.format_candidate_card(
         _application(), _vacancy(), _assessment(overall_result="NEEDS_HUMAN_REVIEW", red_flags=red_flags), _rubric_version(), []
     )
-    assert "QIZIL XAVFLAR" in text
+    assert "🚩 Red Flag" in text
     assert "Muddati o'tgan mahsulotni sotishga tayyor" in text
 
 
 def test_card_shows_no_red_flag_section_when_none_present():
     text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(), _rubric_version(), [])
-    assert "QIZIL XAVFLAR" not in text
+    assert "🚩 Red Flag" not in text
 
 
 def test_card_shows_clarify_questions_when_present():
     text = recruiting_card.format_candidate_card(
         _application(), _vacancy(), _assessment(clarify_questions=["Kamomad haqida savolga aniqroq javob kerak"]), _rubric_version(), []
     )
-    assert "aniqlashtirilishi kerak" in text.lower()
+    assert "aniqlashtirish kerak" in text.lower()
     assert "Kamomad haqida savolga aniqroq javob kerak" in text
 
 

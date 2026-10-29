@@ -79,3 +79,38 @@ def test_previous_month_remains_unpenalized(prepared):
     repo.open_branch_session(SUP, BRANCH, "2026-10-30")
     day.auto_close_expired(datetime(2026, 11, 3, 6, 1, tzinfo=ZoneInfo("Asia/Tashkent")))
     assert not [a for a in _rows("supervisor_audit") if a["event_type"] == "auto_close_minus"]
+
+
+def test_monthly_payroll_separates_full_bonus_from_auto_minus(temp_db):
+    from services import payroll_view
+    from repositories import discipline as discipline_repo
+    from tests.test_payroll_view import _agreement, _evaluation, EMP as PAY_EMP
+    _agreement()
+    _evaluation("2026-09-02", 3)
+    assert discipline_repo.record_supervisor_audit_with_penalty(
+        PAY_EMP, "2026-09-05", "day_full_bonus", -5, "Kun to'liq yopildi (+5)"
+    )
+    assert discipline_repo.record_supervisor_audit_with_penalty(
+        PAY_EMP, "2026-09-06", "auto_close_minus", 5, "Kun 06:00 gacha yopilmadi (-5)"
+    )
+    view = payroll_view.month_view(PAY_EMP, "2026-09")
+    assert view["work_bonus"] == 8
+    assert view["minus"] == 5
+    assert view["minus_applied"] == 5
+    assert not discipline_repo.record_supervisor_audit_with_penalty(
+        PAY_EMP, "2026-09-06", "auto_close_minus", 5, "Kun 06:00 gacha yopilmadi (-5)"
+    )
+
+
+def test_no_negative_monthly_bonus_from_auto_minus(temp_db):
+    from services import payroll_view
+    from repositories import discipline as discipline_repo
+    from tests.test_payroll_view import _agreement, EMP as PAY_EMP
+    _agreement()
+    discipline_repo.record_supervisor_audit_with_penalty(
+        PAY_EMP, "2026-09-06", "auto_close_minus", 5, "Kun 06:00 gacha yopilmadi (-5)"
+    )
+    view = payroll_view.month_view(PAY_EMP, "2026-09")
+    assert view["work_bonus"] == 0
+    assert view["minus"] == 5
+    assert view["minus_applied"] == 0

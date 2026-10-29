@@ -56,6 +56,19 @@ async def request_penalty_photo(
     await target.answer("📷 Minus uchun dalil rasmini yuboring yoki Bekor qiling.", reply_markup=_cancel_keyboard())
 
 
+async def request_grade_photo(
+    target: Message, state: FSMContext, *, employee_id: int,
+    supervisor_id: int, eval_date: str,
+) -> None:
+    """Offer an optional photo after the zero-point grade was already saved."""
+    await state.clear()
+    await state.update_data(grade_pending={
+        "employee_id": employee_id, "supervisor_id": supervisor_id, "eval_date": eval_date,
+    })
+    await state.set_state(EvidenceStates.waiting_optional_grade_photo)
+    await target.answer("📷 Dalil rasmi (ixtiyoriy)", reply_markup=_cancel_keyboard(True))
+
+
 async def send_evidence_notice(
     bot, chat_id: int, evidence_file_id: str | None, text: str, *, reply_markup=None
 ):
@@ -139,6 +152,32 @@ def register(dp: Dispatcher) -> None:
             await state.clear()
             await message.answer("✅ Baho saqlangan. Dalil rasmi o'tkazib yuborildi.")
             return
-        # Grade evidence persistence is wired only with the grade-side guarded repository update.
-        # Never claim that a file_id was saved before the grade handlers wire that update.
-        await message.answer("Dalilni bog'lash hozircha faol emas. O'tkazib yuboring.", reply_markup=_cancel_keyboard(True))
+        pending = (await state.get_data()).get("grade_pending") or {}
+        await state.clear()
+        actor_id = message.from_user.id if message.from_user else None
+        employee_id, eval_date = pending.get("employee_id"), pending.get("eval_date")
+        if (
+            actor_id is None or pending.get("supervisor_id") != actor_id
+            or not permissions.has_permission(actor_id, permissions.ACTION_EVALUATE_EMPLOYEE)
+            or not isinstance(employee_id, int) or not isinstance(eval_date, str)
+        ):
+            await message.answer("Baho o'zgargan yoki kun yopilgan — dalil saqlanmadi")
+            return
+        import company_time
+        from repositories import discipline as discipline_repo
+        from services import nazoratchi_day
+        if nazoratchi_day.check_active(actor_id, eval_date, company_time.now()) is not None:
+            await message.answer("Baho o'zgargan yoki kun yopilgan — dalil saqlanmadi")
+            return
+        updated = discipline_repo.attach_grade_evidence(employee_id, eval_date, message.photo[-1].file_id)
+        if updated != 1:
+            await message.answer("Baho o'zgargan yoki kun yopilgan — dalil saqlanmadi")
+            return
+        try:
+            await send_evidence_notice(
+                message.bot, employee_id, message.photo[-1].file_id,
+                f"📅 {eval_date}: Bajarilmagan (0 ball) — dalil rasmi",
+            )
+        except Exception as error:
+            logger.warning("Grade evidence notice failed: %s", type(error).__name__)
+        await message.answer("✅ Dalil saqlandi")

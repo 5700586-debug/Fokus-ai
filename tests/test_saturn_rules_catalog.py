@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from tests import db_fail
+
 from db import get_connection
 from repositories import discipline as discipline_repo
 from services import company_rules_import as importer
@@ -318,26 +320,14 @@ def test_existing_different_variant_is_a_conflict_and_nothing_is_written():
 
 
 def test_write_error_rolls_back_the_whole_catalog_and_retry_succeeds():
-    conn = get_connection()
+    db_fail.break_writes("company_rule_penalty_options", "INSERT", name="break_options", message="sinov: yozuv xatosi")
     try:
-        conn.execute(
-            "CREATE TRIGGER break_options BEFORE INSERT ON company_rule_penalty_options "
-            "BEGIN SELECT RAISE(ABORT, 'sinov: yozuv xatosi'); END"
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        with pytest.raises(db_fail.WRITE_ERROR):
+            importer.run_import(apply=True, created_by=FOUNDER, expected_version=importer.import_version())
 
-    with pytest.raises(sqlite3.IntegrityError):
-        importer.run_import(apply=True, created_by=FOUNDER, expected_version=importer.import_version())
-
-    assert (_count("company_rules"), _count("company_rule_penalty_options")) == (0, 0)  # yarim katalog qolmagan
-    conn = get_connection()
-    try:
-        conn.execute("DROP TRIGGER break_options")
-        conn.commit()
+        assert (_count("company_rules"), _count("company_rule_penalty_options")) == (0, 0)  # yarim katalog qolmagan
     finally:
-        conn.close()
+        db_fail.repair("company_rule_penalty_options", name="break_options")
     result = importer.run_import(apply=True, created_by=FOUNDER, expected_version=importer.import_version())
     assert result["applied"] and (_count("company_rules"), _count("company_rule_penalty_options")) == (97, 88)
 

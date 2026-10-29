@@ -3,6 +3,7 @@
 import pytest
 
 import db
+from tests import db_fail
 from config import FOUNDER_ID
 from services import discipline
 
@@ -18,30 +19,20 @@ def _state() -> dict:
     try:
         salary = conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (EMPLOYEE,)).fetchone()
         return {
-            "penalties": conn.execute("SELECT COUNT(*) FROM discipline_penalties WHERE employee_id = ?", (EMPLOYEE,)).fetchone()[0],
-            "ledger": conn.execute("SELECT COUNT(*) FROM bonus_bank_ledger WHERE user_id = ?", (EMPLOYEE,)).fetchone()[0],
-            "balance": salary[0] if salary else None,
+            "penalties": conn.execute("SELECT COUNT(*) AS n FROM discipline_penalties WHERE employee_id = ?", (EMPLOYEE,)).fetchone()["n"],
+            "ledger": conn.execute("SELECT COUNT(*) AS n FROM bonus_bank_ledger WHERE user_id = ?", (EMPLOYEE,)).fetchone()["n"],
+            "balance": salary["bonus_bank"] if salary else None,
         }
     finally:
         conn.close()
 
 
 def _trigger(event: str, table: str) -> None:
-    conn = db.get_connection()
-    try:
-        conn.execute(f"CREATE TRIGGER fokus_break BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'sinov xatosi'); END")
-        conn.commit()
-    finally:
-        conn.close()
+    db_fail.break_writes(table, event)  # SQLite va Postgres ikkalasida haqiqiy yozuv xatosi
 
 
-def _drop() -> None:
-    conn = db.get_connection()
-    try:
-        conn.execute("DROP TRIGGER IF EXISTS fokus_break")
-        conn.commit()
-    finally:
-        conn.close()
+def _drop(table: str) -> None:
+    db_fail.repair(table)
 
 
 def _apply():
@@ -82,7 +73,7 @@ def test_failure_at_any_write_stage_leaves_nothing_partial(event, table, preexis
     with pytest.raises(Exception):
         _apply()
 
-    _drop()
+    _drop(table)
     assert _state() == before
     expected = (before["balance"] or 0) - 10
     assert _apply()["bonus_bank_balance"] == expected  # qayta urinish noldan to'liq ishlaydi

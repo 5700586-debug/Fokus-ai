@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 import db
+from tests import db_fail
 from config import FOUNDER_ID
 from services import discipline
 
@@ -26,30 +27,20 @@ def _state(penalty_id: int) -> dict:
         ).fetchone()
         return {
             "status": penalty["appeal_status"], "decision": penalty["appeal_decision"],
-            "balance": conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (EMPLOYEE,)).fetchone()[0],
-            "refunds": conn.execute("SELECT COUNT(*) FROM bonus_bank_ledger WHERE ref_type = 'appeal_refund'").fetchone()[0],
-            "ledger": conn.execute("SELECT COUNT(*) FROM bonus_bank_ledger").fetchone()[0],
+            "balance": conn.execute("SELECT bonus_bank FROM salaries WHERE user_id = ?", (EMPLOYEE,)).fetchone()["bonus_bank"],
+            "refunds": conn.execute("SELECT COUNT(*) AS n FROM bonus_bank_ledger WHERE ref_type = 'appeal_refund'").fetchone()["n"],
+            "ledger": conn.execute("SELECT COUNT(*) AS n FROM bonus_bank_ledger").fetchone()["n"],
         }
     finally:
         conn.close()
 
 
 def _trigger(event: str, table: str) -> None:
-    conn = db.get_connection()
-    try:
-        conn.execute(f"CREATE TRIGGER fokus_break BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'sinov xatosi'); END")
-        conn.commit()
-    finally:
-        conn.close()
+    db_fail.break_writes(table, event)  # SQLite va Postgres ikkalasida haqiqiy yozuv xatosi
 
 
-def _drop() -> None:
-    conn = db.get_connection()
-    try:
-        conn.execute("DROP TRIGGER IF EXISTS fokus_break")
-        conn.commit()
-    finally:
-        conn.close()
+def _drop(table: str) -> None:
+    db_fail.repair(table)
 
 
 def test_approval_writes_decision_balance_and_one_refund_consistently():
@@ -86,7 +77,7 @@ def test_failure_at_each_stage_rolls_back_and_appeal_stays_pending_for_retry(eve
     with pytest.raises(Exception):
         discipline.decide_appeal(penalty_id, discipline.DECISION_APPROVED, FOUNDER_ID)
 
-    _drop()
+    _drop(table)
     assert _state(penalty_id) == before and before["status"] == "pending"
     discipline.decide_appeal(penalty_id, discipline.DECISION_APPROVED, FOUNDER_ID)  # qayta urinish ishlaydi
     assert _state(penalty_id)["refunds"] == 1 and _state(penalty_id)["balance"] == 0

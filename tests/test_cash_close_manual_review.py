@@ -8,6 +8,7 @@ from config import FOUNDER_ID
 from db import get_connection
 from repositories import cash_shifts as cash_shifts_repo
 from services import cash_shift
+from tests import db_fail
 from tests.bot_harness import send, send_callback
 from tests.test_cash_shift_bot_flows import _clear_daily_report_gate, _clear_deficiency_gate, _make_kassir, _open_shift
 
@@ -282,18 +283,18 @@ async def test_no_file_ids_remain_in_fsm_after_send_and_nothing_in_db(bot_dp):
     assert all(data.get(key) is None for key in _PHOTO_KEYS)
     row = _shift()
     assert not row.get("sales_report_photo_ref") and not row.get("cash_report_photo_ref")
+    tables = db_fail.list_tables()  # SQLite va Postgres ikkalasida
     conn = get_connection()
     try:
-        tables = [r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()]
         for table in tables:
-            for column in conn.execute(f"PRAGMA table_info({table})").fetchall():
-                if table == "bot_workflow_messages":
-                    continue
+            if table == "bot_workflow_messages":
+                continue
+            for column in sorted(db_fail.table_columns(table)):
                 if conn.execute(
-                    f"SELECT COUNT(*) AS n FROM {table} WHERE CAST({column['name']} AS TEXT) IN "
+                    f"SELECT COUNT(*) AS n FROM {table} WHERE CAST({column} AS TEXT) IN "
                     "('notebook_file', 'pos_file', 'receipts_file')"
                 ).fetchone()["n"]:
-                    raise AssertionError(f"rasm file_id bazaga tushgan: {table}.{column['name']}")
+                    raise AssertionError(f"rasm file_id bazaga tushgan: {table}.{column}")
     finally:
         conn.close()
 

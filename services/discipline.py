@@ -212,6 +212,37 @@ def log_grade_event(employee_id: int, eval_date: str | None, stage: str, outcome
           f"stage={stage} outcome={outcome} error_type={error_type}", flush=True)
 
 
+
+@dataclass
+class GradePreparation:
+    result: EvaluationResult | None
+    error: str | None = None
+
+
+def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> GradePreparation:
+    """Shared BOS grade checks and save; handler owns only Telegram responses."""
+    from config import RECRUITING_BRANCH_NAMES
+    from services import nazoratchi_day
+
+    log_grade_event(employee_id, eval_date, "bos_request", "received")
+    status = nazoratchi_day.check_active(supervisor_id, eval_date, company_time.now())
+    if status is not None:
+        log_grade_event(employee_id, eval_date, "bos_guard", "inactive_day")
+        return GradePreparation(None, "Ish kuni yopilgan." if status == "closed" else "Bu ish kuni faol emas.")
+    profile = employees.get_profile(employee_id)
+    if profile is None:
+        log_grade_event(employee_id, eval_date, "bos_guard", "unknown_employee")
+        return GradePreparation(None, grade_notice_reply(NOTICE_UNKNOWN_EMPLOYEE))
+    branch = profile.get("branch")
+    sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, eval_date)
+    if any(s["branch"] == branch and s["session_date"] == eval_date and s["status"] == "closed" for s in sessions):
+        log_grade_event(employee_id, eval_date, "bos_guard", "closed_branch")
+        return GradePreparation(None, "Bu filial shu ish kunida yopilgan.")
+    session_branch = branch if branch in RECRUITING_BRANCH_NAMES else None
+    return GradePreparation(record_daily_grade(employee_id, supervisor_id, eval_date, grade_key,
+                                               session_branch=session_branch))
+
+
 def record_daily_grade(
     employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
 ) -> EvaluationResult:

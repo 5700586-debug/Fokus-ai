@@ -1,0 +1,81 @@
+"""Strict day close: cutover, explanation, award, and automatic deduction."""
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
+import db
+import employees
+from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from repositories import discipline as repo
+from roles import set_role
+from services import discipline, nazoratchi_day as day
+
+SUP, EMP = 1, 889001
+BRANCH = RECRUITING_BRANCH_NAMES[0]
+
+
+def _rows(table):
+    conn = db.get_connection()
+    try:
+        return [dict(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()]
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def prepared(temp_db):
+    set_role(SUP, "nazoratchi", set_by=FOUNDER_ID)
+    set_role(EMP, "kassir", set_by=FOUNDER_ID)
+    employees.submit_profile(EMP, {
+        "familiya": "Sinov", "ism": "Xodim", "branch": BRANCH,
+        "role_key": "kassir", "contacts": [],
+    })
+    employees.approve_profile(EMP, approved_by=FOUNDER_ID)
+    return "2026-11-02"
+
+
+def test_strict_close_requires_explanation_and_pays_zero_if_ungraded(prepared):
+    work_date = prepared
+    repo.open_branch_session(SUP, BRANCH, work_date)
+    blocked = day.close_session(SUP, BRANCH, work_date)
+    assert not blocked.closed and blocked.blockers
+    with pytest.raises(ValueError):
+        day.close_session(SUP, BRANCH, work_date, note="abc")
+    closed = day.close_session(SUP, BRANCH, work_date, note="Xodimga ulgurmadim")
+    assert closed.closed
+    notes = _rows("day_close_notes")
+    assert len(notes) == 1 and notes[0]["ungraded_count"] == 1
+    assert not [a for a in _rows("supervisor_audit") if a["event_type"] == "day_full_bonus"]
+
+
+def test_strict_full_close_awards_once_when_all_graded(prepared):
+    work_date = prepared
+    repo.open_branch_session(SUP, BRANCH, work_date)
+    discipline.record_daily_grade(EMP, SUP, work_date, "alo")
+    result = day.close_session(SUP, BRANCH, work_date)
+    assert result.closed
+    assert not day.close_session(SUP, BRANCH, work_date).closed
+    awards = [a for a in _rows("supervisor_audit") if a["event_type"] == "day_full_bonus"]
+    assert len(awards) == 1
+    assert awards[0]["penalty_amount"] == -5
+    assert awards[0]["audit_date"] == work_date
+    assert discipline.get_salary(SUP)["bonus_bank"] == 5
+
+
+def test_auto_close_deducts_once_and_no_session_never_penalized(prepared):
+    repo.auto_close_start("2026-11-02")
+    repo.open_branch_session(SUP, BRANCH, prepared)
+    day.auto_close_expired(datetime(2026, 11, 3, 6, 1, tzinfo=ZoneInfo("Asia/Tashkent")))
+    day.auto_close_expired(datetime(2026, 11, 3, 6, 2, tzinfo=ZoneInfo("Asia/Tashkent")))
+    audits = [a for a in _rows("supervisor_audit") if a["event_type"] == "auto_close_minus"]
+    assert len(audits) == 1 and audits[0]["audit_date"] == prepared
+    assert audits[0]["penalty_amount"] == 5
+    assert not [a for a in audits if a["supervisor_id"] != SUP]
+
+
+def test_previous_month_remains_unpenalized(prepared):
+    repo.auto_close_start("2026-10-30")
+    repo.open_branch_session(SUP, BRANCH, "2026-10-30")
+    day.auto_close_expired(datetime(2026, 11, 3, 6, 1, tzinfo=ZoneInfo("Asia/Tashkent")))
+    assert not [a for a in _rows("supervisor_audit") if a["event_type"] == "auto_close_minus"]

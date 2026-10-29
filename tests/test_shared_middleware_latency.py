@@ -79,7 +79,7 @@ async def _passthrough_handler(event, data):
 # ------------------------------------------------- _SandboxPreviewMiddleware --
 
 
-async def test_sandbox_preview_passes_through_without_state_read_in_production(monkeypatch):
+async def test_sandbox_preview_founder_reads_state_once_in_production(monkeypatch):
     import main
 
     monkeypatch.setattr(main, "ENVIRONMENT", "production")
@@ -92,7 +92,7 @@ async def test_sandbox_preview_passes_through_without_state_read_in_production(m
     result = await main._SandboxPreviewMiddleware()(_passthrough_handler, event, data)
 
     assert result == "handled"
-    assert state.get_data_calls == 0
+    assert state.get_data_calls == 1  # Founder preview productionda ham xavfsiz read-only; bir martalik FSM o‘qish
 
 
 async def test_sandbox_preview_passes_through_for_non_founder_in_test_env(monkeypatch):

@@ -4,6 +4,13 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Grading Mini App tayyorgarligi — DRAFT (2026-10-29)
+
+- Branch: `refactor/grading-miniapp-prep`, base `519e19b`. Faqat mavjud baholash servis guardi, BOS handlerdan servicega ko'chirilgan tekshiruvlar va sof WebApp initData verifier. Endpoint/Mini App yo'q, botning javob matnlari va baho qiymatlari o'zgartirilmaydi.
+- `record_daily_grade` faol 06:00 ish kuni guardini majburiy tekshiradi; yopilgan/eski kunga yozmaydi. `prepare_and_record_grade` profil, filial yopilishi, session_branch va diagnostikani markazlashtiradi.
+- `services/telegram_webapp.py`: HMAC-SHA256, auth_date muddatini tekshirish, hech qayerga ulanmagan. Testlar qo'shilgan. CI/real botda tasdiq alohida zarur.
+- Draft PR; merge/deploy faqat Muhammadiy ruxsati bilan. Full suite yo'q.
+
 ## DeepSeek "architecture" rejimi — DRAFT (2026-10-29)
 
 - Branch `feature/deepseek-architecture-mode`. Faqat `.github/workflows/deepseek-review.yml`, `scripts/deepseek_review.py`, `tests/test_deepseek_review.py` va shu STATE o'zgardi. Bot kodi, DB, Render, baholash qoidalari o'zgarmadi; merge/deploy yo'q (faqat Muhammadiy ruxsati bilan).

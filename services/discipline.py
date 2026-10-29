@@ -212,9 +212,42 @@ def log_grade_event(employee_id: int, eval_date: str | None, stage: str, outcome
           f"stage={stage} outcome={outcome} error_type={error_type}", flush=True)
 
 
+
+@dataclass
+class GradePreparation:
+    result: EvaluationResult | None
+    error: str | None = None
+
+
+def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> GradePreparation:
+    """Shared BOS grade checks and save; handler owns only Telegram responses."""
+    from config import RECRUITING_BRANCH_NAMES
+    from services import nazoratchi_day
+
+    now = company_time.now()
+    snapshot = nazoratchi_day.read_day_context(supervisor_id, now)
+    status = nazoratchi_day.check_active(supervisor_id, eval_date, now, snapshot=snapshot)
+    if status is not None:
+        log_grade_event(employee_id, eval_date, "bos_guard", "inactive_day")
+        return GradePreparation(None, "Bu ish kuni yopilgan." if status == "closed" else "Bu tugma eskirgan.")
+    profile = employees.get_profile(employee_id)
+    if profile is None:
+        log_grade_event(employee_id, eval_date, "bos_guard", "unknown_employee")
+        return GradePreparation(None, grade_notice_reply(NOTICE_UNKNOWN_EMPLOYEE))
+    branch = profile.get("branch")
+    sessions = snapshot["sessions"]
+    if any(s["branch"] == branch and s["session_date"] == eval_date and s["status"] == "closed" for s in sessions):
+        log_grade_event(employee_id, eval_date, "bos_guard", "closed_branch")
+        return GradePreparation(None, "Bu filial shu ish kunida yopilgan.")
+    session_branch = branch if branch in RECRUITING_BRANCH_NAMES else None
+    return GradePreparation(record_daily_grade(employee_id, supervisor_id, eval_date, grade_key,
+                                               session_branch=session_branch))
+
+
 def record_daily_grade(
     employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
 ) -> EvaluationResult:
+    """Ichki funksiya: chaqiruvchi kun guardini o'zi qiladi."""
     grade_points_map = get_grade_points()
     if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")

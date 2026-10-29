@@ -637,25 +637,13 @@ def register(dp: Dispatcher, openai_client) -> None:
         if not await _guard_active_day(callback, review_date):
             discipline.log_grade_event(employee_id, review_date, "bos_guard", "inactive_day")
             return
-
-        grade_profile = employees.get_profile(employee_id)
-        if grade_profile is None:
-            discipline.log_grade_event(employee_id, review_date, "bos_guard", "unknown_employee")
-            await callback.answer(discipline.grade_notice_reply(discipline.NOTICE_UNKNOWN_EMPLOYEE), show_alert=True)
-            return
-        if any(
-            item["branch"] == grade_profile.get("branch") and item["status"] == "closed"
-            for item in discipline_repo_sessions(callback.from_user.id, review_date)
-        ):
-            discipline.log_grade_event(employee_id, review_date, "bos_guard", "closed_branch")
-            await callback.answer("Bu filial shu ish kunida yopilgan.", show_alert=True)
-            return
-
-        grade_branch = grade_profile.get("branch")
-        result = discipline.record_daily_grade(
-            employee_id, callback.from_user.id, review_date, grade_key,
-            session_branch=grade_branch if _branch_index(grade_branch or "") is not None else None,
+        prepared = discipline.prepare_and_record_grade(
+            employee_id, callback.from_user.id, review_date, grade_key
         )
+        if prepared.error:
+            await callback.answer(prepared.error, show_alert=True)
+            return
+        result = prepared.result
         try:
             outcome = await discipline.notify_employee_of_grade(callback.bot, employee_id, result)
             if outcome == discipline.NOTICE_UNCHANGED:

@@ -604,6 +604,7 @@ _FOUNDER_MENU_LABELS = [
     "🏬 Do'konlar",
     "💰 Smenalarni ko'rish",
     "🚨 Bugungi muammolar",
+    "📊 Hisobotlar",
     "💵 Oylik kelishuvi",
     "⚙️ Sozlamalar",
 ]
@@ -1013,6 +1014,19 @@ async def start_handler(message: Message, state: FSMContext) -> None:
     await message.answer(
         greeting_for_user(message.from_user.id),
         reply_markup=build_menu(message.from_user.id),
+    )
+
+
+@dp.message(F.text == "📊 Hisobotlar")
+async def founder_reports_handler(message: Message) -> None:
+    if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+        return
+    await message.answer(
+        "📊 Hisobotlar",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏆 Oylik turnir", callback_data="frep:month")],
+            [InlineKeyboardButton(text="🏁 Bugungi reyting", callback_data="frep:today")],
+        ]),
     )
 
 

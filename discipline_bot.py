@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import secrets
-from datetime import date, datetime, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Dispatcher, F
@@ -873,9 +873,23 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         today = _today()
         board = discipline.get_monthly_leaderboard(today.strftime("%Y-%m"))
-        await message.answer(
-            _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")
-        )
+        text = _format_board(f"🏆 Oylik Turnir — {today.strftime('%Y-%m')}", board, "net_score")
+        if permissions.has_permission(message.from_user.id, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            work_date = date.fromisoformat(nazoratchi_day.current_work_date(company_time.now()))
+            first = work_date.replace(day=1)
+            if work_date == first:
+                end = first
+                first = (first - timedelta(days=1)).replace(day=1)
+                month_names = ("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
+                               "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
+                label = month_names[first.month - 1] + ": "
+            else:
+                end = work_date
+                label = ""
+            days = (end - first).days
+            graded = discipline_repo.count_graded_dates(first.isoformat(), end.isoformat())
+            text += f"\\n\\n{label}Nazoratchi {days} kundan {graded} kunini baholadi"
+        await message.answer(text)
 
     @dp.message(Command("eskikunlarniyop"))
     async def legacy_day_close_preview(message: Message) -> None:

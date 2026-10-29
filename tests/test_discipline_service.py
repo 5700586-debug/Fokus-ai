@@ -490,6 +490,8 @@ def test_quiet_hours_boundaries(hour, minute, quiet):
 # ----------------------------------------- bitta baholash = bitta tranzaksiya --
 
 import sqlite3  # noqa: E402
+
+from tests import db_fail  # noqa: E402
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 
 from db import get_connection  # noqa: E402
@@ -505,15 +507,13 @@ def _ddl(sql: str) -> None:
 
 
 def _break_inserts_into(table: str) -> None:
-    """Haqiqiy DB darajasida shu jadvalga INSERT paytida xato (tranzaksiya ICHIDAGI yozuv bosqichida)."""
-    _ddl(
-        f"CREATE TRIGGER break_{table} BEFORE INSERT ON {table} "
-        "BEGIN SELECT RAISE(ABORT, 'sinov: yozuv xatosi'); END"
-    )
+    """Haqiqiy DB darajasida shu jadvalga INSERT paytida xato (tranzaksiya ICHIDAGI yozuv bosqichida).
+    SQLite va Postgres ikkalasida ishlaydi (qarang ``tests/db_fail.py``)."""
+    db_fail.break_writes(table, "INSERT", name=f"break_{table}", message="sinov: yozuv xatosi")
 
 
 def _repair(table: str) -> None:
-    _ddl(f"DROP TRIGGER break_{table}")
+    db_fail.repair(table, name=f"break_{table}")
 
 
 def _state(user_id: int = 111) -> dict:
@@ -544,7 +544,7 @@ def _state(user_id: int = 111) -> dict:
 def test_first_grade_failure_leaves_nothing_half_written_and_retry_succeeds_once(failing_table):
     _break_inserts_into(failing_table)
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(db_fail.WRITE_ERROR):
         discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
 
     assert _state() == {"grade": None, "balance": None, "history": [], "ledger": []}  # hech biri yarim qolmagan
@@ -558,13 +558,13 @@ def test_first_grade_failure_leaves_nothing_half_written_and_retry_succeeds_once
 
 
 def test_salary_write_failure_rolls_back_evaluation_and_history_too():
-    _ddl("CREATE TRIGGER break_salaries BEFORE INSERT ON salaries BEGIN SELECT RAISE(ABORT, 'sinov: balans xatosi'); END")
+    db_fail.break_writes("salaries", "INSERT", name="break_salaries", message="sinov: balans xatosi")
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(db_fail.WRITE_ERROR):
         discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
 
     assert _state() == {"grade": None, "balance": None, "history": [], "ledger": []}
-    _ddl("DROP TRIGGER break_salaries")
+    db_fail.repair("salaries", name="break_salaries")
     discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_ALO)
     assert _state() == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
 
@@ -575,7 +575,7 @@ def test_failed_correction_keeps_old_grade_balance_and_history_and_retry_has_no_
     before = _state()
     _break_inserts_into(failing_table)
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(db_fail.WRITE_ERROR):
         discipline.record_daily_grade(111, 1, _DAY, discipline.GRADE_NORMA)  # 3 -> 2
 
     assert _state() == before == {"grade": ("alo", 3), "balance": 3, "history": [3], "ledger": [3]}
@@ -617,14 +617,24 @@ def test_adjust_bonus_bank_keeps_its_contract():
 def test_employee_model_has_no_telegram_less_employee_unit_proof():
     """Mavjud model: ``employees.user_id`` — PRIMARY KEY va Telegram ID'ning o'zi; alohida ichki ID yoki
     Telegram bog'lanishi ustuni yo'q. Telegram ID'siz xodimni saqlash/baholash MODELDA QO'LLANMAYDI."""
+    columns = db_fail.table_columns("employees")
     conn = get_connection()
     try:
-        columns = {row["name"]: row for row in conn.execute("PRAGMA table_info(employees)").fetchall()}
+        if db_fail._is_postgres():
+            primary_key = {row["name"] for row in conn.execute(
+                "SELECT kcu.column_name AS name FROM information_schema.table_constraints tc "
+                "JOIN information_schema.key_column_usage kcu "
+                "ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name "
+                "WHERE tc.table_name = ? AND tc.constraint_type = 'PRIMARY KEY'",
+                ("employees",),
+            ).fetchall()}
+        else:
+            primary_key = {row["name"] for row in conn.execute("PRAGMA table_info(employees)").fetchall() if row["pk"]}
     finally:
         conn.close()
 
-    assert columns["user_id"]["pk"] == 1
-    assert not {"telegram_id", "chat_id", "internal_id", "employee_id"} & set(columns)
+    assert primary_key == {"user_id"}
+    assert not {"telegram_id", "chat_id", "internal_id", "employee_id"} & columns
 
 
 # ----------------------------------------- oylik hisob = baho sanasi (eval_date) oyi --

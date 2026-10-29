@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests import db_fail
+
 import db
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -282,11 +284,7 @@ async def test_existing_flows_still_work(bot_dp):
 def test_additive_migration_is_safe_to_rerun(temp_db):
     db.init_db()
     db.init_db()
-    conn = db.get_connection()
-    try:
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(salary_agreements)").fetchall()}
-    finally:
-        conn.close()
+    cols = db_fail.table_columns("salary_agreements")  # SQLite va Postgres ikkalasida
     assert {"tariff", "result_bonus_cap"} <= cols
 
 

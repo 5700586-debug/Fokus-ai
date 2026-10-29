@@ -6,6 +6,7 @@ from datetime import datetime
 import pytest
 
 import db
+from tests import db_fail
 import discipline_bot
 import company_time
 from config import FOUNDER_ID
@@ -257,23 +258,22 @@ async def test_tick_does_not_write_financial_tables_even_if_their_triggers_would
         discipline.adjust_bonus_bank(SUP, 100, "boshlang'ich", "test", None)
     _pin(monkeypatch, 2026, 3, 1, 21, 0)
     before_bank = _bank()
+    db_fail.break_writes(table, event)  # SQLite va Postgres ikkalasida haqiqiy yozuv xatosi
     conn = db.get_connection()
     try:
-        conn.execute(f"CREATE TRIGGER fokus_break BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'sinov xatosi'); END")
-        conn.commit()
-        ledger_before = conn.execute("SELECT COUNT(*) FROM bonus_bank_ledger").fetchone()[0]
+        ledger_before = conn.execute("SELECT COUNT(*) AS n FROM bonus_bank_ledger").fetchone()["n"]
     finally:
         conn.close()
 
-    await discipline_bot._day_close_tick(_Bot())
-
-    conn = db.get_connection()
     try:
-        assert conn.execute("SELECT COUNT(*) FROM bonus_bank_ledger").fetchone()[0] == ledger_before
-        conn.execute("DROP TRIGGER fokus_break")
-        conn.commit()
+        await discipline_bot._day_close_tick(_Bot())
+        conn = db.get_connection()
+        try:
+            assert conn.execute("SELECT COUNT(*) AS n FROM bonus_bank_ledger").fetchone()["n"] == ledger_before
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        db_fail.repair(table)
     assert _audits() == [] and _bank() == before_bank
     await discipline_bot._day_close_tick(_Bot())  # keyingi tick qayta urinadi
     assert _audits() == [] and _bank() == before_bank

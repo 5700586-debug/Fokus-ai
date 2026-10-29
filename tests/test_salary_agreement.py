@@ -7,6 +7,7 @@ import pytest
 
 import company_time
 import db
+from tests import db_fail
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from repositories import discipline as discipline_repo
@@ -356,22 +357,12 @@ def test_migration_twice_keeps_data_and_old_salaries():
 
 
 def test_failed_write_rolls_back_agreement_and_salary_mirror():
-    conn = db.get_connection()
+    db_fail.break_writes("salaries", "INSERT", message="sinov")  # SQLite va Postgres ikkalasida
     try:
-        conn.execute("CREATE TRIGGER fokus_break BEFORE INSERT ON salaries BEGIN SELECT RAISE(ABORT, 'sinov'); END")
-        conn.commit()
+        with pytest.raises(Exception):
+            _save(3_000_000, company_time.today().isoformat(), "rb1")
     finally:
-        conn.close()
-
-    with pytest.raises(Exception):
-        _save(3_000_000, company_time.today().isoformat(), "rb1")
-
-    conn = db.get_connection()
-    try:
-        conn.execute("DROP TRIGGER fokus_break")
-        conn.commit()
-    finally:
-        conn.close()
+        db_fail.repair("salaries")
     assert _rows(EMP) == []
     assert _save(3_000_000, company_time.today().isoformat(), "rb1").created  # qayta urinish ishlaydi
 

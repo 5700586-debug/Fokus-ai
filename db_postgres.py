@@ -208,7 +208,9 @@ class PgConnection:
 
         lastrowid = None
         table_match = _INSERT_TABLE_RE.match(sql.strip())
-        if table_match and table_match.group(1).lower() in _SERIAL_PK_TABLES:
+        # ``INSERT OR IGNORE`` (-> ON CONFLICT DO NOTHING) hech narsa yozmasa, ``lastval()`` baribir sarflangan
+        # ketma-ketlik qiymatini (mavjud bo'lmagan ID) qaytaradi — shuning uchun faqat haqiqatan yozilganda olinadi.
+        if table_match and table_match.group(1).lower() in _SERIAL_PK_TABLES and cursor.rowcount > 0:
             lastval_cursor = self._conn.cursor()
             with latency_probe.db_execute():
                 lastval_cursor.execute("SELECT lastval() AS lastval")

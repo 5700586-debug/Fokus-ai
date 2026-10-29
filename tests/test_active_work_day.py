@@ -8,6 +8,7 @@ import pytest
 
 import company_time
 import db
+from tests import db_fail
 import discipline_bot
 import employees
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -88,7 +89,7 @@ def _session_dates() -> list[tuple[str, str, str]]:
 def _closures() -> int:
     conn = db.get_connection()
     try:
-        return conn.execute("SELECT COUNT(*) FROM daily_closures").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) AS n FROM daily_closures").fetchone()["n"]
     finally:
         conn.close()
 
@@ -582,22 +583,17 @@ async def test_closed_day_or_branch_and_stale_button_write_neither_grade_nor_ses
 @pytest.mark.parametrize("table", ["nazoratchi_branch_sessions", "bonus_bank_ledger", "daily_evaluation_history"])
 async def test_grade_or_session_write_failure_rolls_everything_back(bot_dp, monkeypatch, table):
     _setup_two_branches()
-    conn = db.get_connection()
+    db_fail.break_writes(table, "INSERT")  # SQLite va Postgres ikkalasida haqiqiy yozuv xatosi
     try:
-        conn.execute(f"CREATE TRIGGER fokus_break BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'sinov xatosi'); END")
-        conn.commit()
+        with pytest.raises(Exception):
+            discipline.record_daily_grade(111, SUP, D, discipline.GRADE_ALO, session_branch=A)
     finally:
-        conn.close()
-
-    with pytest.raises(Exception):
-        discipline.record_daily_grade(111, SUP, D, discipline.GRADE_ALO, session_branch=A)
+        db_fail.repair(table)
 
     conn = db.get_connection()
     try:
-        conn.execute("DROP TRIGGER fokus_break")
-        conn.commit()
         counts = [
-            conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+            conn.execute(f"SELECT COUNT(*) AS n FROM {name}").fetchone()["n"]
             for name in ("daily_evaluations", "daily_evaluation_history", "bonus_bank_ledger", "nazoratchi_branch_sessions")
         ]
     finally:

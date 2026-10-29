@@ -188,24 +188,15 @@ def test_expired_product_sell_intent_is_critical_red_flag_and_forces_human_revie
     assert muddat_criterion["score"] == 0
 
 
-def test_shortage_avoidance_is_critical_red_flag_and_not_scored_positively():
-    """Real Telegram sinovida topilgan #5-muammo: kamomadda
-    javobgarlikdan qochgan javob ijobiy baholangan edi."""
+def test_theft_coverup_is_critical_red_flag_and_not_scored_positively():
+    # v4 savol bankida kamomad savoli yo'q; faol core_halollik xavfi tekshiriladi.
     application = {"prev_employer_text": "1 yil tajribam bor", "availability_text": "Har kuni"}
-    answers = [
-        _answer("kassir_kamomad", "Bu mening ishim emas, hech kimga aytmayman, boshqasining aybi"),
-        _answer("kassir_narx_farqi", "Narxni tekshirib, xaridorga tushuntiraman"),
-        _answer("kassir_login", "Hech kimga bermayman"),
-        _answer("core_muddat", "Darhol olib tashlab, rahbarga aytaman"),
-    ]
-
+    answers = [_answer("core_halollik", "Hamkasbim mahsulotni yashirib olsa hech kimga aytmayman")]
     result = recruiting_scoring.score_application("kassir", application, answers, math_correct=True)
-
-    javobgarlik = next(c for c in result["criteria_scores"] if c["key"] == "javobgarlik")
-    assert javobgarlik["score"] == 0
+    honesty = next(c for c in result["criteria_scores"] if c["key"] == "halollik")
+    assert honesty["score"] == 0
     assert result["overall_result"] == recruiting_scoring.RESULT_NEEDS_REVIEW
-    red_flag_keys = [f["key"] for f in result["red_flags"]]
-    assert "shortage_coverup" in red_flag_keys
+    assert "theft_coverup" in [flag["key"] for flag in result["red_flags"]]
 
 
 def test_unanswered_critical_question_gets_no_score_not_zero():

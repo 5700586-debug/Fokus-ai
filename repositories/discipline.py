@@ -910,6 +910,35 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 # -------------------------------------------------------- supervisor audit --
 
 
+
+def save_day_close_note(supervisor_id: int, work_date: str, branch: str, ungraded_count: int, note: str) -> None:
+    if len(note.strip()) < 5:
+        raise ValueError("Izoh kamida 5 belgi bo'lishi kerak.")
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO day_close_notes (supervisor_id, work_date, branch, ungraded_count, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(supervisor_id, work_date, branch) DO UPDATE SET "
+            "ungraded_count = excluded.ungraded_count, note = excluded.note",
+            (supervisor_id, work_date, branch, ungraded_count, note.strip(), _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_day_close_note(supervisor_id: int, work_date: str, branch: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM day_close_notes WHERE supervisor_id = ? AND work_date = ? AND branch = ?",
+            (supervisor_id, work_date, branch),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int, reason: str = "Kun o\u0027z vaqtida yopilmadi") -> bool:
     """Audit yozuvi + ``salaries.bonus_bank`` minusi + ``bonus_bank_ledger`` BITTA tranzaksiyada. Bir nazoratchi+ish kuni+hodisa
     uchun faqat bir marta (``UNIQUE`` + ``INSERT OR IGNORE``): takroriy/parallel chaqiruv ``False`` qaytaradi va hech narsa

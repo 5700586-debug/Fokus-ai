@@ -81,6 +81,8 @@ def _redact_dsn(url: str) -> str:
 # keyinchalik qo'shilgan ustunlar shu yerda ro'yxatlanadi va ``init_db()``
 # ularni yo'q bo'lsagina ``ALTER TABLE`` bilan qo'shadi.
 _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    ("discipline_penalties", "evidence_file_id", "TEXT"),
+    ("daily_evaluations", "evidence_file_id", "TEXT"),
     ("employees", "prior_employer_reference_consent", "INTEGER"),
     ("employees", "prior_employer_contact", "TEXT"),
     ("employees", "night_shift_availability", "TEXT"),

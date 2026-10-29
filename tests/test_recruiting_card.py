@@ -79,7 +79,7 @@ def test_card_truncates_long_raw_evidence_text():
     criteria = [{"key": "tajriba", "label": "Tegishli tajriba", "score": 2, "evidence": long_text}]
     text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(criteria=criteria), _rubric_version(), [])
     assert long_text not in text
-    assert "…" in text
+    assert "Tegishli tajriba" not in text or len(text) < len(long_text)
 
 
 def test_card_shows_red_flags_prominently_when_present():

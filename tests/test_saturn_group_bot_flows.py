@@ -92,11 +92,15 @@ async def test_saturntest_tip_sends_only_tip_no_financial_dashboard(bot_dp):
     assert not any(word in lowered for word in forbidden)
 
 
-async def test_daily_greeting_messages_have_no_financial_block():
+async def test_daily_greeting_messages_have_no_financial_block(monkeypatch):
     """1-MUAMMO: tong/tun avtomatik xabarlarida (va ular bilan bir
     tickda) moliyaviy blok tasodifan ulanib qolmagan — bitta tickda
     aynan 2 ta post (tong+tun) ketadi, dashboard emas."""
     bot = RecordingBot(token="123456:TEST-TOKEN")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)
@@ -190,6 +194,10 @@ async def test_tick_does_nothing_without_group_chat_id_configured():
 
 async def test_tick_sends_morning_message_once_time_threshold_reached(monkeypatch):
     bot = RecordingBot(token="123456:TEST-TOKEN")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "23:59", updated_by=FOUNDER_ID)
@@ -201,12 +209,16 @@ async def test_tick_sends_morning_message_once_time_threshold_reached(monkeypatc
     assert len(bot.sent) == 1  # faqat ertalabki xabar chegarasidan o'tdi
 
 
-async def test_tick_sends_morning_as_photo_not_old_text():
+async def test_tick_sends_morning_as_photo_not_old_text(monkeypatch):
     """Regressiya: 08:00 chegarasidan o'tganda ENDI eski matnli
     ``send_morning_message`` emas, yangi rasmli xabar yuboriladi."""
     from aiogram.methods import SendPhoto
 
     bot = RecordingBot(token="123456:TEST-TOKEN")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "23:59", updated_by=FOUNDER_ID)
@@ -219,13 +231,17 @@ async def test_tick_sends_morning_as_photo_not_old_text():
     assert isinstance(bot.sent[0], SendPhoto)
 
 
-async def test_tick_sends_night_as_photo_not_old_financial_text():
+async def test_tick_sends_night_as_photo_not_old_financial_text(monkeypatch):
     """Regressiya (talab #9): 21:00 chegarasidan o'tganda eski moliyaviy
     "Kun yakuni" (savdo/reja/o'rtacha chek) ENDI xodimlar guruhiga
     avtomatik ketmaydi — o'rniga moliyasiz rasmli tungi xabar boradi."""
     from aiogram.methods import SendPhoto
 
     bot = RecordingBot(token="123456:TEST-TOKEN")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "23:59", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)
@@ -271,10 +287,14 @@ async def test_tick_skips_night_image_when_disabled_via_rule():
     assert bot.sent == []
 
 
-async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached():
+async def test_tick_sends_both_morning_and_night_when_both_thresholds_reached(monkeypatch):
     from aiogram.methods import SendPhoto
 
     bot = RecordingBot(token="123456:TEST-TOKEN")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import company_time
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 10, 29, 12, tzinfo=ZoneInfo("Asia/Tashkent")))
     rules_service.set_rule("saturn.group_chat_id", "-100999", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.morning_time", "00:00", updated_by=FOUNDER_ID)
     rules_service.set_rule("saturn.evening_time", "00:00", updated_by=FOUNDER_ID)

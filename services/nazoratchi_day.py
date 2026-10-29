@@ -196,7 +196,7 @@ def close_session(supervisor_id: int, branch: str, review_date: str, note: str |
     evaluated = sum(1 for item in statuses if item.status == STATUS_EVALUATED)
     off_count = sum(1 for item in statuses if item.status == STATUS_OFF)
     pending = branch_pending_count(branch, review_date, supervisor_id)
-    if review_date >= "2026-11-01" and pending:
+    if review_date >= discipline_repo.strict_close_start() and pending:
         if note is not None:
             discipline_repo.save_day_close_note(supervisor_id, review_date, branch, pending, note)
         if not discipline_repo.get_day_close_note(supervisor_id, review_date, branch):
@@ -207,7 +207,7 @@ def close_session(supervisor_id: int, branch: str, review_date: str, note: str |
     # Qo'lda yopishda barcha qamrov filiallari yopilgach kunning o'zi yakunlanadi.
     if day_fully_closed(supervisor_id, review_date):
         discipline.close_day(supervisor_id, review_date, len(statuses))
-        if review_date >= "2026-11-01" and all(
+        if review_date >= discipline_repo.strict_close_start() and all(
             branch_pending_count(name, review_date, supervisor_id) == 0
             for name in coverage_branches(supervisor_id)
         ):

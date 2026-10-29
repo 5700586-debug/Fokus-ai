@@ -1254,3 +1254,18 @@ def close_expired_review_days(before_day: str, *, expected_version: str | None =
         raise
     finally:
         conn.close()
+
+
+def attach_grade_evidence(employee_id: int, eval_date: str, evidence_file_id: str) -> int:
+    """Attach Telegram photo only while this day's grade is still 'bajarilmagan'."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE daily_evaluations SET evidence_file_id = ? "
+            "WHERE employee_id = ? AND eval_date = ? AND grade_key = 'bajarilmagan'",
+            (evidence_file_id, employee_id, eval_date),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()

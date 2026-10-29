@@ -79,7 +79,8 @@ def test_card_truncates_long_raw_evidence_text():
     criteria = [{"key": "tajriba", "label": "Tegishli tajriba", "score": 2, "evidence": long_text}]
     text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(criteria=criteria), _rubric_version(), [])
     assert long_text not in text
-    assert "…" in text
+    assert "🤖 AI xulosasi:" in text
+    assert "📄 Asl javoblar" not in text
 
 
 def test_card_shows_red_flags_prominently_when_present():
@@ -87,20 +88,21 @@ def test_card_shows_red_flags_prominently_when_present():
     text = recruiting_card.format_candidate_card(
         _application(), _vacancy(), _assessment(overall_result="NEEDS_HUMAN_REVIEW", red_flags=red_flags), _rubric_version(), []
     )
-    assert "QIZIL XAVFLAR" in text
+    assert "🚩 Red Flag" in text
     assert "Muddati o'tgan mahsulotni sotishga tayyor" in text
 
 
 def test_card_shows_no_red_flag_section_when_none_present():
     text = recruiting_card.format_candidate_card(_application(), _vacancy(), _assessment(), _rubric_version(), [])
-    assert "QIZIL XAVFLAR" not in text
+    assert "🚩 Red Flag: aniqlanmadi" in text
+    assert "Muddati o'tgan" not in text
 
 
 def test_card_shows_clarify_questions_when_present():
     text = recruiting_card.format_candidate_card(
         _application(), _vacancy(), _assessment(clarify_questions=["Kamomad haqida savolga aniqroq javob kerak"]), _rubric_version(), []
     )
-    assert "aniqlashtirilishi kerak" in text.lower()
+    assert "aniqlashtirish kerak" in text.lower()
     assert "Kamomad haqida savolga aniqroq javob kerak" in text
 
 

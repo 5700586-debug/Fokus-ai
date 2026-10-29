@@ -136,7 +136,7 @@ def test_main_py_handler_registration_order_matches_commit_9f84a6b():
 
     expected = [
         "onboarding", "approval", "performance_bot", "cash_shift_bot",
-        "inventory_bot", "calibration_bot", "discipline_bot", "supplier_chat_bot",
+        "cash_close_review", "inventory_bot", "calibration_bot", "discipline_bot", "supplier_chat_bot",
         "saturn_group_bot", "recruiting_bot", "nazoratchi_bot",
     ]
     assert calls == expected

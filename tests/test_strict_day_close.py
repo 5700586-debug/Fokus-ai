@@ -114,3 +114,18 @@ def test_no_negative_monthly_bonus_from_auto_minus(temp_db):
     assert view["work_bonus"] == 0
     assert view["minus"] == 5
     assert view["minus_applied"] == 0
+
+
+@pytest.mark.anyio
+async def test_close_button_requests_note_then_saves_and_closes(bot_dp, prepared, monkeypatch):
+    import company_time
+    from tests.bot_harness import send, send_callback
+    fixed = datetime(2026, 11, 2, 12, 0, tzinfo=ZoneInfo("Asia/Tashkent"))
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+    main, bot = bot_dp
+    sent = await send_callback(main.dp, bot, SUP, "bos:close:0:20261102", SUP)
+    assert any("kamida 5 belgili izoh" in (getattr(m, "text", None) or "") for m in sent)
+    assert not repo.get_day_close_note(SUP, prepared, BRANCH)
+    sent = await send(main.dp, bot, SUP, "Vaqt yetmadi, izoh")
+    assert any("nazorati yopildi" in (getattr(m, "text", None) or "") for m in sent)
+    assert repo.get_day_close_note(SUP, prepared, BRANCH)["note"] == "Vaqt yetmadi, izoh"

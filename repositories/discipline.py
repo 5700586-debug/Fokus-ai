@@ -1123,16 +1123,11 @@ _AUTO_CLOSE_START = "bos.auto_close_start_date"
 def strict_close_start() -> str:
     conn = get_connection()
     try:
-        conn.execute(
-            "INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUES (?, ?, 0, ?)",
-            ("bos.strict_close_start", "2026-11-01", _now()),
-        )
-        conn.commit()
         row = conn.execute(
             "SELECT rule_value FROM rules WHERE rule_key = ?",
             ("bos.strict_close_start",),
         ).fetchone()
-        return row["rule_value"]
+        return row["rule_value"] if row else "2026-11-01"
     finally:
         conn.close()
 

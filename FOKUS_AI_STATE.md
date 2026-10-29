@@ -4,6 +4,13 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Strict day close — Draft, 2026-10-29
+
+- Branch `feat/strict-day-close`: 2026-11-01 dan (rules: `bos.strict_close_start`) baholanmagan filialni yopishda >=5 belgili izoh, `day_close_notes`; oxirgi filial bilan kun to'liq va baholanmagan 0 bo'lsa idempotent +5 audit/ledger.
+- Auto-yopilgan sessiyasi bor kunlarga idempotent −5 (`auto_close_minus`), legacy/sessiyasiz tarixga tatbiq qilinmaydi; event audit_date = ish kuni.
+- Oylik hisob `day_full_bonus`ni `work_bonus`ga, boshqa auditni `minus`ga ajratadi, minus_applied bonus miqdori bilan chegaralangan.
+- 06:00 tickdan so'ng `notifications.send_once` orqali nazoratchiga kerak bo'lsa eslatma, Founderga qisqa xulosa. Targeted testlar yozildi; Github Actions natijasi kutiladi, merge/deploy YO'Q.
+
 ## Founder sozlamalar menyusi — DRAFT (2026-10-29)
 
 - Branch `feat/founder-settings-menu`: Sozlamalar Founder uchun 4 inline tugma; xodimga avvalgi «tez orada». Nizomlar, qoidalar va eski kunlar preview'i mavjud buyruq oqimlari bilan umumiy yordamchilar orqali qayta ishlatiladi; tasdiq handleri o'zgarmadi.

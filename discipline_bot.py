@@ -574,7 +574,7 @@ def _month_board_text(user_id: int) -> str:
 
 def discipline_repo_note_exists(supervisor_id: int, work_date: str, branch: str) -> bool:
     from repositories import discipline as discipline_repo
-    return discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None
+    return (work_date < discipline_repo.strict_close_start() or\n            discipline_repo.get_day_close_note(supervisor_id, work_date, branch) is not None)
 
 
 def register(dp: Dispatcher, openai_client) -> None:
@@ -855,7 +855,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         branch = RECRUITING_BRANCH_NAMES[index]
         pending = nazoratchi_day.branch_pending_count(branch, review_date, callback.from_user.id)
-        if review_date >= "2026-11-01" and pending and not discipline_repo_note_exists(
+        if pending and not discipline_repo_note_exists(
             callback.from_user.id, review_date, branch
         ):
             await state.set_state(CloseNoteStates.waiting)

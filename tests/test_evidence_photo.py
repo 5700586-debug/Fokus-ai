@@ -25,6 +25,13 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _daytime_clock(monkeypatch):
+    # Ish kuni 06:00 da almashadi; testlar har doim kunduzgi barqaror vaqtda ishlaydi.
+    fixed = company_time.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+
+
 def _setup(monkeypatch, main) -> None:
     import employees
     from roles import set_role
@@ -112,7 +119,7 @@ async def test_text_instead_of_photo_cancels_and_writes_nothing(bot_dp, monkeypa
     _setup(monkeypatch, main)
     await _stage_minus(main, bot)
 
-    sent = await send(main.dp, bot, NAZ, text="⭐ Mening natijalarim")
+    sent = await send(main.dp, bot, NAZ, text="rasm keyin")
     assert any("bekor qilindi" in (getattr(m, "text", None) or "") for m in sent)
     await send(main.dp, bot, NAZ, photo_file_id="late-photo")
     assert _bank() == 0 and _penalties() == []

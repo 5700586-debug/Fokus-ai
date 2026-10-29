@@ -4,7 +4,7 @@ Bu testlar AI'ning o'zbek tilini tushunishini ISBOTLAMAYDI — faqat server teks
 import json
 
 import pytest
-from aiogram.methods import SendMessage
+from aiogram.methods import SendMessage, SendPhoto
 
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
 from services import company_rules_import as importer
@@ -319,9 +319,11 @@ async def test_employee_notice_is_neutral_and_keeps_appeal_button(bot_dp, monkey
 
     after = await _cb(main, bot, _apply_data(sent[0]))
 
-    notice = next(m for m in after if isinstance(m, SendMessage) and m.chat_id == EMPLOYEE)
-    assert f"-{entry['default_penalty_amount']} ball" in notice.text and entry["title"] in notice.text
-    assert "terminalni bilmaydi" in notice.text and "e'tiroz" in notice.text
+    # S2: xodimga minus nazoratchi dalil rasmi bilan (izohda avvalgi matn) boradi.
+    notice = next(m for m in after if isinstance(m, SendPhoto) and m.chat_id == EMPLOYEE)
+    assert notice.photo == "evidence-1"
+    assert f"-{entry['default_penalty_amount']} ball" in notice.caption and entry["title"] in notice.caption
+    assert "terminalni bilmaydi" in notice.caption and "e'tiroz" in notice.caption
     assert any(c.startswith("nzr_appeal:") for c in _kb(notice))
 
 

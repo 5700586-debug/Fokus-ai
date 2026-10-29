@@ -224,17 +224,18 @@ def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: st
     from config import RECRUITING_BRANCH_NAMES
     from services import nazoratchi_day
 
-    log_grade_event(employee_id, eval_date, "bos_request", "received")
-    status = nazoratchi_day.check_active(supervisor_id, eval_date, company_time.now())
+    now = company_time.now()
+    snapshot = nazoratchi_day.read_day_context(supervisor_id, now)
+    status = nazoratchi_day.check_active(supervisor_id, eval_date, now, snapshot=snapshot)
     if status is not None:
         log_grade_event(employee_id, eval_date, "bos_guard", "inactive_day")
-        return GradePreparation(None, "Ish kuni yopilgan." if status == "closed" else "Bu ish kuni faol emas.")
+        return GradePreparation(None, "Bu ish kuni yopilgan." if status == "closed" else "Bu tugma eskirgan.")
     profile = employees.get_profile(employee_id)
     if profile is None:
         log_grade_event(employee_id, eval_date, "bos_guard", "unknown_employee")
         return GradePreparation(None, grade_notice_reply(NOTICE_UNKNOWN_EMPLOYEE))
     branch = profile.get("branch")
-    sessions = discipline_repo.list_branch_sessions_up_to(supervisor_id, eval_date)
+    sessions = snapshot["sessions"]
     if any(s["branch"] == branch and s["session_date"] == eval_date and s["status"] == "closed" for s in sessions):
         log_grade_event(employee_id, eval_date, "bos_guard", "closed_branch")
         return GradePreparation(None, "Bu filial shu ish kunida yopilgan.")
@@ -246,12 +247,7 @@ def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: st
 def record_daily_grade(
     employee_id: int, supervisor_id: int, eval_date: str, grade_key: str, session_branch: str | None = None
 ) -> EvaluationResult:
-    # Server-side day guard: UI checks alone cannot protect direct callers.
-    from services import nazoratchi_day
-    status = nazoratchi_day.check_active(supervisor_id, eval_date, company_time.now())
-    if status is not None:
-        raise ValueError("Baholash kuni yopilgan." if status == "closed" else "Eski yoki faol bo'lmagan kunga baho qo'yib bo'lmaydi.")
-
+    """Ichki funksiya: chaqiruvchi kun guardini o'zi qiladi."""
     grade_points_map = get_grade_points()
     if grade_key not in grade_points_map:
         raise ValueError(f"noma'lum baho: {grade_key}")

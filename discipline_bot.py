@@ -1841,7 +1841,37 @@ async def _agreement_issue_reminder_tick(bot) -> None:
 async def _day_close_tick(bot) -> None:
     """Silent close only: no evaluation, supervisor penalty or daily Telegram message."""
     try:
-        await asyncio.to_thread(nazoratchi_day.auto_close_expired, _now_company())
+        now = _now_company()
+        await asyncio.to_thread(nazoratchi_day.auto_close_expired, now)
+        from repositories import discipline as discipline_repo
+        from services import notifications
+        work_date = (date.fromisoformat(nazoratchi_day.current_work_date(now)) - timedelta(days=1)).isoformat()
+        if work_date < discipline_repo.strict_close_start():
+            return
+        summary = await asyncio.to_thread(discipline_repo.strict_close_day_report, work_date)
+        groups = {}
+        for session in summary["sessions"]:
+            groups.setdefault(session["supervisor_id"], []).append(session)
+        if not groups:
+            return
+        lines = [f"📅 {work_date} kunlik yopish:"]
+        for supervisor_id, sessions in sorted(groups.items()):
+            audits = {a["event_type"] for a in summary["audits"] if a["supervisor_id"] == supervisor_id}
+            notes = [n for n in summary["notes"] if n["supervisor_id"] == supervisor_id]
+            ungraded = sum(nazoratchi_day.branch_pending_count(
+                s["branch"], work_date, supervisor_id
+            ) for s in sessions)
+            outcome = "-5" if "auto_close_minus" in audits else "+5" if "day_full_bonus" in audits else "0"
+            line = f"{supervisor_id}: {outcome} ball, baholanmagan {ungraded}"
+            if notes:
+                line += "; izoh: " + "; ".join(f"{n['branch']}: {n['note']}" for n in notes)
+            lines.append(line)
+            if "auto_close_minus" in audits or ungraded:
+                await notifications.send_once(
+                    bot, f"strict_close:{work_date}", supervisor_id,
+                    f"⚠️ {work_date}: kunni to'liq yopishingiz kerak edi. Natija: {outcome} ball."
+                )
+        await notifications.send_once(bot, f"strict_close:{work_date}", FOUNDER_ID, "\n".join(lines))
     except Exception as error:
         logger.error("Ish kunini avtomatik yopish xatosi: %s", type(error).__name__)
 

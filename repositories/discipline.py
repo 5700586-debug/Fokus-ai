@@ -911,6 +911,29 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 
 
 
+def strict_close_day_report(work_date: str) -> list[dict]:
+    conn = get_connection()
+    try:
+        sessions = conn.execute(
+            "SELECT supervisor_id, branch, status, evaluated_count, total_count "
+            "FROM nazoratchi_branch_sessions WHERE session_date = ?",
+            (work_date,),
+        ).fetchall()
+        audits = conn.execute(
+            "SELECT supervisor_id, event_type FROM supervisor_audit "
+            "WHERE audit_date = ? AND event_type IN ('day_full_bonus', 'auto_close_minus')",
+            (work_date,),
+        ).fetchall()
+        notes = conn.execute(
+            "SELECT supervisor_id, branch, ungraded_count, note FROM day_close_notes WHERE work_date = ?",
+            (work_date,),
+        ).fetchall()
+        return {"sessions": [dict(x) for x in sessions], "audits": [dict(x) for x in audits],
+                "notes": [dict(x) for x in notes]}
+    finally:
+        conn.close()
+
+
 def save_day_close_note(supervisor_id: int, work_date: str, branch: str, ungraded_count: int, note: str) -> None:
     if len(note.strip()) < 5:
         raise ValueError("Izoh kamida 5 belgi bo'lishi kerak.")

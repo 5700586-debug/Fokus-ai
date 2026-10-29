@@ -82,6 +82,11 @@ class Tg:
         await self.main.dp.feed_update(self.bot, update)
         return message_id
 
+    async def photo(self, user_id: int, file_id: str = "evidence-1") -> None:
+        """S2: nazoratchi minus uchun dalil rasmini yuboradi."""
+        update = Update(update_id=1, message=make_message(user_id, photo_file_id=file_id, message_id=next(self.ids)))
+        await self.main.dp.feed_update(self.bot, update)
+
     async def press(self, user_id: int, data: str, msg_id: int, chat_id: int | None = None) -> None:
         chat = chat_id if chat_id is not None else user_id
         target = Message(message_id=msg_id, date=datetime.now(), chat=Chat(id=chat, type="private"), text="x")
@@ -171,6 +176,8 @@ async def test_cleanup_failure_does_not_break_the_flow(tg, monkeypatch):
     screen = tg.last(NAZ)
 
     await tg.press(NAZ, next(c for c in tg.buttons(screen) if c.startswith("nzr_pa:")), screen["id"], chat_id=NAZ)
+    assert _bank() == 0  # S2: rasm kelmaguncha minus yozilmaydi
+    await tg.photo(NAZ)
 
     assert _bank() == -30
 
@@ -184,6 +191,7 @@ async def test_other_chats_dialogs_and_workflows_are_never_touched(tg, monkeypat
     await tg.say(NAZ, "Telefon bilan o'ynab turdi")
     screen = tg.last(NAZ)
     await tg.press(NAZ, next(c for c in tg.buttons(screen) if c.startswith("nzr_pa:")), screen["id"], chat_id=NAZ)
+    await tg.photo(NAZ)
 
     assert (NAZ2, 777) not in tg.deleted and (NAZ, 778) not in tg.deleted
     assert all(chat == NAZ for chat, _ in tg.deleted)
@@ -201,9 +209,11 @@ async def test_final_result_stays_single_confirmation_kept_and_stale_press_is_ha
 
     await tg.press(NAZ, apply_data, screen["id"], chat_id=NAZ)
     await tg.press(NAZ, apply_data, screen["id"], chat_id=NAZ)  # takroriy bosish
+    await tg.photo(NAZ)
+    await tg.photo(NAZ)  # S2: takroriy rasm ikkinchi minus yaratmaydi
 
     assert _bank() == -30
-    assert any(e[1] == screen["id"] and "qayd etildi" in e[2] for e in tg.edits)  # natija xabari tahrir qilingan
+    assert any(m["chat"] == NAZ and "qayd etildi" in m["text"] for m in tg.sent_log)  # natija xabari ko'rsatilgan
     assert (NAZ, screen["id"]) not in tg.deleted and tg.deleted == deleted_before  # natija qoladi
     assert discipline.list_appealable_penalties(EMP)  # minus bazada saqlangan
 

@@ -389,13 +389,18 @@ async def test_penalty_apply_deducts_bonus_and_notifies_employee_with_buttons(bo
     sent = await send_callback(
         main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700020:3", target_chat_id=_NAZORATCHI_ID
     )
+    # S2: rasm kelmaguncha minus yozilmaydi va xodimga hech narsa bormaydi.
+    assert discipline_service.get_salary(700020)["bonus_bank"] == 0
+    assert not [m for m in sent if getattr(m, "chat_id", None) == 700020]
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
 
     assert discipline_service.get_salary(700020)["bonus_bank"] == -30
 
     employee_texts = [m for m in sent if getattr(m, "chat_id", None) == 700020]
     assert employee_texts
-    assert "-30 ball" in employee_texts[0].text
-    assert "Telefon ishlatdi" in employee_texts[0].text
+    assert employee_texts[0].photo == "evidence-1"
+    assert "-30 ball" in employee_texts[0].caption
+    assert "Telefon ishlatdi" in employee_texts[0].caption
     buttons = [btn.callback_data for row in employee_texts[0].reply_markup.inline_keyboard for btn in row]
     assert any(b.startswith("nzr_ack:") for b in buttons)
     assert any(b.startswith("nzr_appeal:") for b in buttons)
@@ -410,6 +415,7 @@ async def test_penalty_apply_does_not_touch_fixed_salary(bot_dp):
 
     discipline_service.set_fixed_salary(700021, 3000000, updated_by=FOUNDER_ID)
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700021:3", target_chat_id=_NAZORATCHI_ID)
+    await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
 
     assert discipline_service.get_salary(700021)["fixed_salary"] == 3000000
 
@@ -436,9 +442,10 @@ async def test_employee_ack_removes_notice_buttons(bot_dp):
     _make_kassir(700023)
     _add_rule_with_amount(3, 30)
 
-    penalty_sent = await send_callback(
+    await send_callback(
         main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700023:3", target_chat_id=_NAZORATCHI_ID
     )
+    penalty_sent = await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
     employee_msg = next(m for m in penalty_sent if getattr(m, "chat_id", None) == 700023)
     penalty_id = next(
         int(btn.callback_data.split(":", 1)[1])
@@ -490,12 +497,14 @@ async def test_penalty_other_ai_match_confirmed_applies_penalty(bot_dp, monkeypa
     shown = await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
     apply_data = next(b.callback_data for row in shown[0].reply_markup.inline_keyboard for b in row if b.callback_data.startswith("nzr_pa:"))
 
-    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data=apply_data, target_chat_id=_NAZORATCHI_ID)
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data=apply_data, target_chat_id=_NAZORATCHI_ID)
+    assert discipline_service.get_salary(700026)["bonus_bank"] == 0  # S2: rasmsiz minus yo'q
+    sent = await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
 
     assert discipline_service.get_salary(700026)["bonus_bank"] == -30
     employee_texts = [m for m in sent if getattr(m, "chat_id", None) == 700026]
     assert employee_texts
-    assert "-30 ball" in employee_texts[0].text
+    assert "-30 ball" in employee_texts[0].caption
 
 
 async def test_penalty_other_ai_match_rejected_goes_to_founder_with_original_text(bot_dp, monkeypatch):
@@ -550,9 +559,10 @@ async def test_employee_appeal_button_starts_existing_appeal_flow(bot_dp, monkey
     _add_rule_with_amount(3, 30)
     from repositories import discipline as discipline_repo
 
-    penalty_sent = await send_callback(
+    await send_callback(
         main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700024:3", target_chat_id=_NAZORATCHI_ID
     )
+    penalty_sent = await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
     employee_msg = next(m for m in penalty_sent if getattr(m, "chat_id", None) == 700024)
     penalty_id = next(
         int(btn.callback_data.split(":", 1)[1])
@@ -611,6 +621,7 @@ async def test_penalty_apply_guard_is_released_after_completion(bot_dp):
     from services import discipline as discipline_service
 
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_penalty_apply:700030:3", target_chat_id=_NAZORATCHI_ID)
+    await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
 
     assert _NAZORATCHI_ID not in discipline_bot._PENDING_PENALTY_APPLICATIONS
     assert discipline_service.get_salary(700030)["bonus_bank"] == -30
@@ -630,6 +641,7 @@ async def test_penalty_other_ai_match_confirmed_preserves_original_text_as_comme
     _mock_openai_text(monkeypatch, main, "3")
     await send(main.dp, bot, _NAZORATCHI_ID, text="Ish vaqtida telefonda o'ynardi")
     await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_match_yes:700031:3", target_chat_id=_NAZORATCHI_ID)
+    await send(main.dp, bot, _NAZORATCHI_ID, photo_file_id="evidence-1")
 
     penalties = discipline_repo.list_penalties_by_status(700031, "none", limit=10)
     assert len(penalties) == 1

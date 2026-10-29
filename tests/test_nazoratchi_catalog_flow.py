@@ -72,7 +72,11 @@ async def _start(main, bot, user_id: int, text: str):
 
 
 async def _cb(main, bot, data: str):
-    return await send_callback(main.dp, bot, NAZORATCHI, data=data, target_chat_id=NAZORATCHI)
+    sent = await send_callback(main.dp, bot, NAZORATCHI, data=data, target_chat_id=NAZORATCHI)
+    if any("dalil rasmini" in (getattr(m, "text", None) or "") for m in sent):
+        # S2: minus faqat dalil rasmi bilan yoziladi — tasdiqdan keyin nazoratchi rasm yuboradi.
+        sent = sent + await send(main.dp, bot, NAZORATCHI, photo_file_id="evidence-1")
+    return sent
 
 
 def _screen(sent):

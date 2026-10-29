@@ -453,6 +453,7 @@ async def test_appeal_decision_denied_for_non_founder(bot_dp, monkeypatch):
 
     await send_callback(main.dp, bot, 1, data="bos:pen:111:10", target_chat_id=1)
     await send(main.dp, bot, 1, text="3-nizom")
+    await send(main.dp, bot, 1, photo_file_id="evidence-1")  # S2: minus faqat dalil rasmi bilan
     assert discipline.get_salary(111)["bonus_bank"] == -10
 
     sent = await send(main.dp, bot, 111, text="/apellyatsiya")

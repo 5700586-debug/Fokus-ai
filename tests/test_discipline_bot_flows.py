@@ -959,3 +959,38 @@ async def test_founder_settings_callbacks_match_commands(bot_dp):
         assert any(getattr(m, "text", None) == command_result[0].text for m in callback_result)
     stale = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:old", target_chat_id=FOUNDER_ID)
     assert any("Bu tugma eskirgan." in str(m) for m in stale)
+
+
+async def test_settings_legacy_preview_and_confirm_uses_same_token(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    confirmed = []
+
+    monkeypatch.setattr(
+        discipline_bot.nazoratchi_day, "preview_legacy_close",
+        lambda now: {"rows": [{"session_date": "2026-10-20", "branch": "SATURN Charhiy"}],
+                     "version": "snapshot-test"},
+    )
+    def fake_confirm(now, version):
+        confirmed.append(version)
+        return {"days": 1, "sessions": 1}
+    monkeypatch.setattr(discipline_bot.nazoratchi_day, "confirm_legacy_close", fake_confirm)
+
+    sent = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:legacy", target_chat_id=FOUNDER_ID)
+    preview = next(
+        item for item in sent
+        if getattr(item, "text", "").startswith("🔎 Eski kunlarni yopish ko'rigi")
+    )
+    button = preview.reply_markup.inline_keyboard[0][0]
+    assert button.text == "✅ Eski kunlarni yopish"
+    key = (FOUNDER_ID, FOUNDER_ID)
+    state = discipline_bot._LEGACY_CLOSE_PREVIEWS[key]
+    assert button.callback_data == "bos:legacy_close:" + state["token"]
+    assert state["message_id"] == sent.index(preview) + 1
+
+    result = await send_callback(
+        main.dp, bot, FOUNDER_ID, data=button.callback_data,
+        target_chat_id=FOUNDER_ID, message_id=state["message_id"],
+    )
+    assert confirmed == ["snapshot-test"]
+    assert any("✅ Eski kunlar yopildi" in getattr(item, "text", "") for item in result)
+    assert key not in discipline_bot._LEGACY_CLOSE_PREVIEWS

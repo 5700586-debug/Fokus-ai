@@ -911,7 +911,7 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 
 
 
-def strict_close_day_report(work_date: str) -> list[dict]:
+def strict_close_day_report(work_date: str) -> dict:
     conn = get_connection()
     try:
         sessions = conn.execute(

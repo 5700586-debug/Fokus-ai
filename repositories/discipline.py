@@ -697,6 +697,7 @@ def create_penalty_with_balance(
     rule_number: int,
     comment: str | None,
     ai_note: str | None,
+    evidence_file_id: str | None = None,
 ) -> dict:
     """Minus BITTA tranzaksiyada: ``discipline_penalties`` + ``salaries.bonus_bank`` + ``bonus_bank_ledger``.
     Uchalasi muvaffaqiyatli bo'lsagina commit; istalgan yozuv xato bersa ulanish yopilganda hammasi bekor
@@ -706,9 +707,9 @@ def create_penalty_with_balance(
         cursor = conn.execute(
             "INSERT INTO discipline_penalties "
             "(employee_id, supervisor_id, penalty_date, amount, rule_number, comment, "
-            "ai_note, appeal_status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'none', ?)",
-            (employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note, _now()),
+            "ai_note, evidence_file_id, appeal_status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'none', ?)",
+            (employee_id, supervisor_id, penalty_date, amount, rule_number, comment, ai_note, evidence_file_id, _now()),
         )
         penalty_id = cursor.lastrowid
         balance = _apply_bonus_delta(

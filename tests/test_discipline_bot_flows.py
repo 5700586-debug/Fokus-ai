@@ -939,3 +939,23 @@ def test_founder_reports_are_navigation_labels():
     assert "📊 Hisobotlar" in main._FOUNDER_MENU_LABELS
     assert "📊 Hisobotlar" in main._SANDBOX_ESCAPE_TEXTS
     assert "📊 Hisobotlar" in main._TOP_LEVEL_NAV_TEXTS
+
+
+async def test_founder_settings_menu_and_employee_legacy_text(bot_dp):
+    main, bot = bot_dp
+    founder = await send(main.dp, bot, FOUNDER_ID, text="⚙️ Sozlamalar")
+    buttons = [b.text for row in founder[0].reply_markup.inline_keyboard for b in row]
+    assert buttons == ["📜 Nizomlar", "🛠 Qoidalar", "📅 Eski kunlarni yopish", "✍️ Qo'lda sozlash"]
+    _set_role(111, "kassir")
+    employee = await send(main.dp, bot, 111, text="⚙️ Sozlamalar")
+    assert employee[0].text == "⚙️ Sozlamalar bo‘limi tez orada qo‘shiladi."
+
+
+async def test_founder_settings_callbacks_match_commands(bot_dp):
+    main, bot = bot_dp
+    for command, callback_data in (("/listnizom", "fset:nizom"), ("/listrules", "fset:rules")):
+        command_result = await send(main.dp, bot, FOUNDER_ID, text=command)
+        callback_result = await send_callback(main.dp, bot, FOUNDER_ID, data=callback_data, target_chat_id=FOUNDER_ID)
+        assert any(getattr(m, "text", None) == command_result[0].text for m in callback_result)
+    stale = await send_callback(main.dp, bot, FOUNDER_ID, data="fset:old", target_chat_id=FOUNDER_ID)
+    assert any("Bu tugma eskirgan." in str(m) for m in stale)

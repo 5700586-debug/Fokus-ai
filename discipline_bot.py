@@ -887,7 +887,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                 end = work_date
                 label = ""
             days = (end - first).days
-            graded = discipline_repo.count_graded_dates(first.isoformat(), end.isoformat())
+            graded = discipline.count_graded_dates(first.isoformat(), end.isoformat())
             text += f"\n\n{label}Nazoratchi {days} kundan {graded} kunini baholadi"
         await message.answer(text)
 

@@ -910,7 +910,7 @@ def get_closure(supervisor_id: int, closure_date: str) -> dict | None:
 # -------------------------------------------------------- supervisor audit --
 
 
-def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int) -> bool:
+def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, event_type: str, penalty_amount: int, reason: str = "Kun o\u0027z vaqtida yopilmadi") -> bool:
     """Audit yozuvi + ``salaries.bonus_bank`` minusi + ``bonus_bank_ledger`` BITTA tranzaksiyada. Bir nazoratchi+ish kuni+hodisa
     uchun faqat bir marta (``UNIQUE`` + ``INSERT OR IGNORE``): takroriy/parallel chaqiruv ``False`` qaytaradi va hech narsa
     yozmaydi. Istalgan yozuv xato bersa hammasi bekor."""
@@ -925,7 +925,7 @@ def record_supervisor_audit_with_penalty(supervisor_id: int, audit_date: str, ev
         if cursor.rowcount <= 0:
             return False
         _apply_bonus_delta(
-            conn, supervisor_id, -penalty_amount, "Kun o'z vaqtida yopilmadi", "supervisor_audit", None
+            conn, supervisor_id, -penalty_amount, reason, "supervisor_audit", None
         )
         conn.commit()
         return True

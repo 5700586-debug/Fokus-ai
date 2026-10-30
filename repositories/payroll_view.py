@@ -29,6 +29,10 @@ def month_sources(employee_id: int, start: str, end_exclusive: str, conn=None) -
                 (employee_id, start, end_exclusive),
             ).fetchall()
         ]
+        extra_work = conn.execute(
+            "SELECT COALESCE(SUM(stars), 0) AS n FROM extra_work_stars WHERE employee_id = ? AND work_date >= ? AND work_date < ?",
+            (employee_id, start, end_exclusive),
+        ).fetchone()["n"]
         time_bonus_days = conn.execute(
             "SELECT COUNT(*) AS n FROM time_bonus_grants WHERE employee_id = ? AND grant_date >= ? AND grant_date < ?",
             (employee_id, start, end_exclusive),
@@ -36,4 +40,5 @@ def month_sources(employee_id: int, start: str, end_exclusive: str, conn=None) -
     finally:
         if owns:
             conn.close()
-    return {"evaluations": evaluations, "penalties": penalties, "audits": audits, "time_bonus_days": int(time_bonus_days)}
+    return {"evaluations": evaluations, "penalties": penalties, "audits": audits, "time_bonus_days": int(time_bonus_days),
+            "extra_work": int(extra_work)}

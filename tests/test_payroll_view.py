@@ -86,7 +86,7 @@ def test_missing_inputs_give_none_not_zero():
         assert result["total_amount"] is None, index
     assert pv.compute_totals(16800, 2_500_000, 6003, 40, 5, None, 50)["fixed_amount"] == 893_304
     assert pv.compute_totals(0, 2_500_000, 6003, 40, 5, 6, 50)["fixed_amount"] is None
-    assert pv.compute_totals(16800, 2_500_000, 16801, 40, 5, 6, 50)["fixed_amount"] is None  # reja oshgan: taxmin yo'q
+    assert pv.compute_totals(16800, 2_500_000, 16801, 40, 5, 6, 50)["fixed_amount"] == 2_500_000  # reja oshgan: fiks cheklanadi
 
 
 # ------------------------------------------------------------------ reader --
@@ -99,9 +99,8 @@ def test_month_view_reads_sources_and_leaves_unavailable_ones_empty(temp_db):
     assert view["worked_minutes"] == 6003 and view["worked_days"] == 11
     assert view["fixed_amount"] == 893_304
     assert view["work_bonus"] == 40 and view["minus"] == 5 and view["minus_applied"] == 5
-    assert view["recognition"] is None and view["extra_work"] is None  # manba yo'q
-    assert view["total_stars"] is None and view["total_amount"] is None and view["complete"] is False
-    assert "recognition" in view["unavailable"] and "extra_work" in view["unavailable"] and "total_amount" in view["unavailable"]
+    assert view["recognition"] == 0 and view["extra_work"] == 0  # e'tirof = qo'shimcha ish; yozuv yo'q -> 0
+    assert view["total_stars"] == 35 and view["total_amount"] == 893_304 + 35 * 5000 and view["complete"] is True
     assert view["final"] is True
     # manbasi bo'lmagan qismlar tashqaridan berilsa, tasdiqlangan misol chiqadi
     full = pv.compute_totals(view["plan_minutes"], view["fixed_salary"], view["worked_minutes"], view["work_bonus"], view["minus"], 6, 50)
@@ -139,13 +138,13 @@ def test_legacy_agreement_without_days_or_hours_has_no_plan(temp_db):
     assert view["plan_minutes"] is None and view["fixed_amount"] is None and "plan" in view["unavailable"]
 
 
-def test_worked_over_plan_and_incomplete_days_are_flagged(temp_db):
+def test_worked_over_plan_is_capped_and_incomplete_days_are_flagged(temp_db):
     _agreement(days=1, minutes=60)
-    _day("2026-09-02", "08:00:00", "18:00:00")  # 600 > 60
+    _day("2026-09-02", "08:00:00", "18:00:00")  # 600 > 60 — ortiqcha o'tirish pul emas
     attendance_repo.record_event(EMP, "check_in", "2026-09-03T08:00:00+05:00", "test")  # chiqishsiz kun
     view = pv.month_view(EMP, MONTH)
-    assert view["worked_minutes"] == 600 and view["fixed_amount"] is None
-    assert any("oshgan" in t for t in view["limitations"]) and any("chiqish yo'q" in t for t in view["limitations"])
+    assert view["worked_minutes"] == 600 and view["fixed_amount"] == 2_500_000
+    assert not any("oshgan" in t for t in view["limitations"]) and any("chiqish yo'q" in t for t in view["limitations"])
 
 
 def test_future_month_has_no_data(temp_db):
@@ -153,11 +152,39 @@ def test_future_month_has_no_data(temp_db):
     assert view["worked_minutes"] is None and view["total_amount"] is None and view["complete"] is False
 
 
-def test_time_bonus_without_star_value_is_a_limitation(temp_db):
+def test_time_bonus_adds_two_points_per_day(temp_db):
     _full_month_fixture()
-    _sql("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_by, confirmed_at) VALUES (?, '2026-09-04', 'auto', NULL, 'x')", (EMP,))
+    for day in ("2026-09-04", "2026-09-05"):
+        _sql("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_by, confirmed_at) VALUES (?, ?, 'auto', NULL, 'x')",
+             (EMP, day))
     view = pv.month_view(EMP, MONTH)
-    assert view["work_bonus"] == 40 and any("Vaqt bonusi" in t for t in view["limitations"])
+    assert view["time_bonus_days"] == 2 and view["time_bonus"] == 4
+    assert view["work_bonus"] == 44 and not any("Vaqt bonusi" in t for t in view["limitations"])
+
+
+def test_time_bonus_alone_is_a_bonus_source(temp_db):
+    _agreement()
+    _sql("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_by, confirmed_at) VALUES (?, '2026-09-04', 'manual', 1, 'x')",
+         (EMP,))
+    assert pv.month_view(EMP, MONTH)["work_bonus"] == 2
+
+
+def test_extra_work_stars_are_protected_from_minus(temp_db):
+    _full_month_fixture()
+    _penalty("2026-09-07", 100)  # minus ish bonusidan katta
+    _sql("INSERT INTO extra_work_stars (employee_id, work_date, stars, reason, given_by, request_token, created_at) "
+         "VALUES (?, '2026-09-08', 6, 'Inventarizatsiyada 2 soat', 1, 't1', 'x')", (EMP,))
+    view = pv.month_view(EMP, MONTH)
+    assert view["extra_work"] == 6 and view["minus_applied"] == 40
+    assert view["total_stars"] == 6 and view["total_amount"] == 893_304 + 6 * 5000
+
+
+def test_total_shows_even_without_bonus_sources(temp_db):
+    _agreement(days=1, minutes=600)
+    _day("2026-09-02")
+    view = pv.month_view(EMP, MONTH)
+    assert view["work_bonus"] is None and "work_bonus" in view["unavailable"]
+    assert view["total_amount"] == 2_500_000
 
 
 def test_read_is_idempotent_writes_nothing_and_ledger_duplicates_do_not_count(temp_db):

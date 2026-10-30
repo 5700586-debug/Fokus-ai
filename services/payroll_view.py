@@ -5,7 +5,8 @@ Hech narsa yozmaydi, yangi ledger/kiritish oqimi/avtomatik bonus yaratmaydi. Man
 e'tirof/qo'shimcha ish ajratilmaydi.
 
 Tasdiqlangan formula (Muhammadiy): ``fiks = fiks_oylik * ishlangan_daqiqa / reja_daqiqa`` (butun so'mga yaxlitlanadi),
-``yulduz jami = ish_bonusi - min(minus, ish_bonusi) + e'tirof + qo'shimcha_ish`` (minus FAQAT ish bonusidan ayriladi,
+``yulduz jami = ish_bonusi - min(minus, ish_bonusi) + e'tirof + qo'shimcha_ish`` (ish bonusi = baho ballari + nazoratchi
++5 + vaqt bonusi 2 ball/kun; fiks rejadan oshmaydi) (minus FAQAT ish bonusidan ayriladi,
 e'tirof va qo'shimcha ish himoyalangan), ``umumiy = fiks + yulduz_jami * 5000``."""
 
 from datetime import date, timedelta
@@ -18,6 +19,8 @@ from repositories import salary_agreements as agreements_repo
 from services import attendance
 
 STAR_VALUE_SOM = 5000
+# Muhammadiy qarori (2026-10-30): vaqt bonusi berilgan har kun = 2 ball; ish bonusi kabi minusdan ta'sirlanadi.
+TIME_BONUS_POINTS = 2
 NO_DATA = "Ma'lumot yo'q"
 
 
@@ -25,11 +28,13 @@ def compute_totals(
     plan_minutes: int | None, fixed_salary: int | None, worked_minutes: int | None,
     work_bonus: int | None, minus: int | None, recognition: int | None, extra_work: int | None,
 ) -> dict:
-    """Sof hisob (bazaga tegmaydi). Yetishmagan kirish -> tegishli natija ``None``; ishlangan vaqt rejadan oshsa fiks
-    ``None`` (oshgan qism qoidasi tasdiqlanmagan)."""
+    """Sof hisob (bazaga tegmaydi). Yetishmagan kirish -> tegishli natija ``None``.
+    Rejadan ortiq o'tirilgan vaqt pul emas (Muhammadiy qarori, 2026-10-30): fiks rejadagi summadan oshmaydi —
+    qo'shimcha ish faqat alohida kelishilgan "qo'shimcha ish yulduzi" bilan to'lanadi."""
     fixed_amount = None
-    if plan_minutes and plan_minutes > 0 and fixed_salary is not None and worked_minutes is not None and 0 <= worked_minutes <= plan_minutes:
-        fixed_amount = (2 * fixed_salary * worked_minutes + plan_minutes) // (2 * plan_minutes)  # yarim so'm yuqoriga
+    if plan_minutes and plan_minutes > 0 and fixed_salary is not None and worked_minutes is not None and worked_minutes >= 0:
+        paid_minutes = min(worked_minutes, plan_minutes)
+        fixed_amount = (2 * fixed_salary * paid_minutes + plan_minutes) // (2 * plan_minutes)  # yarim so'm yuqoriga
 
     minus_applied = None
     if work_bonus is not None and minus is not None:
@@ -86,6 +91,7 @@ def month_view(employee_id: int, year_month: str) -> dict:
     if last < start:
         reason = f"{NO_DATA}: oy hali boshlanmagan"
         return {**result, "plan_minutes": None, "fixed_salary": None, "worked_minutes": None, "worked_days": 0, "work_bonus": None,
+                "time_bonus": 0, "time_bonus_days": 0,
                 "minus": None, "recognition": None, "extra_work": None, **compute_totals(None, None, None, None, None, None, None),
                 "unavailable": {"month": reason}, "limitations": [reason], "complete": False}
 
@@ -120,29 +126,28 @@ def month_view(employee_id: int, year_month: str) -> dict:
         unavailable["worked"] = f"{NO_DATA}: davomatda kirish va chiqishi to'liq kun yo'q"
     if worked["incomplete"]:
         limitations.append(f"{worked['incomplete']} kunda kirish bor, chiqish yo'q — ishlangan vaqt to'liq bo'lmasligi mumkin")
-    if worked_minutes is not None and plan_minutes and worked_minutes > plan_minutes:
-        reason = "Ishlangan vaqt rejadan oshgan — oshgan qism qoidasi tasdiqlanmagan"
-        unavailable["fixed"] = reason
-        limitations.append(reason)
 
     full_bonus = -sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] == "day_full_bonus")
-    work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus) if sources["evaluations"] or sources["audits"] else None
+    time_bonus = sources["time_bonus_days"] * TIME_BONUS_POINTS
+    has_bonus_source = sources["evaluations"] or sources["audits"] or sources["time_bonus_days"]
+    work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus + time_bonus) if has_bonus_source else None
     if work_bonus is None:
         unavailable["work_bonus"] = f"{NO_DATA}: shu oyda kunlik ish bahosi yo'q"
     minus = sum(p["amount"] for p in sources["penalties"]) + sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] != "day_full_bonus")
-    if sources["time_bonus_days"]:
-        limitations.append("Vaqt bonusi berilgan, lekin uning yulduz qiymati tizimda saqlanmaydi — hisobga kirmaydi")
-    unavailable["recognition"] = f"{NO_DATA}: e'tirof manbasi yo'q"
-    unavailable["extra_work"] = f"{NO_DATA}: qo'shimcha ish manbasi yo'q"
+    # E'tirof alohida manba emas (Muhammadiy: filial rahbari faqat qo'shimcha ish uchun yulduzcha beradi) — 0.
+    recognition = 0
+    extra_work = sources["extra_work"]
 
-    totals = compute_totals(plan_minutes, fixed_salary, worked_minutes, work_bonus, minus, None, None)
+    # Bonus manbasi bo'lmasa ham jami chiqsin: bonus 0 deb olinadi (sababi ``unavailable``da qoladi).
+    totals = compute_totals(plan_minutes, fixed_salary, worked_minutes, work_bonus or 0, minus, recognition, extra_work)
     if totals["fixed_amount"] is None and "fixed" not in unavailable:
         unavailable["fixed"] = f"{NO_DATA}: reja yoki ishlangan vaqt yetarli emas"
     if totals["total_stars"] is None:
         unavailable["total_stars"] = unavailable["total_amount"] = f"{NO_DATA}: tarkibiy qismlardan biri yo'q — jami hisoblanmadi"
     return {
         **result, "plan_minutes": plan_minutes, "fixed_salary": fixed_salary, "worked_minutes": worked_minutes,
-        "worked_days": worked["days"], "work_bonus": work_bonus, "minus": minus, "recognition": None, "extra_work": None,
+        "worked_days": worked["days"], "work_bonus": work_bonus, "time_bonus": time_bonus,
+        "time_bonus_days": sources["time_bonus_days"], "minus": minus, "recognition": recognition, "extra_work": extra_work,
         **totals, "unavailable": unavailable, "limitations": limitations,
         "complete": not unavailable and not limitations and totals["total_amount"] is not None,
     }

@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Intizomli xodimlar yulduzi (oylik) — Draft (2026-10-30)
+- Muhammadiy qarori: har oy yulduz yo +1, yo −1 (0..5). +1 sharti: nizom minusi yo'q (istisnosiz), "bajarilmagan" yo'q va "chala" ≤1 kun, vaqt bonusi olinmagan kun ≤1, sababsiz kelmagan kun yo'q, ish kunlari to'liq (kelishuvdagi oylik ish kunlari yoki 26; ruxsatli kunlar ayiriladi). E'tiroz hal bo'lmagan xodim — kutiladi. Oktabr sinov oyi: hisob 2026-11 dan (birinchi ko'rik 1-dekabr).
+- `services/star_month.py`: evaluate (faqat o'qish), apply (Founder tasdig'idan keyin; star_history/bonus_history UNIQUE bilan idempotent), guruh jadvali rasmi (surat/bosh harf + ism + 5 yulduz, pul ko'rinmaydi).
+- Har oy 1-kuni 09:11 Founderga ko'rik + "✅ Tasdiqlash va yozish"; tasdiqdan keyin xodimga shaxsiy xabar (yulduz + bonus summasi), guruhga jadval (`saturn.group_chat_id` bo'lsa). "📊 Hisobotlar → ⭐ Yulduzlar" — joriy jadval va o'tgan oy ko'rigi.
+- Hali yo'q: kunlik guruh jadvali (nazoratchi kunni yopgach) — keyingi qadam.
+
 ## Haftalik va oylik Founder hisoboti (dashboard) — Draft (2026-10-30)
 - `services/period_report.py`: har dushanba 08:17 (o'tgan dushanba–yakshanba) va har oyning 1-kuni 08:23 (o'tgan oy), Asia/Tashkent, Founderga dashboard rasmi (Pillow: o'rtacha baho, baholar soni, minuslar, baholanmagan + oldingi davrga nisbatan, baho taqsimoti, filiallar, eng yaxshi/eng past 5 xodim, nazoratchi) + qisqa AI xulosa (gpt-5-mini; xato bo'lsa qoidaga asoslangan xulosa). Bazaga yozmaydi; bir davr uchun bir marta (`notifications.try_reserve`).
 - "📊 Hisobotlar" ichida "📈 Haftalik hisobot" / "📅 Oylik hisobot" tugmalari — istalgan payt.

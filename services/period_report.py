@@ -128,9 +128,9 @@ def _totals(conn, start: str, end: str) -> Totals:
     totals = Totals()
     for row in _rows(conn, "SELECT grade_key, COUNT(*) AS n, SUM(grade_points) AS pts FROM daily_evaluations "
                            "WHERE eval_date >= ? AND eval_date <= ? GROUP BY grade_key", (start, end)):
-        totals.graded += row["n"]
-        totals.points += row["pts"] or 0
         if row["grade_key"] in totals.grades:
+            totals.graded += row["n"]
+            totals.points += row["pts"] or 0
             totals.grades[row["grade_key"]] += row["n"]
     for row in _rows(conn, "SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS pts, "
                            "COALESCE(SUM(CASE WHEN appeal_status != 'none' THEN 1 ELSE 0 END), 0) AS appeals "
@@ -163,9 +163,9 @@ def collect(period: Period) -> Report:
                                "FROM daily_evaluations WHERE eval_date >= ? AND eval_date <= ? "
                                "GROUP BY employee_id, grade_key", (start, end)):
             item = rows.setdefault(row["employee_id"], employee(row["employee_id"]))
-            if row["grade_key"] in item.grades:
+            if row["grade_key"] in item.grades:  # noma'lum (eski) baho turi o'rtachani buzmasin
                 item.grades[row["grade_key"]] += row["n"]
-            item.points += row["pts"] or 0
+                item.points += row["pts"] or 0
         for row in _rows(conn, "SELECT employee_id, COUNT(*) AS n, SUM(amount) AS pts FROM discipline_penalties "
                                "WHERE penalty_date >= ? AND penalty_date <= ? "
                                "AND (appeal_decision IS NULL OR appeal_decision != 'approved') "
@@ -344,7 +344,9 @@ def render_dashboard(report: Report) -> bytes:
     top = graded[:5]
     bottom = list(reversed(graded[max(5, len(graded) - 5):]))  # eng yaxshilar bilan takrorlanmaydi
     branch_rows = report.branches[:6]
-    height = 1400 + 64 * max(len(top), 1) + (64 * len(bottom) + 90 if bottom else 0) + 58 * len(branch_rows)
+    # Kartalar balandligi yig'indisi + zaxira; oxirida haqiqiy kontentgacha kesiladi (pastki qism yo'qolmaydi).
+    height = (1500 + 64 * max(len(top), 1) + (64 * len(bottom) + 170 if bottom else 0)
+              + 58 * max(len(branch_rows), 1) + 300)
 
     image = Image.new("RGB", (_W, height), _BG)
     draw = ImageDraw.Draw(image)

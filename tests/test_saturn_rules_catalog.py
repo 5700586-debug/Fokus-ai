@@ -15,7 +15,7 @@ from repositories import discipline as discipline_repo
 from services import company_rules_import as importer
 from services import discipline
 
-SOURCE_SHA256 = "e836d6af6daeb3fdec42a6bf62755daff9e00af79e85e51a1881b83387766c10"
+SOURCE_SHA256 = "6a597c01bbfe65bd68e62fd16816daa1db07faf58a52dd60c47fe522ea87b011"
 FOUNDER = 1
 
 
@@ -48,7 +48,7 @@ def _count(table: str, where: str = "1=1") -> int:
 def test_source_is_the_single_original_file_byte_for_byte(text, manifest):
     raw = importer.SOURCE_PATH.read_bytes()
     assert hashlib.sha256(raw).hexdigest() == SOURCE_SHA256 == manifest["source"]["sha256"]
-    assert len(raw) == manifest["source"]["bytes"] == 63767
+    assert len(raw) == manifest["source"]["bytes"] == 64909
     assert manifest["source"]["original_name"] == "SATURN_NIZOM_CHEKLIST_MANBA.txt"
     assert b"\r" not in raw  # hech qanday "tozalash"/qator oxiri o'zgarishi yo'q
     assert importer.validate() == []
@@ -73,7 +73,7 @@ def test_first_two_metadata_lines_and_separators_are_not_catalog_items(src, mani
 
 
 def test_ten_sections_in_order_and_every_meaningful_line_is_covered(src, manifest):
-    assert [s["name"] for s in manifest["sections"]] == list(importer.EXPECTED_SECTION_ORDER) and len(manifest["sections"]) == 10
+    assert [s["name"] for s in manifest["sections"]] == list(importer.EXPECTED_SECTION_ORDER) and len(manifest["sections"]) == 11
     covered = set()
     for item in manifest["items"]:
         covered.update(range(item["title_line"], item["last_line"] + 1))
@@ -151,7 +151,7 @@ def test_typographic_apostrophe_differences_are_tolerated_only_in_comparison():
 
 def test_every_option_points_come_from_the_exact_source_line(src, manifest):
     pattern = re.compile(r"[–−-]\s?(\d+)\s*ball", re.IGNORECASE)
-    assert len(manifest["penalty_options"]) == 88
+    assert len(manifest["penalty_options"]) == 89
     for option in manifest["penalty_options"]:
         line = src.lines[option["line"] - 1]
         assert int(pattern.search(line).group(1)) == option["points"]
@@ -234,8 +234,8 @@ def test_empty_db_import_creates_the_full_catalog_and_changes_no_balances_or_pen
     result = importer.run_import(apply=True, created_by=FOUNDER, expected_version=importer.import_version())
 
     assert result["applied"] is True and result["conflicts"] == []
-    assert (result["rules_inserted"], result["options_inserted"], result["unresolved"]) == (97, 88, 17)
-    assert _count("company_rules", "catalog_kind IS NOT NULL") == 97 and _count("company_rule_penalty_options") == 88
+    assert (result["rules_inserted"], result["options_inserted"], result["unresolved"]) == (102, 89, 18)
+    assert _count("company_rules", "catalog_kind IS NOT NULL") == 102 and _count("company_rule_penalty_options") == 89
     assert discipline.get_rule(777)["title"] == "Oldingi nizom"  # mavjud boshqa nizom saqlangan
     assert (_count("bonus_bank_ledger"), _count("discipline_penalties"), _count("daily_evaluations"), _count("daily_evaluation_history")) == before
     kinds = discipline_repo.list_catalog_rules()
@@ -248,7 +248,7 @@ def test_dry_run_writes_nothing_and_reports_the_same_plan_as_apply():
     dry = importer.run_import(apply=False, created_by=FOUNDER)
 
     assert (_count("company_rules"), _count("company_rule_penalty_options")) == (0, 0)
-    assert dry["applied"] is False and dry["rules_inserted"] == 97 and dry["options_inserted"] == 88
+    assert dry["applied"] is False and dry["rules_inserted"] == 102 and dry["options_inserted"] == 89
 
     applied = importer.run_import(apply=True, created_by=FOUNDER, expected_version=dry["version"])
     assert {k: dry[k] for k in ("rules_inserted", "options_inserted", "conflicts", "unresolved")} == {
@@ -262,8 +262,8 @@ def test_repeated_import_is_idempotent_and_creates_no_duplicates():
 
     again = importer.run_import(apply=True, created_by=FOUNDER, expected_version=version)
 
-    assert (again["rules_inserted"], again["options_inserted"], again["rules_unchanged"], again["options_unchanged"]) == (0, 0, 97, 88)
-    assert (_count("company_rules"), _count("company_rule_penalty_options")) == (97, 88)
+    assert (again["rules_inserted"], again["options_inserted"], again["rules_unchanged"], again["options_unchanged"]) == (0, 0, 102, 89)
+    assert (_count("company_rules"), _count("company_rule_penalty_options")) == (102, 89)
 
 
 def test_parallel_imports_do_not_duplicate():
@@ -274,7 +274,7 @@ def test_parallel_imports_do_not_duplicate():
             lambda _: importer.run_import(apply=True, created_by=FOUNDER, expected_version=version), range(4)
         ))
 
-    assert (_count("company_rules"), _count("company_rule_penalty_options")) == (97, 88)
+    assert (_count("company_rules"), _count("company_rule_penalty_options")) == (102, 89)
     assert all(r["conflicts"] == [] or all("parallel" in c or "busy" in c for c in r["conflicts"]) for r in results)
 
 
@@ -329,7 +329,7 @@ def test_write_error_rolls_back_the_whole_catalog_and_retry_succeeds():
     finally:
         db_fail.repair("company_rule_penalty_options", name="break_options")
     result = importer.run_import(apply=True, created_by=FOUNDER, expected_version=importer.import_version())
-    assert result["applied"] and (_count("company_rules"), _count("company_rule_penalty_options")) == (97, 88)
+    assert result["applied"] and (_count("company_rules"), _count("company_rule_penalty_options")) == (102, 89)
 
 
 def test_wrong_source_hash_or_unapproved_version_blocks_apply(monkeypatch, tmp_path):
@@ -468,7 +468,7 @@ def test_catalog_entries_cover_all_sources_and_exclude_only_notes_and_bonus_mode
     sources = discipline.list_catalog_sources(entries)
 
     assert [s["section"] for s in sources] == list(discipline.SOURCE_ORDER)
-    assert len(entries) == 97 - 1 - 3  # bonus modeli va 3 ta "Eslatma:" izohi nomzod emas
+    assert len(entries) == 102 - 1 - 3  # bonus modeli va 3 ta "Eslatma:" izohi nomzod emas
     rule26 = discipline.get_catalog_entry(26)
     assert rule26["amount_status"] == "options" and rule26["display_number"] == 26
     assert discipline.get_catalog_entry(10_101 + 11)["amount_status"] == "none"

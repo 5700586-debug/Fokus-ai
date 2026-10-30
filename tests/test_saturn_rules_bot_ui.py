@@ -60,7 +60,7 @@ async def test_listnizom_with_catalog_is_paginated_and_every_message_fits(bot_dp
 
     assert len(sent) == 1 and len(sent[0].text) <= 4096
     sections = [b.callback_data for b in _buttons(sent[0])]
-    assert len(sections) == 10 == len(discipline.list_catalog_sources(discipline.get_catalog_entries(candidates_only=False)))
+    assert len(sections) == 11 == len(discipline.list_catalog_sources(discipline.get_catalog_entries(candidates_only=False)))
 
     seen_titles = set()
     for data in sections:
@@ -134,7 +134,7 @@ async def test_founder_preview_writes_nothing_then_apply_imports_once(bot_dp):
 
     await send_callback(main.dp, bot, FOUNDER_ID, data=apply_data, target_chat_id=FOUNDER_ID)
     after = _count_rules()
-    assert after == 97
+    assert after == 102
     await send_callback(main.dp, bot, FOUNDER_ID, data=apply_data, target_chat_id=FOUNDER_ID)
     assert _count_rules() == after
 
@@ -186,6 +186,6 @@ async def test_import_acknowledges_before_database_work_and_reports_afterwards(b
     sent = await send_callback(main.dp, bot, FOUNDER_ID, data=f"rimp:{importer.import_version()}", target_chat_id=FOUNDER_ID)
 
     assert events == ["ack", "import", "result"]
-    assert _count_rules() == 97
+    assert _count_rules() == 102
     assert any(isinstance(m, EditMessageText) and "Import bajarildi" in m.text for m in sent)
     assert not any("Kutilmagan" in (getattr(m, "text", "") or "") for m in sent)

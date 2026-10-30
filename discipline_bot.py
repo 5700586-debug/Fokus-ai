@@ -35,6 +35,7 @@ from services import rules as rules_service
 from services import salary_agreement
 from services import evidence_photo
 from services import period_report
+from services import star_month
 import evidence_handlers
 
 logger = logging.getLogger(__name__)
@@ -969,6 +970,37 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         await message.answer(_month_board_text(message.from_user.id))
 
+    @dp.callback_query(F.data.in_({_CB_STARS_SHOW, _CB_STARS_MONTH}) | F.data.startswith(_CB_STARS_OK))
+    async def founder_stars_callback(callback: CallbackQuery) -> None:
+        if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        await callback.answer()
+        try:
+            if callback.data == _CB_STARS_SHOW:
+                await _send_star_board(callback.bot, callback.from_user.id, "Joriy yulduzlar")
+                await callback.message.answer(
+                    "Oy yakuni hisobini ko'rish:",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                        text="📋 O'tgan oy hisobi", callback_data=_CB_STARS_MONTH)]]),
+                )
+            elif callback.data == _CB_STARS_MONTH:
+                await _send_star_preview(callback.bot, callback.from_user.id, star_month.previous_month(_company_today()))
+            else:
+                year_month = callback.data[len(_CB_STARS_OK):]
+                if len(year_month) != 7 or year_month >= _company_today().strftime("%Y-%m"):
+                    await callback.message.answer("Bu tugma eskirgan.")
+                    return
+                if callback.message:
+                    try:
+                        await callback.message.edit_reply_markup(reply_markup=None)
+                    except Exception:  # noqa: BLE001
+                        pass
+                await callback.message.answer(await _apply_stars(callback.bot, year_month))
+                await _send_star_board(callback.bot, callback.from_user.id, f"Yulduzlar — {star_month.month_label(year_month)}")
+        except Exception as error:  # noqa: BLE001
+            logger.error("Yulduz amali xatosi: %s", type(error).__name__)
+            await callback.message.answer("Yulduz amalini bajarib bo'lmadi, keyinroq urinib ko'ring.")
+
     @dp.callback_query(F.data.startswith("frep:"))
     async def founder_report_callback(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
@@ -1887,6 +1919,85 @@ def _company_today() -> date:
     return company_time.now().date()
 
 
+_CB_STARS_SHOW = "stars:show"
+_CB_STARS_MONTH = "stars:month"
+_CB_STARS_OK = "stars:ok:"
+
+
+def _stars_confirm_markup(year_month: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Tasdiqlash va yozish", callback_data=f"{_CB_STARS_OK}{year_month}")
+    ]])
+
+
+async def _send_star_preview(bot, chat_id: int, year_month: str) -> None:
+    decisions = await asyncio.to_thread(star_month.evaluate, year_month)
+    text = star_month.preview_text(year_month, decisions)
+    markup = _stars_confirm_markup(year_month) if any(not d.pending for d in decisions) else None
+    for start in range(0, len(text), 3500):
+        chunk = text[start:start + 3500]
+        last = start + 3500 >= len(text)
+        await bot.send_message(chat_id, chunk, reply_markup=markup if last else None)
+
+
+async def _send_star_board(bot, chat_id: int, title: str) -> None:
+    from aiogram.types import BufferedInputFile
+
+    rows = await asyncio.to_thread(star_month.current_board)
+    photos = await star_month.download_photos(bot, rows)
+    png = await asyncio.to_thread(star_month.render_board, rows, title, photos)
+    await bot.send_photo(chat_id, BufferedInputFile(png, filename="yulduzlar.png"))
+
+
+async def _apply_stars(bot, year_month: str) -> str:
+    decisions = await asyncio.to_thread(star_month.evaluate, year_month)
+    applied = await asyncio.to_thread(star_month.apply, year_month, decisions)
+    label = star_month.month_label(year_month)
+    for decision in applied:
+        bonus = rules_service.get_bonus_for_stars(decision.new_stars)
+        if decision.passed:
+            text = f"⭐ {label}: intizomli oy! Yulduzlaringiz {decision.current_stars} → {decision.new_stars}."
+        else:
+            text = (f"⭐ {label}: yulduzlaringiz {decision.current_stars} → {decision.new_stars}.\n"
+                    f"Sabab: {'; '.join(decision.reasons)}")
+        if bonus:
+            text += f"\nYulduz bonusi: {bonus:,} so'm".replace(",", " ")
+        try:
+            await bot.send_message(decision.user_id, text)
+        except Exception as error:  # noqa: BLE001 - xodimga yetmasa ham yozuv saqlanadi
+            logger.info("Yulduz xabari yetmadi: %s", type(error).__name__)
+    group_id = rules_service.get_saturn_group_chat_id()
+    if applied and group_id:
+        try:
+            await _send_star_board(bot, group_id, f"Yulduzlar — {label}")
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Guruhga yulduz jadvali yuborilmadi: %s", type(error).__name__)
+    waiting = sum(1 for d in decisions if d.pending)
+    result = f"✅ {label}: {len(applied)} xodimning yulduzi yozildi."
+    if waiting:
+        result += f"\n⏳ {waiting} xodim e'tiroz sabab kutmoqda — hal bo'lgach 📊 Hisobotlar → ⭐ Yulduzlar orqali qayta tasdiqlang."
+    if not group_id:
+        result += "\nℹ️ Guruh ulanmagan — jadval faqat sizga yuborildi."
+    return result
+
+
+async def _star_month_tick(bot) -> None:
+    """Har oyning 1-kuni: o'tgan oy yulduz hisobini Founderga KO'RIK sifatida yuboradi (yozmaydi)."""
+    from services import notifications
+
+    year_month = star_month.previous_month(_company_today())
+    job_key = f"star_preview:{year_month}"
+    if not await notifications.try_reserve(job_key, FOUNDER_ID):
+        return
+    try:
+        await _send_star_preview(bot, FOUNDER_ID, year_month)
+    except Exception as error:  # noqa: BLE001
+        notifications.release_reservation(job_key, FOUNDER_ID)
+        logger.error("Yulduz ko'rigi yuborilmadi: %s", type(error).__name__)
+        return
+    notifications.mark_sent(job_key, FOUNDER_ID)
+
+
 async def _period_report_tick(bot, kind: str) -> None:
     """Har dushanba (o'tgan hafta) va har oyning 1-kuni (o'tgan oy) Founderga dashboard + AI xulosa.
     Bir davr uchun faqat BIR marta yuboriladi (qayta ishga tushish/ikki nusxa takrorlamaydi)."""
@@ -1958,6 +2069,8 @@ def start_scheduler(bot):
                       id="founder_weekly_report", misfire_grace_time=6 * 3600, coalesce=True)
     scheduler.add_job(_period_report_tick, "cron", day=1, hour=8, minute=23, args=[bot, "month"],
                       id="founder_monthly_report", misfire_grace_time=6 * 3600, coalesce=True)
+    scheduler.add_job(_star_month_tick, "cron", day=1, hour=9, minute=11, args=[bot],
+                      id="founder_star_month", misfire_grace_time=6 * 3600, coalesce=True)
     scheduler.add_job(_agreement_issue_reminder_tick, "interval", minutes=10, args=[bot], id="salary_agreement_issue_reminder")
     scheduler.start()
     return scheduler

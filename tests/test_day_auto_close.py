@@ -288,6 +288,7 @@ async def test_scheduler_is_06_tashkent_with_immediate_startup_catchup(seeded):
         # Agreement reminder + Founder haftalik/oylik hisobot; kunlik yopish uchun ikkinchi job yo'q.
         assert {j.id for j in scheduler.get_jobs()} == {
             "bos_day_close_audit", "salary_agreement_issue_reminder", "founder_weekly_report", "founder_monthly_report",
+            "founder_star_month",
         }
     finally:
         scheduler.shutdown(wait=False)

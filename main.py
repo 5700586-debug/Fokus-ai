@@ -1030,6 +1030,7 @@ async def founder_reports_handler(message: Message) -> None:
             [InlineKeyboardButton(text="🏁 Bugungi reyting", callback_data="frep:today")],
             [InlineKeyboardButton(text="📈 Haftalik hisobot", callback_data="frep:weekly")],
             [InlineKeyboardButton(text="📅 Oylik hisobot", callback_data="frep:monthly")],
+            [InlineKeyboardButton(text="⭐ Yulduzlar", callback_data="stars:show")],
             [InlineKeyboardButton(text="➕ Qo'shimcha ish yulduzi", callback_data="xs:list:0")],
         ]),
     )

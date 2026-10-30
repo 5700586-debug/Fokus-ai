@@ -4,6 +4,11 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Haftalik va oylik Founder hisoboti (dashboard) — Draft (2026-10-30)
+- `services/period_report.py`: har dushanba 08:17 (o'tgan dushanba–yakshanba) va har oyning 1-kuni 08:23 (o'tgan oy), Asia/Tashkent, Founderga dashboard rasmi (Pillow: o'rtacha baho, baholar soni, minuslar, baholanmagan + oldingi davrga nisbatan, baho taqsimoti, filiallar, eng yaxshi/eng past 5 xodim, nazoratchi) + qisqa AI xulosa (gpt-5-mini; xato bo'lsa qoidaga asoslangan xulosa). Bazaga yozmaydi; bir davr uchun bir marta (`notifications.try_reserve`).
+- "📊 Hisobotlar" ichida "📈 Haftalik hisobot" / "📅 Oylik hisobot" tugmalari — istalgan payt.
+- E'tirozda bekor qilingan minuslar (`appeal_decision='approved'`) hisobga olinmaydi.
+
 ## Qoidalar ekrani sodda tilda — Draft (2026-10-30)
 - "⚙️ Sozlamalar → 🛠 Qoidalar" va `/listrules` endi texnik kalit (`bos.penalty_amounts = 10,20,30`) o'rniga bo'limlarga ajratilgan o'zbekcha nom + birlik ko'rsatadi (`services/rules_display.py`). Qiymatlar o'zgarmaydi.
 - Kodda o'qilmaydigan eski kalitlar ko'rsatilmaydi: `bos.day_close_deadline`, `bos.supervisor_late_penalty`, `bos.work_day_start`, `star.min/max`, `saturn.group_chat_id/dashboard_times/*_image_enabled`. Noma'lum yangi kalit "Boshqa"da xom chiqadi.

@@ -285,6 +285,9 @@ async def test_scheduler_is_06_tashkent_with_immediate_startup_catchup(seeded):
         fire = job.trigger.get_next_fire_time(None, _now("2026-10-28T05:59:59"))
         assert fire == _now("2026-10-28T06:00:00")
         assert job.next_run_time == seeded
-        assert len(scheduler.get_jobs()) == 2  # Existing agreement reminder only; no second scheduler/report.
+        # Agreement reminder + Founder haftalik/oylik hisobot; kunlik yopish uchun ikkinchi job yo'q.
+        assert {j.id for j in scheduler.get_jobs()} == {
+            "bos_day_close_audit", "salary_agreement_issue_reminder", "founder_weekly_report", "founder_monthly_report",
+        }
     finally:
         scheduler.shutdown(wait=False)

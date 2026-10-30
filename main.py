@@ -1026,6 +1026,8 @@ async def founder_reports_handler(message: Message) -> None:
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🏆 Oylik turnir", callback_data="frep:month")],
             [InlineKeyboardButton(text="🏁 Bugungi reyting", callback_data="frep:today")],
+            [InlineKeyboardButton(text="📈 Haftalik hisobot", callback_data="frep:weekly")],
+            [InlineKeyboardButton(text="📅 Oylik hisobot", callback_data="frep:monthly")],
         ]),
     )
 

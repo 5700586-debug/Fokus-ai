@@ -34,6 +34,7 @@ from services import company_rules_import as discipline_import
 from services import rules as rules_service
 from services import salary_agreement
 from services import evidence_photo
+from services import period_report
 import evidence_handlers
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ _MANAGEMENT_ROLES = {"founder", "nazoratchi"}
 # Bitta nazoratchi bir vaqtning o'zida faqat bitta jarima
 # yozuvini qayta ishlashi mumkin.
 _PENDING_PENALTY_APPLICATIONS: set[int] = set()
+# Davriy (haftalik/oylik) hisobot AI xulosasi uchun — ``register`` saqlaydi, scheduler ishlatadi.
+_OPENAI_CLIENT = None
 _PENDING_CATALOG_IMPORTS: set[int] = set()
 _LEGACY_CLOSE_PREVIEWS: dict[tuple[int, int], dict] = {}
 _LISTNIZOM_SINGLE_LIMIT = 3800
@@ -631,6 +634,8 @@ async def _finish_bos_penalty(message: Message, pending: dict, evidence_file_id:
 
 
 def register(dp: Dispatcher, openai_client) -> None:
+    global _OPENAI_CLIENT
+    _OPENAI_CLIENT = openai_client
     # S2 rasm-dalil handlerlari boshqa xabar handlerlaridan OLDIN ro'yxatdan o'tadi.
     evidence_handlers.register(dp)
     evidence_handlers.register_finisher("bos", _finish_bos_penalty)
@@ -967,6 +972,17 @@ def register(dp: Dispatcher, openai_client) -> None:
     @dp.callback_query(F.data.startswith("frep:"))
     async def founder_report_callback(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):
+            return
+        if callback.data in ("frep:weekly", "frep:monthly"):
+            await callback.answer("Hisobot tayyorlanmoqda…")
+            kind = "week" if callback.data == "frep:weekly" else "month"
+            try:
+                await period_report.send_report(
+                    callback.bot, _OPENAI_CLIENT, kind, callback.from_user.id, _company_today()
+                )
+            except Exception as error:  # noqa: BLE001
+                logger.error("Davriy hisobot xatosi: %s", type(error).__name__)
+                await callback.message.answer("Hisobotni tayyorlab bo'lmadi, keyinroq urinib ko'ring.")
             return
         if callback.data == "frep:month":
             text = _month_board_text(callback.from_user.id)
@@ -1867,6 +1883,29 @@ async def _agreement_issue_reminder_tick(bot) -> None:
         logger.error("Kelishuv savollari eslatmasi xatosi: %s", type(error).__name__)
 
 
+def _company_today() -> date:
+    return company_time.now().date()
+
+
+async def _period_report_tick(bot, kind: str) -> None:
+    """Har dushanba (o'tgan hafta) va har oyning 1-kuni (o'tgan oy) Founderga dashboard + AI xulosa.
+    Bir davr uchun faqat BIR marta yuboriladi (qayta ishga tushish/ikki nusxa takrorlamaydi)."""
+    from services import notifications
+
+    today = _company_today()
+    period = period_report.last_full_period(kind, today)
+    job_key = f"period_report:{kind}:{period.start.isoformat()}"
+    if not await notifications.try_reserve(job_key, FOUNDER_ID):
+        return
+    try:
+        await period_report.send_report(bot, _OPENAI_CLIENT, kind, FOUNDER_ID, today)
+    except Exception as error:  # noqa: BLE001
+        notifications.release_reservation(job_key, FOUNDER_ID)
+        logger.error("Davriy hisobot (%s) yuborilmadi: %s", kind, type(error).__name__)
+        return
+    notifications.mark_sent(job_key, FOUNDER_ID)
+
+
 async def _day_close_tick(bot) -> None:
     """Silent close only: no evaluation, supervisor penalty or daily Telegram message."""
     try:
@@ -1915,6 +1954,10 @@ def start_scheduler(bot):
     scheduler = AsyncIOScheduler(timezone="Asia/Tashkent")
     scheduler.add_job(_day_close_tick, "cron", hour=6, minute=0, args=[bot], id="bos_day_close_audit",
                       next_run_time=_now_company(), coalesce=True, misfire_grace_time=None)
+    scheduler.add_job(_period_report_tick, "cron", day_of_week="mon", hour=8, minute=17, args=[bot, "week"],
+                      id="founder_weekly_report", misfire_grace_time=6 * 3600, coalesce=True)
+    scheduler.add_job(_period_report_tick, "cron", day=1, hour=8, minute=23, args=[bot, "month"],
+                      id="founder_monthly_report", misfire_grace_time=6 * 3600, coalesce=True)
     scheduler.add_job(_agreement_issue_reminder_tick, "interval", minutes=10, args=[bot], id="salary_agreement_issue_reminder")
     scheduler.start()
     return scheduler

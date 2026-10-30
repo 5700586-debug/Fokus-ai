@@ -210,6 +210,21 @@ CREATE TABLE IF NOT EXISTS rule_learning_progress (
     UNIQUE(employee_id, rule_number)
 );
 
+-- Qo'shimcha ish yulduzlari (Muhammadiy qarori, 2026-10-30): faqat alohida kelishilgan qo'shimcha ish uchun
+-- beriladi; minus ULARDAN AYRILMAYDI (fiks kabi himoyalangan). ``request_token`` — takroriy bosishdan himoya.
+CREATE TABLE IF NOT EXISTS extra_work_stars (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    stars INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    given_by INTEGER NOT NULL,
+    request_token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_extra_work_stars_employee ON extra_work_stars (employee_id, work_date);
+
 INSERT OR IGNORE INTO rules (rule_key, rule_value, updated_by, updated_at) VALUES
     ('bos.day_close_deadline', '20:00', NULL, NULL),
     ('bos.supervisor_late_penalty', '40', NULL, NULL),

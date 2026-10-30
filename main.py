@@ -46,6 +46,7 @@ import calibration_bot  # noqa: E402
 import cash_shift_bot  # noqa: E402
 import cash_close_review  # noqa: E402
 import discipline_bot  # noqa: E402
+import extra_stars_bot  # noqa: E402
 import salary_agreement_bot  # noqa: E402
 import employees  # noqa: E402
 import health_server  # noqa: E402
@@ -948,6 +949,7 @@ cash_close_review.register(dp)
 inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
+extra_stars_bot.register(dp)
 salary_agreement_bot.register(
     dp,
     build_menu,
@@ -1029,6 +1031,7 @@ async def founder_reports_handler(message: Message) -> None:
             [InlineKeyboardButton(text="📈 Haftalik hisobot", callback_data="frep:weekly")],
             [InlineKeyboardButton(text="📅 Oylik hisobot", callback_data="frep:monthly")],
             [InlineKeyboardButton(text="⭐ Yulduzlar", callback_data="stars:show")],
+            [InlineKeyboardButton(text="➕ Qo'shimcha ish yulduzi", callback_data="xs:list:0")],
         ]),
     )
 

@@ -4,6 +4,10 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Qoidalar ekrani sodda tilda — Draft (2026-10-30)
+- "⚙️ Sozlamalar → 🛠 Qoidalar" va `/listrules` endi texnik kalit (`bos.penalty_amounts = 10,20,30`) o'rniga bo'limlarga ajratilgan o'zbekcha nom + birlik ko'rsatadi (`services/rules_display.py`). Qiymatlar o'zgarmaydi.
+- Kodda o'qilmaydigan eski kalitlar ko'rsatilmaydi: `bos.day_close_deadline`, `bos.supervisor_late_penalty`, `bos.work_day_start`, `star.min/max`, `saturn.group_chat_id/dashboard_times/*_image_enabled`. Noma'lum yangi kalit "Boshqa"da xom chiqadi.
+
 ## Nazoratchi chek-listi — Draft (2026-10-30)
 - Muhammadiy tasdiqlagan 5 band manbaga (`content/saturn_rules/source.txt`) yangi `NAZORATCHI` bo'limi sifatida qo'shildi: har kuni filialga borish (bormasdan baholash −50; shu oy takrorlansa oylik bonus to'liq — ball emas, Founder qo'lda), har xodimni baholash, baholanmaganga sabab, minusga dalil rasmi, kunni o'z vaqtida yopish (+5/−5 — avtomatik, katalogda qo'lda variant yo'q).
 - Katalog 97 → 102 band, 88 → 89 ball varianti; `nazoratchi` roli o'z chek-listini birinchi ko'radi.

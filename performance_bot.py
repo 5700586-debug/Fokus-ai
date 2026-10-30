@@ -460,11 +460,9 @@ def register(dp: Dispatcher, openai_client) -> None:
         await message.answer(f"✅ Qoida yangilandi: {rule_key} = {rule_value}")
 
     def _rules_text() -> str:
-        rules = rules_service.list_rules()
-        if not rules:
-            return "Qoidalar topilmadi."
-        lines = "\n".join(f"{key} = {value}" for key, value in sorted(rules.items()))
-        return f"⚙️ Joriy qoidalar:\n{lines}"
+        from services import rules_display
+
+        return rules_display.rules_text(rules_service.list_rules())
 
     @dp.message(Command("listrules"))
     async def listrules_handler(message: Message) -> None:

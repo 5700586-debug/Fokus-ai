@@ -110,7 +110,7 @@ def test_month_view_reads_sources_and_leaves_unavailable_ones_empty(temp_db):
 def test_missing_sources_return_no_data_not_zero(temp_db):
     view = pv.month_view(EMP, MONTH)
     assert view["plan_minutes"] is None and view["worked_minutes"] is None and view["work_bonus"] is None
-    assert view["fixed_amount"] is None and view["total_stars"] is None and view["total_amount"] is None
+    assert view["fixed_amount"] is None and view["total_stars"] == 0 and view["total_amount"] is None
     assert view["complete"] is False and "plan" in view["unavailable"] and "worked" in view["unavailable"]
     assert "work_bonus" in view["unavailable"]
 

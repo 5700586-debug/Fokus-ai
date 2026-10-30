@@ -17,6 +17,7 @@ ishlatiladigan naqshlar uchun mo'ljallangan — umumiy SQL parser emas.
 
 import re
 import threading
+import time
 
 import psycopg2
 import psycopg2.extras
@@ -34,6 +35,11 @@ from schema import SCHEMA_STATEMENTS
 # to'plamdan QAYTA ISHLATILADI.
 _MIN_POOL_SIZE = 1
 _MAX_POOL_SIZE = 5
+# Pool to'la bo'lsa ``ThreadedConnectionPool.getconn()`` kutmasdan ``PoolError`` beradi. Qisqa yuklama
+# cho'qqisida (bir nechta parallel so'rov/fon vazifa) tugma bosish xato bilan tugamasligi uchun bo'shagan
+# ulanishni shu vaqtgacha kutamiz; muddat tugasa avvalgidek ``PoolError``.
+_POOL_WAIT_SECONDS = 5.0
+_POOL_RETRY_INTERVAL = 0.05
 
 _pools: dict[str, "psycopg2.pool.ThreadedConnectionPool"] = {}
 _pools_lock = threading.Lock()
@@ -54,6 +60,19 @@ def _get_pool(dsn: str) -> "psycopg2.pool.ThreadedConnectionPool":
             )
             _pools[dsn] = pool_obj
     return pool_obj
+
+
+def _getconn_waiting(pool_obj, wait_seconds: float | None = None):
+    """Pool'dan ulanish oladi; to'la bo'lsa ``wait_seconds`` gacha bo'shashini kutadi."""
+    deadline = time.monotonic() + (_POOL_WAIT_SECONDS if wait_seconds is None else wait_seconds)
+    while True:
+        try:
+            return pool_obj.getconn()
+        except psycopg2.pool.PoolError as error:
+            # Faqat "pool to'la" holati kutiladi; yopilgan pool va boshqa xatolar darhol chiqadi.
+            if "exhausted" not in str(error) or time.monotonic() >= deadline:
+                raise
+            time.sleep(_POOL_RETRY_INTERVAL)
 
 
 def close_all_pools() -> None:
@@ -185,7 +204,7 @@ class PgConnection:
         # xaritasi orqali qaysi kalit ekanini o'zi topadi.
         self._pool = _get_pool(dsn)
         with latency_probe.time_db_connect():
-            self._conn = self._pool.getconn()
+            self._conn = _getconn_waiting(self._pool)
 
     # sqlite3.Connection'da hech qanday amal bermaydi (Postgres FK'ni
     # doim majburlaydi) — chaqiruvchi tomon (``db.get_connection()``)

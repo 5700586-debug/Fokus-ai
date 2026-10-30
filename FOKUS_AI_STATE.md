@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Nazoratchi chek-listi — Draft (2026-10-30)
+- Muhammadiy tasdiqlagan 5 band manbaga (`content/saturn_rules/source.txt`) yangi `NAZORATCHI` bo'limi sifatida qo'shildi: har kuni filialga borish (bormasdan baholash −50; shu oy takrorlansa oylik bonus to'liq — ball emas, Founder qo'lda), har xodimni baholash, baholanmaganga sabab, minusga dalil rasmi, kunni o'z vaqtida yopish (+5/−5 — avtomatik, katalogda qo'lda variant yo'q).
+- Katalog 97 → 102 band, 88 → 89 ball varianti; `nazoratchi` roli o'z chek-listini birinchi ko'radi.
+- Production'ga tushishi uchun merge'dan keyin Founder `/nizomimport` (preview → tasdiq) qiladi; mavjud 97 band o'zgarmaydi.
+- Keyin: har xodim bo'limidan 1 tovar sanash — To'rala mini ilovasi tayyor bo'lgach.
+
 ## S2 rasm-dalil — Draft (2026-10-30)
 
 - Branch `feat/evidence-photo`: minus uchun Telegram rasm MAJBURIY — 4 minus oqimi (`bos:pen`, karta nizom tugmasi, katalog varianti, "Boshqa holat" AI mosligi) ma'lumotni FSM'ga qo'yadi, rasm kelgachgina `services/evidence_photo.apply_pending_penalty` minusni `discipline_penalties.evidence_file_id` bilan yozadi. Rasm o'rniga matn/menyu yoki ❌ Bekor qilish — minus yo'q; 15 daqiqadan eski kutish qo'llanmaydi.

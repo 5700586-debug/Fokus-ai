@@ -3,9 +3,9 @@
  "source": {
   "original_name": "SATURN_NIZOM_CHEKLIST_MANBA.txt",
   "stored_path": "content/saturn_rules/source.txt",
-  "sha256": "e836d6af6daeb3fdec42a6bf62755daff9e00af79e85e51a1881b83387766c10",
-  "bytes": 63767,
-  "lines": 1026,
+  "sha256": "6a597c01bbfe65bd68e62fd16816daa1db07faf58a52dd60c47fe522ea87b011",
+  "bytes": 64909,
+  "lines": 1045,
   "metadata_lines": [
    1,
    2
@@ -129,6 +129,15 @@
    "separator_line": 875,
    "first_line": 876,
    "last_line": 1026
+  },
+  {
+   "key": "nazoratchi",
+   "name": "NAZORATCHI",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "separator_line": 1028,
+   "first_line": 1029,
+   "last_line": 1045
   }
  ],
  "section_headers": [
@@ -198,6 +207,13 @@
    "lines": [
     877,
     878
+   ]
+  },
+  {
+   "section": "nazoratchi",
+   "lines": [
+    1030,
+    1031
    ]
   }
  ],
@@ -1753,6 +1769,86 @@
    "end": 61434,
    "candidate": true,
    "default_points": 6
+  },
+  {
+   "key": "nazoratchi:01",
+   "section": "nazoratchi",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "rule_number": 11001,
+   "official_number": null,
+   "title": "HAR KUNI FILIALGA BORISH",
+   "title_line": 1032,
+   "first_line": 1032,
+   "last_line": 1036,
+   "start": 61584,
+   "end": 61944,
+   "candidate": true,
+   "default_points": 50
+  },
+  {
+   "key": "nazoratchi:02",
+   "section": "nazoratchi",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "rule_number": 11002,
+   "official_number": null,
+   "title": "ISHGA CHIQQAN HAR BIR XODIMNI BAHOLASH",
+   "title_line": 1037,
+   "first_line": 1037,
+   "last_line": 1038,
+   "start": 61945,
+   "end": 62078,
+   "candidate": true,
+   "default_points": null
+  },
+  {
+   "key": "nazoratchi:03",
+   "section": "nazoratchi",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "rule_number": 11003,
+   "official_number": null,
+   "title": "BAHOLANMAGAN XODIM UCHUN SABAB YOZISH",
+   "title_line": 1039,
+   "first_line": 1039,
+   "last_line": 1040,
+   "start": 62079,
+   "end": 62197,
+   "candidate": true,
+   "default_points": null
+  },
+  {
+   "key": "nazoratchi:04",
+   "section": "nazoratchi",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "rule_number": 11004,
+   "official_number": null,
+   "title": "MINUS UCHUN DALIL RASMI",
+   "title_line": 1041,
+   "first_line": 1041,
+   "last_line": 1042,
+   "start": 62198,
+   "end": 62304,
+   "candidate": true,
+   "default_points": null
+  },
+  {
+   "key": "nazoratchi:05",
+   "section": "nazoratchi",
+   "kind": "checklist",
+   "source_name": "Nazoratchi chek-listi",
+   "rule_number": 11005,
+   "official_number": null,
+   "title": "KUNNI O‘Z VAQTIDA YOPISH",
+   "title_line": 1043,
+   "first_line": 1043,
+   "last_line": 1045,
+   "start": 62305,
+   "end": 62542,
+   "candidate": true,
+   "default_points": null
   }
  ],
  "penalty_options": [
@@ -3372,6 +3468,24 @@
    "target": "offender",
    "apply_allowed": true,
    "written_warning": false
+  },
+  {
+   "key": "nazoratchi:01:o1",
+   "item": "nazoratchi:01",
+   "points": 50,
+   "line": 1035,
+   "points_start": 61856,
+   "points_end": 61864,
+   "condition_lines": [
+    1035,
+    1035
+   ],
+   "condition_start": 61821,
+   "condition_end": 61865,
+   "gate_lines": null,
+   "target": "offender",
+   "apply_allowed": true,
+   "written_warning": false
   }
  ],
  "unresolved": [
@@ -3493,6 +3607,13 @@
    "note": "Nazoratchi bonusi miqdori alohida KPI yoki kelishuv asosida — bonus (minus emas).",
    "start": 60582,
    "end": 60697
+  },
+  {
+   "first_line": 1036,
+   "last_line": 1036,
+   "note": "Nazoratchi bormasdan baholashni shu oy takrorlasa oylik bonusi to'liq ayriladi — ball emas, Founder qo'lda hal qiladi.",
+   "start": 61866,
+   "end": 61944
   }
  ]
 }

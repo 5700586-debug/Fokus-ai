@@ -1024,3 +1024,22 @@ Qaydda quyidagilar yoziladi:
 Imkon bo‘lsa, mahsulotning rasmi ham olinadi.
 Bu hisob qaysi mahsulotdan ko‘p zarar bo‘layotganini, qaysi ta’minotchi sifatsiz mahsulot olib kelayotganini va buyurtmani qancha kamaytirish kerakligini aniqlash uchun yuritiladi.
 Mahsulotni qayd qilmasdan chiqarib yuborgan xodimga — –6 ball.
+
+########## NAZORATCHI ##########
+
+NAZORATCHI CHEK-LISTI
+Ichki hisobda 1 ball — 5 000 so‘m. Minus ball faqat xodim ishlab topgan bonusidan ayriladi.
+HAR KUNI FILIALGA BORISH
+Nazoratchi ish kunida har bir filialga borib, xodimlar ishini o‘z ko‘zi bilan ko‘radi.
+Filialga bormasdan, eshitgani yoki telefon orqali baho qo‘yish mumkin emas. Bora olmasa, rahbardan oldindan ruxsat so‘raydi.
+Filialga bormasdan baho qo‘yilsa — –50 ball.
+Shu oy ichida takrorlansa, nazoratchining o‘sha oydagi bonusi to‘liq ayriladi.
+ISHGA CHIQQAN HAR BIR XODIMNI BAHOLASH
+Nazoratchi o‘sha kuni ishga chiqqan har bir xodimga baho qo‘yadi. 0 ball ham baho hisoblanadi.
+BAHOLANMAGAN XODIM UCHUN SABAB YOZISH
+Biror xodim baholanmay qolsa, nazoratchi filialni yopishda sababini aniq yozadi.
+MINUS UCHUN DALIL RASMI
+Nazoratchi minus qo‘yganda dalil rasmini botga yuboradi. Rasmsiz minus yozilmaydi.
+KUNNI O‘Z VAQTIDA YOPISH
+Nazoratchi har kuni filialni yopadi. Kun to‘liq yopilib, hamma xodim baholansa, nazoratchiga 5 ball bonus yoziladi.
+Kun ertalab soat 06:00 gacha yopilmasa, bot nazoratchiga avtomatik ravishda 5 ball minus yozadi.

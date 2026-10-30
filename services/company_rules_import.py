@@ -1,4 +1,4 @@
-"""Saturn nizomi, korporativ madaniyati va 8 lavozim chek-listini ASL manbadan (``content/saturn_rules/source.txt``)
+"""Saturn nizomi, korporativ madaniyati va 9 lavozim chek-listini (8 ta + nazoratchi) ASL manbadan (``content/saturn_rules/source.txt``)
 ``company_rules`` kanonik jadvaliga xavfsiz import qilish.
 
 Asl matn HECH QACHON tahrirlanmaydi: manifest (``manifest.json``) faqat texnik ajratish xaritasi — har bir band/iqtibos
@@ -39,6 +39,7 @@ SECTION_META = {
     "TOVUQ GOSHT CHUCHVARA LAGMON": ("muzlatilgan", "checklist", "Muzlatilgan mahsulotlar bo'limi chek-listi"),
     "OSHPAZ": ("oshpaz", "checklist", "Oshpaz chek-listi"),
     "MEVACHI": ("mevachi", "checklist", "Meva-sabzavot bo'limi xodimi chek-listi"),
+    "NAZORATCHI": ("nazoratchi", "checklist", "Nazoratchi chek-listi"),
 }
 EXPECTED_SECTION_ORDER = tuple(SECTION_META)
 
@@ -80,6 +81,7 @@ TECHNICAL_ID_BASE = {"bonus_model": 10_000, "culture": 10_100}
 CHECKLIST_ID_BASE = {
     "omborchi": 10_200, "kassir": 10_300, "tozalik_xodimi": 10_400, "non_bolimi": 10_500,
     "kolbasa_saryog": 10_600, "muzlatilgan": 10_700, "oshpaz": 10_800, "mevachi": 10_900,
+    "nazoratchi": 11_000,
 }
 
 # Korporativ madaniyat bandlari (sarlavhasiz matn) — qo'lda belgilangan qator oraliqlari; matn manbadan kesib olinadi.
@@ -195,6 +197,7 @@ UNRESOLVED_NOTES = (
     (933, 933, "Ta'minotchi qaytariladigan mahsulotni olmasa 'minus ball ta'minotchiga yoziladi' — miqdori ko'rsatilmagan va ta'minotchi xodim emas."),
     (988, 988, "Foydali yangilik uchun mevachiga maxsus bonus — bonus (minus emas)."),
     (1012, 1012, "Nazoratchi bonusi miqdori alohida KPI yoki kelishuv asosida — bonus (minus emas)."),
+    (1036, 1036, "Nazoratchi bormasdan baholashni shu oy takrorlasa oylik bonusi to'liq ayriladi — ball emas, Founder qo'lda hal qiladi."),
 )
 
 

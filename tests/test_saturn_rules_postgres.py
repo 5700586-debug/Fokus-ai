@@ -89,11 +89,11 @@ def _counts() -> tuple[int, int]:
 def test_dry_run_writes_nothing_and_apply_imports_the_full_catalog(pg):
     dry = importer.run_import(apply=False, created_by=FOUNDER)
     assert _counts() == (0, 0)
-    assert dry["rules_inserted"] == 97 and dry["options_inserted"] == 88 and not dry["conflicts"]
+    assert dry["rules_inserted"] == 102 and dry["options_inserted"] == 89 and not dry["conflicts"]
 
     result = _apply()
 
-    assert result["applied"] and _counts() == (97, 88)
+    assert result["applied"] and _counts() == (102, 89)
     assert _scalar("SELECT COUNT(*) FROM bonus_bank_ledger") == 0 and _scalar("SELECT COUNT(*) FROM discipline_penalties") == 0
 
 
@@ -115,7 +115,7 @@ def test_stored_texts_are_exact_source_slices_on_postgres(pg):
 def test_repeated_import_is_idempotent(pg):
     _apply()
     second = _apply()
-    assert _counts() == (97, 88)
+    assert _counts() == (102, 89)
     assert second["rules_inserted"] == 0 and second["options_inserted"] == 0
 
 
@@ -124,7 +124,7 @@ def test_parallel_imports_leave_one_consistent_catalog(pg):
         futures = [pool.submit(_apply) for _ in range(4)]
         results = [future.result() for future in futures]
     assert all(not result["conflicts"] for result in results)
-    assert _counts() == (97, 88)
+    assert _counts() == (102, 89)
     assert _scalar("SELECT COUNT(*) - COUNT(DISTINCT source_key) FROM company_rules") == 0
 
 

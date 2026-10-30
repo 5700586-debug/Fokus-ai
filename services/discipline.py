@@ -616,11 +616,11 @@ def penalize_supervisor_for_late_close(supervisor_id: int, audit_date: str, pena
 
 SOURCE_ORDER = (
     "nizomlar", "madaniyat", "omborchi", "kassir", "tozalik_xodimi", "non_bolimi", "kolbasa_saryog", "muzlatilgan",
-    "oshpaz", "mevachi",
+    "oshpaz", "mevachi", "nazoratchi",
 )
 LEGACY_SECTION = "legacy"
 # Tizim roli -> lavozim chek-listi bo'limi. Faqat aniq mos keladiganlar; boshqa rollar uchun TAXMIN QILINMAYDI.
-CHECKLIST_BY_ROLE = {"kassir": "kassir", "tozalik": "tozalik_xodimi"}
+CHECKLIST_BY_ROLE = {"kassir": "kassir", "tozalik": "tozalik_xodimi", "nazoratchi": "nazoratchi"}
 QUOTE_MAX_CHARS = 220
 PAGE_MAX_CHARS = 3500
 

@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Maosh hisobi: vaqt bonusi, fiks chegarasi, qo'shimcha ish yulduzi, Jami — Draft (2026-10-30)
+- Muhammadiy qarorlari: vaqt bonusi = kuniga 2 ball (ish bonusi qatorida, minus undan ham ayriladi); rejadan ortiq o'tirish pul emas — fiks kelishuvdagi summadan oshmaydi; qo'shimcha ish faqat alohida kelishilgan "qo'shimcha ish yulduzi" bilan (minus ayrilmaydi); e'tirof alohida manba emas (= qo'shimcha ish).
+- `services/payroll_view.py`: TIME_BONUS_POINTS=2; fiks min(ishlangan, reja); Jami endi doim hisoblanadi (bonus manbasi yo'q bo'lsa 0).
+- `extra_work_stars` jadvali + `services/extra_stars.py` + `extra_stars_bot.py` (📊 Hisobotlar → ➕ Qo'shimcha ish yulduzi, /qoshimchaish): xodim → yulduz → sabab → tasdiq (request_token), xodimga xabar. Beruvchi: hozircha faqat Founder (GIVER_ROLES — Muhammadiy qarori kutilmoqda).
+- Navbatda: 3-tarif mukofoti (300k), oylik yulduz bonusi Jamiga, Founder "Xodim maoshi" ro'yxatdan tanlash.
+
 ## Haftalik va oylik Founder hisoboti (dashboard) — Draft (2026-10-30)
 - `services/period_report.py`: har dushanba 08:17 (o'tgan dushanba–yakshanba) va har oyning 1-kuni 08:23 (o'tgan oy), Asia/Tashkent, Founderga dashboard rasmi (Pillow: o'rtacha baho, baholar soni, minuslar, baholanmagan + oldingi davrga nisbatan, baho taqsimoti, filiallar, eng yaxshi/eng past 5 xodim, nazoratchi) + qisqa AI xulosa (gpt-5-mini; xato bo'lsa qoidaga asoslangan xulosa). Bazaga yozmaydi; bir davr uchun bir marta (`notifications.try_reserve`).
 - "📊 Hisobotlar" ichida "📈 Haftalik hisobot" / "📅 Oylik hisobot" tugmalari — istalgan payt.

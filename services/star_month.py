@@ -90,6 +90,7 @@ def evaluate(year_month: str) -> list[Decision]:
     if year_month < FIRST_MONTH:
         return []
     start, end = month_bounds(year_month)
+    next_day = (date.fromisoformat(end) + timedelta(days=1)).isoformat()  # ISO vaqtlar uchun aniq yuqori chegara
     conn = get_connection()
     try:
         people = _eligible_employees(conn)
@@ -108,7 +109,7 @@ def evaluate(year_month: str) -> list[Decision]:
             time_days.setdefault(row["employee_id"], set()).add(row["grant_date"])
         arrivals: dict[int, set] = {}
         for row in _rows(conn, "SELECT employee_id, event_time FROM attendance_events WHERE event_type = 'check_in' "
-                               "AND event_time >= ? AND event_time < ?", (start, end + "T99")):
+                               "AND event_time >= ? AND event_time < ?", (start, next_day)):
             arrivals.setdefault(row["employee_id"], set()).add(str(row["event_time"])[:10])
         reasons: dict[int, dict] = {}
         for row in _rows(conn, "SELECT employee_id, event_date, reason_status FROM attendance_reasons "
@@ -157,7 +158,8 @@ def evaluate(year_month: str) -> list[Decision]:
         unjustified = sum(1 for status in own_reasons.values() if status in UNJUSTIFIED_REASONS)
         if unjustified:
             decision.reasons.append(f"sababsiz kelmagan: {unjustified} kun")
-        excused = sum(1 for status in own_reasons.values() if status in EXCUSED_REASONS)
+        # Ruxsatli kun faqat ishlanmagan bo'lsa ayiriladi (ishlangan kun ikki marta hisoblanmasin).
+        excused = sum(1 for day, status in own_reasons.items() if status in EXCUSED_REASONS and day not in worked)
         credited = worked | ungraded_branch_days.get(person.get("branch") or "", set())
         required = max(agreements.get(uid, DEFAULT_WORK_DAYS) - excused, 0)
         if len(credited) < required:

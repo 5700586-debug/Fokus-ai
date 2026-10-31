@@ -21,6 +21,9 @@ from services import attendance
 STAR_VALUE_SOM = 5000
 # Muhammadiy qarori (2026-10-30): vaqt bonusi berilgan har kun = 2 ball; ish bonusi kabi minusdan ta'sirlanadi.
 TIME_BONUS_POINTS = 2
+# 3-tarif mukofoti (Muhammadiy qarori): faqat 3-tarifdagi xodimga, oy intizomli yakunlansa (yulduz mezonlari bilan
+# bir xil: nizom minusi yo'q, ish kunlari to'liq, 1 ish + 1 vaqt istisnosi). Yozilmaydi — har safar hisoblanadi.
+TARIFF3_AWARD_SOM = 300_000
 NO_DATA = "Ma'lumot yo'q"
 
 
@@ -79,6 +82,20 @@ def _worked(employee_id: int, start: date, last: date, conn) -> dict:
     return {"minutes": minutes, "days": days, "incomplete": incomplete}
 
 
+def _star_bonus(employee_id: int, year_month: str) -> int:
+    """Founder tasdiqlagan oylik yulduz bonusi (``bonus_history``). Tasdiqlanmagan oy — 0."""
+    from db import get_connection
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT bonus_amount FROM bonus_history WHERE user_id = ? AND year_month = ?", (employee_id, year_month)
+        ).fetchone()
+    finally:
+        conn.close()
+    return int(row["bonus_amount"]) if row else 0
+
+
 def month_view(employee_id: int, year_month: str) -> dict:
     """Bir oy uchun hisob komponentlari va jami. Faqat o'qiydi. ``complete`` — hamma manba bor va cheklov yo'q."""
     start, next_start = _month_bounds(year_month)
@@ -91,7 +108,8 @@ def month_view(employee_id: int, year_month: str) -> dict:
     if last < start:
         reason = f"{NO_DATA}: oy hali boshlanmagan"
         return {**result, "plan_minutes": None, "fixed_salary": None, "worked_minutes": None, "worked_days": 0, "work_bonus": None,
-                "time_bonus": 0, "time_bonus_days": 0,
+                "time_bonus": 0, "time_bonus_days": 0, "tariff": None, "tariff_award": 0, "tariff_note": None,
+                "star_bonus": 0,
                 "minus": None, "recognition": None, "extra_work": None, **compute_totals(None, None, None, None, None, None, None),
                 "unavailable": {"month": reason}, "limitations": [reason], "complete": False}
 
@@ -140,6 +158,28 @@ def month_view(employee_id: int, year_month: str) -> dict:
 
     # Bonus manbasi bo'lmasa ham jami chiqsin: bonus 0 deb olinadi (sababi ``unavailable``da qoladi).
     totals = compute_totals(plan_minutes, fixed_salary, worked_minutes, work_bonus or 0, minus, recognition, extra_work)
+
+    # --- 3-tarif mukofoti va oylik yulduz bonusi (alohida, ikki marta hisoblanmaydi) ---
+    tariff = at_end.get("tariff") if at_end else None
+    tariff_award, tariff_note = 0, None
+    if tariff == 3:
+        if not result["final"]:
+            tariff_note = "Oy tugagach hisoblanadi"
+        else:
+            from services import star_month
+
+            decision = next((d for d in star_month.evaluate(year_month) if d.user_id == employee_id), None)
+            if decision is None:
+                tariff_note = "Bu oy hisobga olinmaydi"
+            elif decision.pending:
+                tariff_note = "E'tiroz hal bo'lmagan — kutilmoqda"
+            elif decision.passed:
+                tariff_award = TARIFF3_AWARD_SOM
+            else:
+                tariff_note = "; ".join(decision.reasons)
+    star_bonus = _star_bonus(employee_id, year_month)
+    if totals["total_amount"] is not None:
+        totals["total_amount"] += tariff_award + star_bonus
     if totals["fixed_amount"] is None and "fixed" not in unavailable:
         unavailable["fixed"] = f"{NO_DATA}: reja yoki ishlangan vaqt yetarli emas"
     if totals["total_stars"] is None:
@@ -148,6 +188,7 @@ def month_view(employee_id: int, year_month: str) -> dict:
         **result, "plan_minutes": plan_minutes, "fixed_salary": fixed_salary, "worked_minutes": worked_minutes,
         "worked_days": worked["days"], "work_bonus": work_bonus, "time_bonus": time_bonus,
         "time_bonus_days": sources["time_bonus_days"], "minus": minus, "recognition": recognition, "extra_work": extra_work,
+        "tariff": tariff, "tariff_award": tariff_award, "tariff_note": tariff_note, "star_bonus": star_bonus,
         **totals, "unavailable": unavailable, "limitations": limitations,
         "complete": not unavailable and not limitations and totals["total_amount"] is not None,
     }

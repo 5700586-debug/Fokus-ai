@@ -54,6 +54,7 @@ import health_server  # noqa: E402
 import inventory_bot  # noqa: E402
 import invites  # noqa: E402
 import nazoratchi_bot  # noqa: E402
+import webapp_server  # noqa: E402
 import onboarding  # noqa: E402
 import performance_bot  # noqa: E402
 import recruiting_bot  # noqa: E402
@@ -2114,7 +2115,9 @@ async def main() -> None:
     # Render "Web Service" $PORT'ga bog'lanishni kutadi (Free planda
     # Background Worker yo'q) — aks holda deploy "Timed out" bo'ladi,
     # garchi bot polling orqali to'liq ishlab tursa ham.
-    health_runner = await health_server.start()
+    health_runner = await health_server.start(
+        setup=lambda app: webapp_server.add_routes(app, bot=bot, bot_token=BOT_TOKEN, fsm_storage=dp.storage)
+    )
     probe_tasks: list = []
     db_startup_probe.start(probe_tasks)  # bir martalik fon "SELECT 1" o'lchovi: polling'ni kutib qoldirmaydi
 

@@ -66,14 +66,30 @@ async def request_penalty_photo(target: Message, state: FSMContext, *, source: s
     )
 
 
-async def request_grade_photo(target: Message, state: FSMContext, *, employee_id: int, supervisor_id: int, eval_date: str) -> None:
-    """0 ball bahosi allaqachon saqlangan; ixtiyoriy dalil rasmini taklif qiladi."""
+_GRADE_PHOTO_PROMPT = "📷 Dalil rasmi (ixtiyoriy) — rasm yuboring yoki o'tkazib yuboring."
+
+
+async def _set_grade_pending(state: FSMContext, *, employee_id: int, supervisor_id: int, eval_date: str) -> None:
     await state.clear()
     await state.update_data(grade_pending={
         "employee_id": employee_id, "supervisor_id": supervisor_id, "eval_date": eval_date, "created": time.time(),
     })
     await state.set_state(EvidenceStates.waiting_optional_grade_photo)
-    await target.answer("📷 Dalil rasmi (ixtiyoriy) — rasm yuboring yoki o'tkazib yuboring.", reply_markup=_keyboard(True))
+
+
+async def request_grade_photo(target: Message, state: FSMContext, *, employee_id: int, supervisor_id: int, eval_date: str) -> None:
+    """0 ball bahosi allaqachon saqlangan; ixtiyoriy dalil rasmini taklif qiladi."""
+    await _set_grade_pending(state, employee_id=employee_id, supervisor_id=supervisor_id, eval_date=eval_date)
+    await target.answer(_GRADE_PHOTO_PROMPT, reply_markup=_keyboard(True))
+
+
+async def request_grade_photo_in_chat(
+    bot, chat_id: int, state: FSMContext, *, employee_id: int, supervisor_id: int, eval_date: str, title: str = "",
+) -> None:
+    """📱 Baholash ekrani uchun: xuddi shu ixtiyoriy oqim, xabar nazoratchining shaxsiy chatiga yuboriladi."""
+    await _set_grade_pending(state, employee_id=employee_id, supervisor_id=supervisor_id, eval_date=eval_date)
+    text = f"{title}\n{_GRADE_PHOTO_PROMPT}" if title else _GRADE_PHOTO_PROMPT
+    await bot.send_message(chat_id, text, reply_markup=_keyboard(True))
 
 
 async def send_evidence_notice(bot, chat_id: int, evidence_file_id: str | None, text: str, *, reply_markup=None):

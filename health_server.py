@@ -13,6 +13,7 @@ kutubxona, shuning uchun ``requirements.txt``ga hech narsa qo'shilmaydi.
 """
 
 import os
+from collections.abc import Callable
 
 from aiohttp import web
 
@@ -21,7 +22,7 @@ async def _health(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
-async def start(port: int | None = None) -> web.AppRunner:
+async def start(port: int | None = None, setup: Callable[[web.Application], None] | None = None) -> web.AppRunner:
     """Health-check serverini ishga tushiradi va uni to'xtatish uchun
     ``AppRunner``ni qaytaradi (``await runner.cleanup()`` bilan yopiladi).
     """
@@ -30,6 +31,8 @@ async def start(port: int | None = None) -> web.AppRunner:
     app = web.Application()
     app.router.add_get("/", _health)
     app.router.add_get("/health", _health)
+    if setup is not None:
+        setup(app)  # masalan, 📱 Baholash ekrani yo'llari (``webapp_server.add_routes``)
 
     runner = web.AppRunner(app)
     await runner.setup()

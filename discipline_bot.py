@@ -196,6 +196,24 @@ def discipline_repo_sessions(supervisor_id: int, work_date: str) -> list[dict]:
     ]
 
 
+def _close_report_messages(supervisor_id: int, branch: str, review_date: str, result) -> tuple[list[str], InlineKeyboardMarkup]:
+    """Filial yopilgach: xodimlar natijasi (bo'laklarga bo'lingan) + oxirgisiga izoh/footer va keyingi qadam tugmasi.
+    Tugma bilan ham, izoh bilan ham yopilganda bir xil ko'rinish."""
+    statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=supervisor_id, closed=True)
+    chunks = close_report.build_close_report(branch, review_date, statuses, result.evaluated, result.total)
+    day_closed = nazoratchi_day.day_fully_closed(supervisor_id, review_date)
+    footer = (
+        f"\n\n✅ {_display_date(review_date)} ish kuni yopildi." if day_closed
+        else "\n\nIsh kuni hali yopilmadi: boshqa filiallar ham tekshirilishi kerak."
+    )
+    next_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="➡️ Keyingi ish kuni" if day_closed else "🏬 Boshqa filial", callback_data="bos:today")
+    ]])
+    chunks = list(chunks)
+    chunks[-1] = chunks[-1] + footer
+    return chunks, next_kb
+
+
 RESUME_NOTE = "Avval shu ish kunini yakunlaymiz."
 
 
@@ -915,25 +933,14 @@ def register(dp: Dispatcher, openai_client) -> None:
                 ]]),
             )
         else:
-            statuses = nazoratchi_day.branch_statuses(branch, review_date, exclude_user_id=callback.from_user.id, closed=True)
-            chunks = close_report.build_close_report(branch, review_date, statuses, result.evaluated, result.total)
-            day_closed = nazoratchi_day.day_fully_closed(callback.from_user.id, review_date)
-            footer = (
-                f"\n\n✅ {_display_date(review_date)} ish kuni yopildi." if day_closed
-                else "\n\nIsh kuni hali yopilmadi: boshqa filiallar ham tekshirilishi kerak."
-            )
-            next_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="➡️ Keyingi ish kuni" if day_closed else "🏬 Boshqa filial", callback_data="bos:today"
-                )
-            ]])
+            chunks, next_kb = _close_report_messages(callback.from_user.id, branch, review_date, result)
             if len(chunks) == 1:
-                await callback.message.edit_text(chunks[0] + footer, reply_markup=next_kb)
+                await callback.message.edit_text(chunks[0], reply_markup=next_kb)
             else:
                 await callback.message.edit_text(chunks[0])
                 for chunk in chunks[1:-1]:
                     await callback.message.answer(chunk)
-                await callback.message.answer(chunks[-1] + footer, reply_markup=next_kb)
+                await callback.message.answer(chunks[-1], reply_markup=next_kb)
         await callback.answer()
 
     @dp.message(StateFilter(CloseNoteStates.waiting))
@@ -956,11 +963,17 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         result = nazoratchi_day.close_session(message.from_user.id, branch, review_date, note=note)
         await state.clear()
-        await message.answer(
-            f"✅ {branch} nazorati yopildi. Izoh saqlandi." if result.closed
-            else "ℹ️ Filial allaqachon yopilgan." if result.already_closed
-            else nazoratchi_day.blockers_text(result.blockers)
-        )
+        if not result.closed:
+            await message.answer(
+                "ℹ️ Filial allaqachon yopilgan." if result.already_closed else nazoratchi_day.blockers_text(result.blockers)
+            )
+            return
+        # Izoh bilan yopilganda ham tugma bilan yopilgandagidek to'liq hisobot va keyingi qadam tugmasi chiqadi.
+        chunks, next_kb = _close_report_messages(message.from_user.id, branch, review_date, result)
+        chunks[0] = "📝 Izoh saqlandi.\n\n" + chunks[0]
+        for chunk in chunks[:-1]:
+            await message.answer(chunk)
+        await message.answer(chunks[-1], reply_markup=next_kb)
 
     # ------------------------------------------------------- dashboardlar --
 

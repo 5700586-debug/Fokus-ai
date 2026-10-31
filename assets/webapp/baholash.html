@@ -139,7 +139,8 @@
     renderList();
   }
 
-  function load(keepNotes) {
+  // keepNotes: eski yozuvlarni saqlash. check: {id, key} — aloqa uzilgandan keyin haqiqiy holatni serverdan tekshirish.
+  function load(keepNotes, check) {
     return api("/api/baholash/day").then(function (j) {
       if (!j.ok) { $("sub").textContent = ""; $("list").innerHTML = '<div class="msg">' + esc(j.error || "Xato") + "</div>"; return; }
       if (keepNotes && state.data) {
@@ -147,11 +148,20 @@
         state.data.branches.forEach(function (b) { b.employees.forEach(function (e) { if (e.note) notes[e.id] = e; }); });
         j.branches.forEach(function (b) { b.employees.forEach(function (e) {
           if (notes[e.id]) { e.note = notes[e.id].note; e.noteErr = notes[e.id].noteErr; }
+          if (check && e.id === check.id) {
+            // Server holati — haqiqat: eski "aloqa uzildi" yozuvi qolmaydi.
+            if (e.grade === check.key) { e.note = "✅ Tekshirildi: baho saqlangan."; e.noteErr = false; }
+            else { e.note = "Baho saqlanmadi — qayta bosing."; e.noteErr = true; }
+          }
         }); });
       }
       state.data = j;
       render();
     }).catch(function () {
+      if (check) {
+        var e = findEmp(check.id);
+        if (e) { e.note = "Internet yo'q — holat noma'lum. Ekranni yangilab tekshiring."; e.noteErr = true; renderList(); return; }
+      }
       $("list").innerHTML = '<div class="msg">Internet yo\'q — qayta urinib ko\'ring.</div>';
     });
   }
@@ -172,7 +182,12 @@
       state.busy[id] = false;
       if (j.ok) {
         e.grade = j.grade;
-        e.note = j.message + (j.grade === "bajarilmagan" && j.changed ? " · Dalil rasmi chatda so'raldi." : "");
+        var PHOTO = {
+          requested: " · Dalil rasmi (ixtiyoriy) chatda so'raldi.",
+          chat_busy: " · Chatda boshqa jarayon ochiq — dalil rasmi so'ralmadi.",
+          failed: " · Dalil rasmi so'rovini chatga yuborib bo'lmadi."
+        };
+        e.note = j.message + (PHOTO[j.photo] || "");
         e.noteErr = false;
         haptic("success");
         renderTabs(); renderList();
@@ -190,7 +205,7 @@
       state.busy[id] = false;
       e.note = "Aloqa uzildi — tekshirilmoqda…"; e.noteErr = true;
       renderList();
-      load(true);
+      load(true, { id: id, key: key });
     });
   }
 

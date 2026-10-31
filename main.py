@@ -729,6 +729,7 @@ _OTHER_BUTTON_LABELS: dict[str, str] = {
     "/invsnapshot": "📦 Ombor hisoboti",
     "/inventorysummary": "📈 Ombor xulosasi",
     "/mealplan": "🍽 Ovqat rejasi",
+    "/qoshimchaish": "➕ Qo'shimcha ish yulduzi",
     "/drivercheck": "🚚 Mashina tekshiruvi",
     "/marketlog": "📝 Bozor kuzatuvi",
     "/xarid": "🛒 Bozorlik xaridi",

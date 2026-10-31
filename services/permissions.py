@@ -63,6 +63,8 @@ ACTION_VIEW_CASH_SUMMARY = "view_cash_summary"
 ACTION_VIEW_INVENTORY_SUMMARY = "view_inventory_summary"
 
 ACTION_EVALUATE_EMPLOYEE = "evaluate_employee"
+# Qo'shimcha ish yulduzi: filial rahbari (savdo bo'limi boshlig'i) faqat o'z filialiga; Founder — hammaga.
+ACTION_GIVE_EXTRA_STARS = "give_extra_stars"
 ACTION_CLOSE_DAY = "close_day"
 
 # main.py — foydalanuvchi/rol boshqaruvi (hammasi Founder-only).
@@ -164,7 +166,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         ACTION_VIEW_SUPPLIER_RESULTS,
     },
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION, ACTION_RECORD_SUPPLIER_PURCHASE, ACTION_VIEW_SUPPLIER_RESULTS},
-    "savdo_boshligi": {ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT, ACTION_VIEW_BRANCH_AGREEMENT},
+    "savdo_boshligi": {
+        ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT, ACTION_VIEW_BRANCH_AGREEMENT, ACTION_GIVE_EXTRA_STARS,
+    },
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
     # Kassir faqat smenani boshlaydi/topshiradi; xarajatni rahbar/moliyachi kiritadi (ACTION_LOG_CASH_EXPENSE).
     "kassir": {ACTION_OPEN_CASH_SHIFT, ACTION_CLOSE_CASH_SHIFT},

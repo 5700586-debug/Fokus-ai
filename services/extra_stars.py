@@ -1,7 +1,7 @@
 """Qo'shimcha ish yulduzlari (Muhammadiy qarori, 2026-10-30).
 
-Rejadan ortiq o'tirish pul emas: qo'shimcha ish faqat oldindan kelishilib, beruvchi (Founder yoki ruxsatli rahbar)
-yulduzcha bilan to'laydi. Yulduzlar oy davomida yig'iladi, oy oxirida maoshga qo'shiladi (1 yulduz = 5 000 so'm) va
+Rejadan ortiq o'tirish pul emas: qo'shimcha ish faqat oldindan kelishilib, filial rahbari (savdo bo'limi boshlig'i,
+o'z filialiga) yoki Founder yulduzcha bilan to'laydi. Yulduzlar oy davomida yig'iladi, oy oxirida maoshga qo'shiladi (1 yulduz = 5 000 so'm) va
 ULARDAN MINUS AYRILMAYDI. Har yozuv bir martalik ``request_token`` bilan — takroriy bosish ikkinchi yozuv yaratmaydi.
 """
 
@@ -14,8 +14,6 @@ from db import get_connection
 
 MAX_STARS_PER_ENTRY = 20
 MIN_REASON_CHARS = 5
-# Kim bera oladi: Founder har doim; qo'shimcha rollar Muhammadiy qaroridan keyin shu yerga qo'shiladi.
-GIVER_ROLES: frozenset[str] = frozenset()
 
 
 class ExtraStarsError(ValueError):
@@ -23,10 +21,29 @@ class ExtraStarsError(ValueError):
 
 
 def can_give(user_id: int) -> bool:
-    from config import FOUNDER_ID
-    from roles import get_role
+    """Founder (har kimga) yoki filial rahbari — savdo bo'limi boshlig'i (faqat o'z filialiga)."""
+    from services import permissions
 
-    return user_id == FOUNDER_ID or (get_role(user_id) or "") in GIVER_ROLES
+    return permissions.has_permission(user_id, permissions.ACTION_GIVE_EXTRA_STARS)
+
+
+def giver_branch(user_id: int) -> str | None:
+    """``None`` — cheklovsiz (Founder). Aks holda beruvchi faqat shu filial xodimlariga bera oladi."""
+    from config import FOUNDER_ID
+
+    if user_id == FOUNDER_ID:
+        return None
+    import employees
+
+    profile = employees.get_profile(user_id) or {}
+    return profile.get("branch") or ""
+
+
+def can_give_to(giver_id: int, employee: dict | None) -> bool:
+    if employee is None or not can_give(giver_id):
+        return False
+    branch = giver_branch(giver_id)
+    return branch is None or (bool(branch) and employee.get("branch") == branch)
 
 
 def give(employee_id: int, stars: int, reason: str, given_by: int, request_token: str) -> bool:
@@ -44,9 +61,11 @@ def give(employee_id: int, stars: int, reason: str, given_by: int, request_token
         raise ExtraStarsError("Tasdiq eskirgan.")
     conn = get_connection()
     try:
-        row = conn.execute("SELECT status FROM employees WHERE user_id = ?", (employee_id,)).fetchone()
+        row = conn.execute("SELECT status, branch FROM employees WHERE user_id = ?", (employee_id,)).fetchone()
         if row is None or row["status"] != "approved":
             raise ExtraStarsError("Xodim topilmadi.")
+        if not can_give_to(given_by, dict(row)):
+            raise ExtraStarsError("Faqat o'z filialingiz xodimlariga yulduz bera olasiz.")
         cursor = conn.execute(
             "INSERT OR IGNORE INTO extra_work_stars (employee_id, work_date, stars, reason, given_by, request_token, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",

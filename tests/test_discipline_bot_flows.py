@@ -558,7 +558,7 @@ async def test_apellyatsiya_with_no_penalties_tells_user(bot_dp):
     assert "topilmadi" in sent[0].text
 
 
-async def test_mymaosh_shows_own_balance_only(bot_dp):
+async def test_mymaosh_shows_own_data_only(bot_dp):
     main, bot = bot_dp
     _set_role(111, "kassir")
 
@@ -567,7 +567,8 @@ async def test_mymaosh_shows_own_balance_only(bot_dp):
     discipline.adjust_bonus_bank(111, 5, "sinov", "test", None)
 
     sent = await send(main.dp, bot, 111, text="/mymaosh")
-    assert "5 ball" in sent[0].text
+    # "Bonus banki" endi ko'rsatilmaydi (Jami bilan chalkashtirardi); profil yo'q — faqat kelishuv qatorlari.
+    assert "Bonus banki" not in sent[0].text and "Hisob uchun ma'lumot yo'q" in sent[0].text
 
 
 # ------------------------------------------- baho qo'yilgach xodimga xabar --

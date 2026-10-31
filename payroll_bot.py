@@ -1,4 +1,5 @@
 """💰 Xodim maoshi (Founder): xodimni ro'yxatdan tanlash → joriy yoki o'tgan oy maoshining to'liq tarkibi.
+💰 Oyligim (xodim): xuddi shu tarkib, FAQAT o'zining (``from_user.id``), faqat shaxsiy chatda.
 Faqat o'qiydi (``services/payroll_view.month_view``)."""
 
 from datetime import timedelta
@@ -57,7 +58,7 @@ def _month(offset: int) -> str:
 def salary_text(profile: dict, year_month: str) -> str:
     v = payroll_view.month_view(profile["user_id"], year_month)
     star = payroll_view.STAR_VALUE_SOM
-    lines = [f"💰 {_name(profile)} — {year_month}" + ("" if v["final"] else " (oy davom etmoqda)")]
+    lines = [f"💰 {_name(profile)} — {year_month}" + ("" if v["final"] else " (hozirgacha — yakuniy emas)")]
     if v.get("worked_minutes") is not None and v.get("plan_minutes"):
         lines.append(f"🕒 Ishlagan: {v['worked_minutes'] // 60} soat / reja {v['plan_minutes'] // 60} soat")
     lines.append(f"📌 Fiks: {_som(v['fixed_amount'])}")
@@ -69,17 +70,50 @@ def salary_text(profile: dict, year_month: str) -> str:
     if v["total_stars"] is not None:
         lines.append(f"= Bonus jami: {v['total_stars']} ball × {star:,} = {_som(v['total_stars'] * star)}".replace(",", " "))
     if v.get("tariff") == 3:
-        lines.append(f"🏅 3-tarif mukofoti: {_som(v['tariff_award'])}" + (f" ({v['tariff_note']})" if v.get("tariff_note") else ""))
+        if not v["final"]:  # oy davomida summa ko'rsatilmaydi — kafolatlangan daromaddek ko'rinmasin
+            lines.append("⏳ 3-tarif mukofoti: oy tugagach hisoblanadi")
+        else:
+            lines.append(f"🏅 3-tarif mukofoti: {_som(v['tariff_award'])}" + (f" ({v['tariff_note']})" if v.get("tariff_note") else ""))
     if v.get("star_bonus"):
         lines.append(f"🌟 Oylik yulduz bonusi: {_som(v['star_bonus'])}")
-    lines.append(f"\n💵 JAMI: {_som(v['total_amount'])}")
+    lines.append(f"\n💵 JAMI{'' if v['final'] else ' (hozirgacha)'}: {_som(v['total_amount'])}")
     notes = list(v["unavailable"].values()) + v["limitations"]
     if notes:
         lines.append("\nℹ️ " + "\nℹ️ ".join(dict.fromkeys(notes)))
     return "\n".join(lines)
 
 
+MY_CURRENT, MY_PREVIOUS = "0", "1"
+
+
+def my_salary_text(user_id: int, offset: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """💰 Oyligim: kelishuv qatorlari + shu oy maoshining to'liq tarkibi. Faqat chaqiruvchining o'z id'si."""
+    from services import discipline, salary_agreement
+
+    # Kelishuv qatorlari — AMALDAGI kelishuv, shuning uchun faqat joriy oyda (o'tgan oy hisobiga aralashmasin;
+    # o'tgan oy fiksi month_view'da o'sha oy kelishuvidan olinadi).
+    lines = (salary_agreement.view_lines(user_id, discipline.get_salary(user_id)["fixed_salary"])
+             if offset == 0 else [])
+    profile = employees.get_profile(user_id)
+    if profile is None:
+        return "\n".join([*lines, "", "Hisob uchun ma'lumot yo'q."]), None
+    other = 1 - offset
+    markup = _kb([("📅 O'tgan oy" if other else "📅 Joriy oy", f"mypay:{MY_PREVIOUS if other else MY_CURRENT}")])
+    body = salary_text(profile, _month(offset))
+    return ("\n".join([*lines, "", body]) if lines else body), markup
+
+
 def register(dp: Dispatcher) -> None:
+    @dp.callback_query(F.data.in_({f"mypay:{MY_CURRENT}", f"mypay:{MY_PREVIOUS}"}))
+    async def my_salary_callback(callback: CallbackQuery) -> None:
+        from roles import is_authorized
+
+        await callback.answer()
+        if not is_authorized(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
+            return
+        text, markup = my_salary_text(callback.from_user.id, int(callback.data.split(":")[1]))
+        await callback.message.answer(text, **({"reply_markup": markup} if markup is not None else {}))
+
     @dp.callback_query(F.data.startswith("pay:"))
     async def payroll_callbacks(callback: CallbackQuery) -> None:
         if not await permissions.ensure_permission(callback, permissions.ACTION_MANAGE_DISCIPLINE_RULES):

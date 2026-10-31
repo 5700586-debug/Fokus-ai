@@ -1,8 +1,25 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf12c8e`
+Tekshirilgan: 2026-11-01, manba: main HEAD `a0a2ffb` (+ PR #92 branch feat/my-salary)
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
+
+## Holat yangilanishi (2026-11-01, Sodiq tekshirgan)
+- LIVE (main'da, Render'da, Traceback yo'q): PR #87 oylik yulduz (f9a71a0), PR #88 vaqt bonusi/fiks chegarasi/qo'shimcha ish yulduzi (701e782), PR #89 3-tarif mukofoti + yulduz bonusi Jamiga + "💰 Xodim maoshi" + filial rahbari faqat o'z filialiga (1b6d9fd), PR #90 "Umumiy (filialsiz)" bo'lim (696f535), PR #91 📱 Baholash ekrani (a0a2ffb). Quyidagi "Draft" belgili maosh/yulduz/hisobot bo'limlari — merge qilingan.
+- Test asosi: sqlite 0 FAIL; postgres 4 eski FAIL (test_handler_metrics ×2, test_mystars_roundtrips ×2 — SQLite'ga xos instrumentatsiya).
+
+## 💰 Oyligim — xodim o'z maoshining to'liq tarkibi — PR #92 (2026-11-01)
+- `/mymaosh` (💰 Oyligim) endi `payroll_bot.salary_text` bilan Founder ekrani bilan bir xil tarkib: fiks, ish bonusi, vaqt bonusi, minus, qo'shimcha ish, 3-tarif, yulduz bonusi, JAMI. Faqat `from_user.id`, faqat shaxsiy chat; "📅 O'tgan oy / Joriy oy" (`mypay:0|1`, id yo'q).
+- Joriy oy: "(hozirgacha — yakuniy emas)", "JAMI (hozirgacha)"; 3-tarif summasi oy tugagach; amaldagi kelishuv qatorlari faqat joriy oyda. "Bonus banki" qatori olib tashlandi.
+
+## 📱 Baholash ekrani (Telegram Mini App) — LIVE (a0a2ffb, 2026-11-01)
+- `/baholash` ekranida tepada web_app tugma (faqat `RENDER_EXTERNAL_URL`/`WEBAPP_BASE_URL` https bo'lsa). Sahifa `GET /app/baholash`, API `POST /api/baholash/day|grade` — mavjud health serverda (`webapp_server.py`).
+- Yangi baholash mantig'i yo'q: `discipline.prepare_and_record_grade` + `notify_employee_of_grade`. Sana serverda; initData HMAC, 1 soat; ACTION_EVALUATE_EMPLOYEE; faqat nazoratchiga ko'rinadigan xodim; rate limit 30/daq.
+- "Bajarilmagan" — ixtiyoriy dalil rasmi chatda so'raladi (`evidence_handlers.request_grade_photo_in_chat`); chatda boshqa FSM jarayoni ochiq bo'lsa tegilmaydi (`chat_busy`), nazoratchi bo'yicha qulf. Minus va kun/filial yopish chatda.
+- Real nazoratchi sinovi hali qilinmagan.
+
+## "Umumiy (filialsiz)" bo'lim — LIVE (696f535, 2026-10-31)
+- Filialsiz tasdiqlangan xodimlar (haydovchi, ta'minotchi, moliyachi) nazoratchida virtual bo'limda (`config.SUPERVISION_GENERAL_BRANCH`, `employees.supervision_branch`). Kunni yopish uchun MAJBURIY EMAS (`coverage_branches` faqat haqiqiy filiallar); RECRUITING_BRANCH_NAMES o'zgarmagan.
 
 ## Maosh: 3-tarif mukofoti, yulduz bonusi, "Xodim maoshi" — Draft (2026-10-31)
 - Muhammadiy qarori: 3-tarif mukofoti (300 000 so'm) faqat 3-tarifdagi xodimga, oy yulduz mezonlari bilan intizomli yakunlansa; oylik yulduz bonusi barcha tariflarga (ikkalasi alohida). payroll_view ikkalasini ham faqat O'QIYDI: tarif mukofoti har safar star_month mezonidan hisoblanadi (yozilmaydi), yulduz bonusi Founder tasdiqlagan bonus_history'dan.

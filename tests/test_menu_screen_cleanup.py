@@ -455,7 +455,8 @@ def _enroll_with_rules(employee_id: int) -> None:
 
 async def test_opening_rules_cleans_previous_menu_but_keeps_the_new_rule_card_untracked(env):
     _enroll_with_rules(EMP)
-    first = await env.tap(EMP, "💰 Oyligim")
+    # Reply-klaviaturali oddiy ekran kerak: "💰 Oyligim" endi inline tugmali (📅 O'tgan oy), shuning uchun boshqasi.
+    first = await env.tap(EMP, "🏆 Bugungi o'rnim")
     salary_screen = env.screens(EMP)[0]
 
     rules_tap = await env.tap(EMP, "📋 Nizomlar")
@@ -634,7 +635,7 @@ def _restart() -> None:
 
 async def test_after_restart_opening_rules_keeps_unknown_keyboard_owner_until_next_keyboard_screen(env):
     _enroll_with_rules(EMP)
-    await env.tap(EMP, "💰 Oyligim")
+    await env.tap(EMP, "🏆 Bugungi o'rnim")  # reply-klaviaturali ekran ("💰 Oyligim" endi inline tugmali)
     owner = env.screens(EMP)[-1]["id"]
     assert env.session.keyboard_owners[EMP] == owner
     _restart()

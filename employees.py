@@ -146,16 +146,35 @@ def get_profile(user_id: int, conn=None, include_contacts: bool = True) -> dict 
             conn.close()
 
 
+def supervision_branch(profile: dict | None) -> str | None:
+    """Nazorat uchun filial: biriktirilmagan xodim — virtual "Umumiy (filialsiz)" bo'lim."""
+    from config import SUPERVISION_GENERAL_BRANCH
+
+    if profile is None:
+        return None
+    return profile.get("branch") or SUPERVISION_GENERAL_BRANCH
+
+
 def list_approved_by_branch(branch: str) -> list[dict]:
     """Shu filialga biriktirilgan, tasdiqlangan (``status='approved'``)
     xodimlar — Founder'ning "🏬 Do'konlar" filial kartasi va xodimlar
-    ro'yxati uchun (faqat o'qish, hech qanday yozuv yo'q)."""
+    ro'yxati uchun (faqat o'qish, hech qanday yozuv yo'q). Virtual "Umumiy (filialsiz)" bo'lim uchun —
+    filialga biriktirilmagan tasdiqlangan xodimlar."""
+    from config import SUPERVISION_GENERAL_BRANCH
+
     conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM employees WHERE branch = ? AND status = 'approved' ORDER BY familiya, ism",
-            (branch,),
-        ).fetchall()
+        if branch == SUPERVISION_GENERAL_BRANCH:
+            rows = conn.execute(
+                "SELECT * FROM employees WHERE (branch IS NULL OR branch = '' OR branch = ?) AND status = 'approved' "
+                "ORDER BY familiya, ism",
+                (branch,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM employees WHERE branch = ? AND status = 'approved' ORDER BY familiya, ism",
+                (branch,),
+            ).fetchall()
     finally:
         conn.close()
 

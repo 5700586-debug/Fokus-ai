@@ -142,6 +142,11 @@ RECRUITING_BRANCH_NAMES = [
     if name.strip()
 ]
 
+# Nazoratchi uchun virtual bo'lim: hech qaysi filialga biriktirilmagan (haydovchi, ta'minotchi, moliyachi kabi)
+# tasdiqlangan xodimlar shu nom ostida baholanadi. RECRUITING_BRANCH_NAMES (ishga qabul) bunga TEGILMAYDI.
+SUPERVISION_GENERAL_BRANCH = "Umumiy (filialsiz)"
+SUPERVISION_BRANCH_NAMES = [*RECRUITING_BRANCH_NAMES, SUPERVISION_GENERAL_BRANCH]
+
 # Ish e'loni uchun filialning HAQIQIY manzili (Founder tomonidan
 # berilgan) — V1 uchun minimal, yangi DB jadvali YO'Q. Faqat
 # ``RECRUITING_BRANCH_NAMES``dagi nomlar bilan mos keladigan filiallar

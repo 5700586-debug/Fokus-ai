@@ -27,7 +27,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 import company_time
 import employees
-from config import COMPANY_TIMEZONE, FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from config import COMPANY_TIMEZONE, FOUNDER_ID, SUPERVISION_BRANCH_NAMES as RECRUITING_BRANCH_NAMES
 from roles import is_authorized, list_users
 from services import chat_cleanup, dialog_cleanup, discipline, discipline_ai, nazoratchi_close_report as close_report, nazoratchi_day, permissions, rule_learning
 from services import company_rules_import as discipline_import
@@ -704,7 +704,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             return
         profile = employees.get_profile(employee_id)
         name = _employee_name(employee_id)
-        branch = profile.get("branch") if profile else None
+        branch = employees.supervision_branch(profile)
 
         lines = [f"👤 {name}"]
         if profile is not None:
@@ -756,7 +756,7 @@ def register(dp: Dispatcher, openai_client) -> None:
                 f"💰 Bonus banki: {result.bonus_bank_balance} ball"
             )
             profile = employees.get_profile(employee_id)
-            branch = profile.get("branch") if profile else None
+            branch = employees.supervision_branch(profile)
             if branch and _branch_index(branch) is not None:
                 text, keyboard = _branch_screen(branch, review_date, callback.from_user.id, prefix=confirmation + "\n\n")
                 await callback.message.edit_text(text, reply_markup=keyboard)

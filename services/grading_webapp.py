@@ -10,6 +10,7 @@ Javoblarda telefon, maosh yoki bonus balansi yo'q.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections import defaultdict, deque
@@ -26,7 +27,14 @@ INIT_DATA_MAX_AGE = 3600
 RATE_LIMIT_PER_MINUTE = 30
 GRADE_KEYS = (discipline.GRADE_BAJARILMAGAN, discipline.GRADE_CHALA, discipline.GRADE_NORMA, discipline.GRADE_ALO)
 
+# Bajarilmagan bahodan keyingi ixtiyoriy dalil rasmi taklifi natijasi (sahifa shunga qarab yozadi).
+PHOTO_NOT_NEEDED = "none"
+PHOTO_REQUESTED = "requested"
+PHOTO_CHAT_BUSY = "chat_busy"
+PHOTO_FAILED = "failed"
+
 _hits: dict[int, deque] = defaultdict(deque)
+_photo_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class WebAppError(Exception):
@@ -112,19 +120,25 @@ async def grade(bot, fsm_storage, supervisor_id: int, employee_id, grade_key) ->
         raise WebAppError(409, prepared.error)
     result = prepared.result
     outcome = await discipline.notify_employee_of_grade(bot, employee_id, result)
+    photo = PHOTO_NOT_NEEDED
     if grade_key == discipline.GRADE_BAJARILMAGAN and result.changed and fsm_storage is not None:
-        await _offer_grade_photo(bot, fsm_storage, supervisor_id, employee_id, work_date)
+        photo = await _offer_grade_photo(bot, fsm_storage, supervisor_id, employee_id, work_date)
     return {
         "ok": True,
         "employee_id": employee_id,
         "grade": grade_key,
         "changed": result.changed,
         "message": discipline.grade_notice_reply(outcome),
+        "photo": photo,
     }
 
 
-async def _offer_grade_photo(bot, fsm_storage, supervisor_id: int, employee_id: int, work_date: str) -> None:
-    """Chatdagi bilan bir xil ixtiyoriy dalil oqimi: holat nazoratchining shaxsiy chatiga o'rnatiladi."""
+async def _offer_grade_photo(bot, fsm_storage, supervisor_id: int, employee_id: int, work_date: str) -> str:
+    """Chatdagi bilan bir xil ixtiyoriy dalil oqimi: holat nazoratchining shaxsiy chatiga o'rnatiladi.
+
+    Nazoratchi chatda BOSHQA jarayonda bo'lsa (masalan minus rasmi kutilmoqda yoki boshqa xodimning dalili hali
+    kutilmoqda) — holatga TEGILMAYDI: u jarayon buzilmaydi va rasm noto'g'ri xodimga bog'lanmaydi. Baho baribir
+    saqlangan; dalil ixtiyoriy."""
     from aiogram.fsm.context import FSMContext
     from aiogram.fsm.storage.base import StorageKey
 
@@ -133,10 +147,22 @@ async def _offer_grade_photo(bot, fsm_storage, supervisor_id: int, employee_id: 
     key = StorageKey(bot_id=bot.id, chat_id=supervisor_id, user_id=supervisor_id)
     state = FSMContext(storage=fsm_storage, key=key)
     name = nazoratchi_day.full_name(employees.get_profile(employee_id) or {"user_id": employee_id})
-    try:
-        await evidence_handlers.request_grade_photo_in_chat(
-            bot, supervisor_id, state, employee_id=employee_id, supervisor_id=supervisor_id, eval_date=work_date,
-            title=f"❌ {name} — Bajarilmagan (0 ball) saqlandi.",
-        )
-    except Exception as error:  # noqa: BLE001 - baho saqlangan; rasm taklifi yetmasa baho bekor qilinmaydi
-        discipline.log_grade_event(employee_id, work_date, "webapp_photo_offer", "failed", type(error).__name__)
+    # Bir nazoratchining parallel so'rovlari "tekshir -> o'rnat" orasida bir-birini bosib o'tmasin.
+    async with _photo_locks[supervisor_id]:
+        if await state.get_state() is not None:
+            discipline.log_grade_event(employee_id, work_date, "webapp_photo_offer", "chat_busy")
+            return PHOTO_CHAT_BUSY
+        try:
+            await evidence_handlers.request_grade_photo_in_chat(
+                bot, supervisor_id, state, employee_id=employee_id, supervisor_id=supervisor_id, eval_date=work_date,
+                title=f"❌ {name} — Bajarilmagan (0 ball) saqlandi.",
+            )
+        except Exception as error:  # noqa: BLE001 - baho saqlangan; rasm taklifi yetmasa baho bekor qilinmaydi
+            discipline.log_grade_event(employee_id, work_date, "webapp_photo_offer", "failed", type(error).__name__)
+            # Faqat O'ZIMIZ o'rnatgan kutish holatini tozalaymiz — boshqa jarayonning yangi holatiga tegilmaydi.
+            pending = (await state.get_data()).get("grade_pending") or {}
+            if (await state.get_state() == evidence_handlers.EvidenceStates.waiting_optional_grade_photo.state
+                    and pending.get("employee_id") == employee_id and pending.get("eval_date") == work_date):
+                await state.clear()
+            return PHOTO_FAILED
+    return PHOTO_REQUESTED

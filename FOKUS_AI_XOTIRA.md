@@ -85,6 +85,17 @@ Robot (Claude Code) ishga tushirish usuli
 ✅ Eng arzon yetarli model ishlatiladi (katta model economy rejimiga zid).
 ❌ Aniq so'm-asosidagi kunlik bonus formulasi (STAGE 9) BEKOR qilingan — ball tizimi tanlangan (12-bo'lim). (manba: eski FOKUS_AI_STATE.md; Muhammadiy, 2026-10-18)
 ⚠️ Bonus/minus bo'yicha ochiq biznes qarorlari (o'ylab topilmaydi, Founder tasdig'i kerak; 1 ball qiymati va kechikish qoidalari 12-bo'limda hal qilingan, qolganini Muhammadiy tekshiradi): vaqtida/erta kelish bonusi; kechikish minuslari; nazoratchi noto'g'ri tasdiqlasa minus; takroriy fors-major qoidasi. (manba: eski docs/IDEAS.md)
+### Maosh va yulduz qarorlari (Muhammadiy, 2026-10-30/31 — amalga oshirilgan)
+✅ Vaqt bonusi — kuniga 2 ball. Fiks rejadan oshmaydi: ortiqcha o'tirish pul emas.
+✅ Ortiqcha ish faqat "qo'shimcha ish yulduzi" bilan to'lanadi (1 ⭐ = 5 000 so'm), minus undan ayrilmaydi; e'tirof = qo'shimcha ish. Beradi: filial rahbari (savdo_boshligi) — faqat o'z filialiga; Founder — hammaga.
+✅ Jami doim ko'rsatiladi. Xodim "💰 Oyligim"da o'z maoshining to'liq tarkibini ko'radi (faqat o'zinikini).
+✅ Oylik yulduz (intizomli xodimlar "zvaniyasi", oddiy bonusdan alohida musobaqa): har oy +1 yoki −1 (0..5). +1 sharti: nizom minusi yo'q (istisnosiz), "bajarilmagan" yo'q, "chala" ≤1 kun, vaqt bonusisiz kun ≤1, grafikdagi kunlar to'liq ishlangan. Nizom buzilsa ham shunchaki −1. Oktyabr — sinov oyi, hisob noyabrdan. Founder tasdig'isiz yozilmaydi.
+✅ Yulduz bonusi: 1–5 ⭐ uchun 50 000 / 110 000 / 200 000 / 300 000 / 500 000 so'm (barcha tariflarga).
+✅ 3-tarif mukofoti 300 000 so'm — faqat 3-tarifdagi xodimga, yulduz bilan bir xil intizom shartlari bajarilsa; yulduz bonusidan alohida (ikkalasi beriladi).
+✅ Nazoratchi chek-listi — 5 band; "bormasdan baholash" −50 (nazoratchi roziligi shart emas). Haydovchi/ta'minotchi/moliyachi nazoratchida "Umumiy (filialsiz)" bo'limida, ularning chek-listini Muhammadiy keyin beradi.
+✅ Founder hisobotlari: haftalik (har dushanba, o'tgan hafta) va oylik dashboard — tushunarli, zamonaviy.
+✅ Ish tartibi (2026-10-31, qat'iy): har qadamda avval ChatGPT bilan tanqid/fidbek (2 raund), keyin bajarish. Test: kichik tuzatishda tez test, botga qo'shishdan oldin bir marta to'liq; pul/yulduz ishlarida doim to'liq.
+
 ## 5. Kelajak g'oyalari (tasdiqlanmagan yoki qisman)
 💡 Bot + Mini App bo'linishi (3-qism). Bot: xabar beradi, eslatadi, savol beradi, tasdiqlaydi. Mini App: ko'rsatadi, boshqaradi, taqqoslaydi. Hozir Mini App ga tegilmaydi.
 💡 Bugungi muammolar — Founder oynasi. Barcha modullar muammosi bitta ekranda. Holat: 🔴 shoshilinch · 🟡 bugun · ⏳ kutilmoqda · 🟢 hal. Tugma: 👀 ko'rdim · ➡️ mas'ulga · ✅ hal · ⏰ keyin eslat. Quruq qo'rqinchli ro'yxat emas. V1: faqat Founder, moliya yo'q, guruhga yubormaydi, AI hukm yo'q. (V1 qurilgan)

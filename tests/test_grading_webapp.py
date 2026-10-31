@@ -36,6 +36,7 @@ def anyio_backend():
 def _env(monkeypatch):
     monkeypatch.setattr(company_time, "now", lambda: FIXED)
     grading_webapp._hits.clear()
+    grading_webapp._photo_locks.clear()  # har test o'z event loop'ida
 
 
 def _signed(user_id: int, token: str, auth_date: int | None = None) -> str:
@@ -148,11 +149,66 @@ async def test_branchless_employee_can_be_graded(bot_dp):
 async def test_bajarilmagan_asks_optional_photo_in_chat(bot_dp):
     main, bot = bot_dp
     _seed()
+    await (await _state(main, bot)).clear()  # boshqa testdan qolgan holat bo'lmasin
     bot.sent.clear()
-    await grading_webapp.grade(bot, main.dp.storage, NAZ, CASHIER, "bajarilmagan")
+    result = await grading_webapp.grade(bot, main.dp.storage, NAZ, CASHIER, "bajarilmagan")
+    assert result["photo"] == grading_webapp.PHOTO_REQUESTED
     assert any(isinstance(m, SendMessage) and m.chat_id == NAZ and "Dalil rasmi" in m.text for m in bot.sent)
     sent = await send(main.dp, bot, NAZ, photo_file_id="photo-1")
     assert any(isinstance(m, SendMessage) and m.chat_id == NAZ and "Dalil saqlandi" in m.text for m in sent)
+
+
+async def _state(main, bot):
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.base import StorageKey
+
+    return FSMContext(storage=main.dp.storage, key=StorageKey(bot_id=bot.id, chat_id=NAZ, user_id=NAZ))
+
+
+async def test_second_bajarilmagan_does_not_steal_pending_photo(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    state = await _state(main, bot)
+    await state.clear()
+    first = await grading_webapp.grade(bot, main.dp.storage, NAZ, CASHIER, "bajarilmagan")
+    second = await grading_webapp.grade(bot, main.dp.storage, NAZ, DRIVER, "bajarilmagan")
+    assert first["photo"] == grading_webapp.PHOTO_REQUESTED and second["photo"] == grading_webapp.PHOTO_CHAT_BUSY
+    assert (await state.get_data())["grade_pending"]["employee_id"] == CASHIER  # rasm birinchi xodimga bog'lanadi
+    assert len(_grades()) == 2  # baholar baribir saqlangan
+    await state.clear()
+
+
+async def test_parallel_bajarilmagan_sets_only_one_pending(bot_dp):
+    import asyncio
+
+    main, bot = bot_dp
+    _seed()
+    state = await _state(main, bot)
+    await state.clear()
+    results = await asyncio.gather(grading_webapp.grade(bot, main.dp.storage, NAZ, CASHIER, "bajarilmagan"),
+                                   grading_webapp.grade(bot, main.dp.storage, NAZ, DRIVER, "bajarilmagan"))
+    assert sorted(r["photo"] for r in results) == [grading_webapp.PHOTO_CHAT_BUSY, grading_webapp.PHOTO_REQUESTED]
+    requested = next(r for r in results if r["photo"] == grading_webapp.PHOTO_REQUESTED)
+    assert (await state.get_data())["grade_pending"]["employee_id"] == requested["employee_id"]
+    await state.clear()
+
+
+async def test_busy_chat_flow_is_not_broken(bot_dp):
+    main, bot = bot_dp
+    _seed()
+    import evidence_handlers
+
+    state = await _state(main, bot)
+    await state.clear()
+    await state.set_state(evidence_handlers.EvidenceStates.waiting_photo)  # nazoratchi minus rasmini yuborayotgan
+    await state.update_data(evidence_pending={"source": "x", "supervisor_id": NAZ})
+    bot.sent.clear()
+    result = await grading_webapp.grade(bot, main.dp.storage, NAZ, CASHIER, "bajarilmagan")
+    assert result["ok"] and result["photo"] == grading_webapp.PHOTO_CHAT_BUSY
+    assert await state.get_state() == evidence_handlers.EvidenceStates.waiting_photo.state
+    assert (await state.get_data())["evidence_pending"]["source"] == "x"
+    assert not any(isinstance(m, SendMessage) and m.chat_id == NAZ for m in bot.sent)
+    await state.clear()
 
 
 async def test_closed_day_writes_nothing(bot_dp, monkeypatch):

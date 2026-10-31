@@ -23,7 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
 import company_time
 import employees
@@ -214,10 +214,16 @@ def _day_screen(supervisor_id: int, prefix: str) -> tuple[str, InlineKeyboardMar
             f"📅 Ish kuni: {_display_date(day.work_date)}\n✅ Bu ish kuni yopilgan. Yangi ish kuni hali boshlanmagan.",
             None,
         )
-    return (
-        f"{_day_header(day)}\n\n🏬 Filialni tanlang:",
-        _branch_picker_keyboard(prefix, day.work_date, supervisor_id),
-    )
+    keyboard = _branch_picker_keyboard(prefix, day.work_date, supervisor_id)
+    if prefix == "bos:br":
+        import webapp_server
+
+        url = webapp_server.page_url()
+        if url:  # 📱 Baholash ekrani — faqat https manzil sozlangan bo'lsa; chat tugmalari zaxira bo'lib qoladi
+            keyboard.inline_keyboard.insert(
+                0, [InlineKeyboardButton(text="📱 Baholash ekrani (hammasi bir joyda)", web_app=WebAppInfo(url=url))]
+            )
+    return f"{_day_header(day)}\n\n🏬 Filialni tanlang:", keyboard
 
 
 _STALE_ANSWER = "Bu tugma eskirgan."

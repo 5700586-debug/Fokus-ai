@@ -1657,9 +1657,10 @@ def register(dp: Dispatcher, openai_client) -> None:
             await message.answer("Oylik ma'lumoti faqat shaxsiy chatda ko'rsatiladi.")
             return
 
-        salary = discipline.get_salary(message.from_user.id)
-        lines = [*salary_agreement.view_lines(message.from_user.id, salary["fixed_salary"]), f"💰 Bonus banki: {salary['bonus_bank']} ball"]
-        await message.answer("\n".join(lines))
+        import payroll_bot  # 💰 Oyligim: Founder ekrani bilan bir xil to'liq tarkib, faqat o'zining
+
+        text, markup = payroll_bot.my_salary_text(message.from_user.id, 0)
+        await message.answer(text, reply_markup=markup)
 
     # ------------------------------------------------------- apellyatsiya --
 

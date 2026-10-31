@@ -112,7 +112,7 @@ def register(dp: Dispatcher) -> None:
         if not is_authorized(callback.from_user.id) or not callback.message or callback.message.chat.type != "private":
             return
         text, markup = my_salary_text(callback.from_user.id, int(callback.data.split(":")[1]))
-        await callback.message.answer(text, reply_markup=markup)
+        await callback.message.answer(text, **({"reply_markup": markup} if markup is not None else {}))
 
     @dp.callback_query(F.data.startswith("pay:"))
     async def payroll_callbacks(callback: CallbackQuery) -> None:

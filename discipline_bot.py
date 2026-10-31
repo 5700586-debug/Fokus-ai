@@ -1660,7 +1660,8 @@ def register(dp: Dispatcher, openai_client) -> None:
         import payroll_bot  # 💰 Oyligim: Founder ekrani bilan bir xil to'liq tarkib, faqat o'zining
 
         text, markup = payroll_bot.my_salary_text(message.from_user.id, 0)
-        await message.answer(text, reply_markup=markup)
+        # Tugma bo'lmasa reply_markup UMUMAN berilmaydi: aks holda menyu-ekran tizimi pastki klaviaturani yo'qotadi.
+        await message.answer(text, **({"reply_markup": markup} if markup is not None else {}))
 
     # ------------------------------------------------------- apellyatsiya --
 

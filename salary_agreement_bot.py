@@ -61,6 +61,8 @@ def _kb(*rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
 
 _CANCEL_ROW = [("⬅️ Xodimlar", "sagr:list"), ("❌ Bekor qilish", "sagr:cancel")]
 _HOME_ROW = [("🏠 Menyu", "sagr:home")]
+# Saqlangandan keyin: ro'yxat YANGI xabarda ochiladi (saqlangan karta o'chmaydi) yoki menyuga qaytish.
+_AFTER_SAVE_ROW = [("➡️ Keyingi xodim", "sagr:more"), ("🏠 Menyu", "sagr:home")]
 
 
 def _full_name(profile: dict) -> str:
@@ -293,6 +295,17 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         await callback.answer("Bekor qilindi." if callback.data == "sagr:cancel" else None)
         await callback.message.edit_text(text, reply_markup=markup)
 
+    @dp.callback_query(F.data == "sagr:more")
+    async def agreement_more(callback: CallbackQuery, state: FSMContext) -> None:
+        """Saqlangan kartadan keyin keyingi xodim: ro'yxat yangi xabarda (saqlangan karta joyida qoladi).
+        Holat TOZALANMAYDI: eski kartadagi tugma boshqa boshlangan kelishuvni buzmasin (xodim tanlansa ``sagr:new``
+        o'zi yangidan boshlaydi)."""
+        if not await _allowed(callback):
+            return
+        await callback.answer()
+        text, markup = _employee_list(0)
+        await callback.message.answer(text, reply_markup=markup)
+
     @dp.callback_query(F.data == "sagr:home")
     async def agreement_home(callback: CallbackQuery, state: FSMContext) -> None:
         if not await _allowed(callback):
@@ -421,12 +434,12 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         if sent:
             return (
                 "✅ Saqlandi va xodimga yuborildi.\nHolat: Xodim tasdig'i kutilmoqda.",
-                None,
+                _kb(_AFTER_SAVE_ROW),
             )
         return (
             "✅ Saqlandi, lekin xodimga YUBORIB BO'LMADI (xodim botni ochmagan bo'lishi mumkin).\n"
             "Holat: Xodim tasdig'i kutilmoqda. Xodim botda «💵 Oylik kelishuvim» orqali o'zi ochib tasdiqlashi mumkin.",
-            _kb([("🔁 Qayta yuborish", f"sagr:resend:{agreement['id']}")]),
+            _kb([("🔁 Qayta yuborish", f"sagr:resend:{agreement['id']}")], _AFTER_SAVE_ROW),
         )
 
     @dp.callback_query(F.data.startswith("sagr:save:"))
@@ -459,7 +472,7 @@ def register(dp: Dispatcher, menu_builder=None, nav_texts=None) -> None:
         await state.clear()
         await callback.answer()
         if not result.created or result.agreement is None:
-            await callback.message.edit_text("ℹ️ Bu kelishuv allaqachon saqlangan; qayta yozilmadi.")
+            await callback.message.edit_text("ℹ️ Bu kelishuv allaqachon saqlangan; qayta yozilmadi.", reply_markup=_kb(_AFTER_SAVE_ROW))
             return
         sent = await _send_to_employee(callback.bot, result.agreement)
         text, markup = _delivery_report(sent, result.agreement)

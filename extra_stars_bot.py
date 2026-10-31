@@ -39,7 +39,7 @@ def _money(stars: int) -> str:
 
 
 def employee_list(giver_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
-    people = [p for p in employees.list_approved() if p["user_id"] != giver_id]
+    people = [p for p in employees.list_approved() if p["user_id"] != giver_id and extra_stars.can_give_to(giver_id, p)]
     pages = max(1, -(-len(people) // PAGE_SIZE))
     page = min(max(page, 0), pages - 1)
     rows = [[(f"{_name(p)} · {p.get('branch') or '—'}"[:60], f"xs:pick:{p['user_id']}")]
@@ -98,8 +98,8 @@ def register(dp: Dispatcher) -> None:
         if action == "pick" and len(parts) == 3 and parts[2].lstrip("-").isdigit():
             employee_id = int(parts[2])
             profile = employees.get_profile(employee_id)
-            if profile is None:
-                await callback.message.answer("Xodim topilmadi.")
+            if not extra_stars.can_give_to(user_id, profile):
+                await callback.message.answer("Faqat o'z filialingiz xodimlariga yulduz bera olasiz.")
                 return
             rows = [[(f"{n} ⭐", f"xs:n:{employee_id}:{n}") for n in STAR_CHOICES[:4]],
                     [(f"{n} ⭐", f"xs:n:{employee_id}:{n}") for n in STAR_CHOICES[4:]],
@@ -111,7 +111,7 @@ def register(dp: Dispatcher) -> None:
             return
         if action == "n" and len(parts) == 4 and parts[2].lstrip("-").isdigit() and parts[3].isdigit():
             employee_id, stars = int(parts[2]), int(parts[3])
-            if stars not in STAR_CHOICES or employees.get_profile(employee_id) is None:
+            if stars not in STAR_CHOICES or not extra_stars.can_give_to(user_id, employees.get_profile(employee_id)):
                 await callback.message.answer("Bu tugma eskirgan.")
                 return
             await state.clear()

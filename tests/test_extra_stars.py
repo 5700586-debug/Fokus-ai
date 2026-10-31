@@ -10,7 +10,7 @@ from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
 
-EMP, OTHER = 701, 702
+EMP, OTHER, BOSS, FAR = 701, 702, 703, 704
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ def anyio_backend():
 def _seed() -> None:
     conn = get_connection()
     try:
-        for uid in (EMP, OTHER):
-            conn.execute("INSERT INTO employees (user_id, familiya, ism, branch, status) VALUES (?, 'Karimov', 'Vali', 'SATURN A', "
-                         "'approved')", (uid,))
+        for uid, branch in ((EMP, "SATURN A"), (OTHER, "SATURN A"), (BOSS, "SATURN A"), (FAR, "SATURN B")):
+            conn.execute("INSERT INTO employees (user_id, familiya, ism, branch, status) VALUES (?, 'Karimov', 'Vali', ?, "
+                         "'approved')", (uid, branch))
         conn.commit()
     finally:
         conn.close()
@@ -89,3 +89,28 @@ async def test_cancel_writes_nothing(bot_dp):
     stale = await send_callback(main.dp, bot, FOUNDER_ID, data="xs:ok:deadbeef", target_chat_id=FOUNDER_ID)
     assert any(isinstance(m, SendMessage) and "eskirgan" in m.text for m in stale)
     assert _rows() == []
+
+
+def test_branch_manager_gives_only_to_own_branch():
+    from roles import set_role
+
+    _seed()
+    set_role(BOSS, "savdo_boshligi", set_by=FOUNDER_ID)
+    assert extra_stars.give(EMP, 2, "Kechki yuk tushirishda qoldi", BOSS, "b1") is True
+    with pytest.raises(extra_stars.ExtraStarsError):
+        extra_stars.give(FAR, 2, "Kechki yuk tushirishda qoldi", BOSS, "b2")
+    assert extra_stars.give(FAR, 2, "Rahbar yo'qligida Founder berdi", FOUNDER_ID, "b3") is True
+    assert len(_rows()) == 2
+
+
+async def test_branch_manager_list_shows_only_own_branch(bot_dp):
+    from aiogram.methods import SendMessage as _SM
+    from roles import set_role
+
+    main, bot = bot_dp
+    _seed()
+    set_role(BOSS, "savdo_boshligi", set_by=FOUNDER_ID)
+    sent = await send(main.dp, bot, BOSS, text="/qoshimchaish")
+    listing = next(m for m in sent if isinstance(m, _SM) and "Qo'shimcha ish yulduzi" in m.text)
+    targets = {b.callback_data for row in listing.reply_markup.inline_keyboard for b in row}
+    assert f"xs:pick:{EMP}" in targets and f"xs:pick:{FAR}" not in targets

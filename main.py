@@ -47,6 +47,7 @@ import cash_shift_bot  # noqa: E402
 import cash_close_review  # noqa: E402
 import discipline_bot  # noqa: E402
 import extra_stars_bot  # noqa: E402
+import payroll_bot  # noqa: E402
 import salary_agreement_bot  # noqa: E402
 import employees  # noqa: E402
 import health_server  # noqa: E402
@@ -526,6 +527,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
         permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT,
     ),
     ("savdo_boshligi", "/mealplan — Ovqat rejasini kiritish", permissions.ACTION_ENTER_MEAL_PLAN),
+    ("savdo_boshligi", "/qoshimchaish — Qo'shimcha ish yulduzi", permissions.ACTION_GIVE_EXTRA_STARS),
     ("haydovchi", "/drivercheck — Kunlik mashina/servis tekshiruvi", permissions.ACTION_DRIVER_DAILY_CHECK),
     ("taminotchi", "/marketlog — Bozor kuzatuvi qo'shish", permissions.ACTION_LOG_MARKET_OBSERVATION),
     ("taminotchi", "/xarid — Bugungi bozorlikni xarid qilish", permissions.ACTION_RECORD_SUPPLIER_PURCHASE),
@@ -727,6 +729,7 @@ _OTHER_BUTTON_LABELS: dict[str, str] = {
     "/invsnapshot": "📦 Ombor hisoboti",
     "/inventorysummary": "📈 Ombor xulosasi",
     "/mealplan": "🍽 Ovqat rejasi",
+    "/qoshimchaish": "➕ Qo'shimcha ish yulduzi",
     "/drivercheck": "🚚 Mashina tekshiruvi",
     "/marketlog": "📝 Bozor kuzatuvi",
     "/xarid": "🛒 Bozorlik xaridi",
@@ -950,6 +953,7 @@ inventory_bot.register(dp)
 calibration_bot.register(dp)
 discipline_bot.register(dp, openai_client)
 extra_stars_bot.register(dp)
+payroll_bot.register(dp)
 salary_agreement_bot.register(
     dp,
     build_menu,
@@ -1031,6 +1035,7 @@ async def founder_reports_handler(message: Message) -> None:
             [InlineKeyboardButton(text="📈 Haftalik hisobot", callback_data="frep:weekly")],
             [InlineKeyboardButton(text="📅 Oylik hisobot", callback_data="frep:monthly")],
             [InlineKeyboardButton(text="⭐ Yulduzlar", callback_data="stars:show")],
+            [InlineKeyboardButton(text="💰 Xodim maoshi", callback_data="pay:list:0")],
             [InlineKeyboardButton(text="➕ Qo'shimcha ish yulduzi", callback_data="xs:list:0")],
         ]),
     )

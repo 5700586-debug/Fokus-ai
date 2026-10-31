@@ -10,7 +10,7 @@ from aiogram.methods import EditMessageText
 import company_time
 import discipline_bot
 import employees
-from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES, SUPERVISION_BRANCH_NAMES
 from services import attendance as attendance_service
 from services import discipline, nazoratchi_day
 from tests.bot_harness import send, send_callback
@@ -80,7 +80,7 @@ async def test_baholash_asks_branch_first_and_hides_all_employees(bot_dp):
     assert "Filialni tanlang" in sent[0].text and f"📅 Ish kuni: {_display(_today())}" in sent[0].text
     assert "Alisher" not in sent[0].text and "Botir" not in sent[0].text  # hamma xodim aralash chiqmaydi
     labels = [b.text for row in sent[0].reply_markup.inline_keyboard for b in row]
-    assert labels == [f"📍 {name}" for name in RECRUITING_BRANCH_NAMES]
+    assert labels == [f"📍 {name}" for name in SUPERVISION_BRANCH_NAMES]  # + "Umumiy (filialsiz)"
 
 
 async def test_selected_branch_shows_only_its_employees(bot_dp):

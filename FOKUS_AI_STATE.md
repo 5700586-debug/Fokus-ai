@@ -4,6 +4,12 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Maosh hisobi: vaqt bonusi, fiks chegarasi, qo'shimcha ish yulduzi, Jami — Draft (2026-10-30)
+- Muhammadiy qarorlari: vaqt bonusi = kuniga 2 ball (ish bonusi qatorida, minus undan ham ayriladi); rejadan ortiq o'tirish pul emas — fiks kelishuvdagi summadan oshmaydi; qo'shimcha ish faqat alohida kelishilgan "qo'shimcha ish yulduzi" bilan (minus ayrilmaydi); e'tirof alohida manba emas (= qo'shimcha ish).
+- `services/payroll_view.py`: TIME_BONUS_POINTS=2; fiks min(ishlangan, reja); Jami endi doim hisoblanadi (bonus manbasi yo'q bo'lsa 0).
+- `extra_work_stars` jadvali + `services/extra_stars.py` + `extra_stars_bot.py` (📊 Hisobotlar → ➕ Qo'shimcha ish yulduzi, /qoshimchaish): xodim → yulduz → sabab → tasdiq (request_token), xodimga xabar. Beruvchi: hozircha faqat Founder (GIVER_ROLES — Muhammadiy qarori kutilmoqda).
+- Navbatda: 3-tarif mukofoti (300k), oylik yulduz bonusi Jamiga, Founder "Xodim maoshi" ro'yxatdan tanlash.
+
 ## Intizomli xodimlar yulduzi (oylik) — Draft (2026-10-30)
 - Muhammadiy qarori: har oy yulduz yo +1, yo −1 (0..5). +1 sharti: nizom minusi yo'q (istisnosiz), "bajarilmagan" yo'q va "chala" ≤1 kun, vaqt bonusi olinmagan kun ≤1, sababsiz kelmagan kun yo'q, ish kunlari to'liq (kelishuvdagi oylik ish kunlari yoki 26; ruxsatli kunlar ayiriladi). E'tiroz hal bo'lmagan xodim — kutiladi. Oktabr sinov oyi: hisob 2026-11 dan (birinchi ko'rik 1-dekabr).
 - `services/star_month.py`: evaluate (faqat o'qish), apply (Founder tasdig'idan keyin; star_history/bonus_history UNIQUE bilan idempotent), guruh jadvali rasmi (surat/bosh harf + ism + 5 yulduz, pul ko'rinmaydi).

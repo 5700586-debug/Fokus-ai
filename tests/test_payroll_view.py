@@ -198,3 +198,51 @@ def test_read_is_idempotent_writes_nothing_and_ledger_duplicates_do_not_count(te
     second = pv.month_view(EMP, MONTH)
     assert first == second and {t: _count(t) for t in tables} == before
     assert first["work_bonus"] == 40
+
+
+# ------------------------------------------------- 3-tarif mukofoti va yulduz bonusi --
+
+
+def _good_november(monkeypatch, tariff=3):
+    from datetime import date as _date
+
+    monkeypatch.setattr(pv.company_time, "today", lambda: _date(2026, 12, 2))
+    sa.save_agreement(EMP, 2_500_000, 26, 600, "2026-01-01", FOUNDER_ID, f"t{tariff}", tariff=tariff)
+    _sql("INSERT INTO employees (user_id, familiya, ism, branch, status) VALUES (?, 'Karimov', 'Vali', 'SATURN A', 'approved')",
+         (EMP,))
+    for day in range(1, 31):
+        if day % 7 == 0:
+            continue  # dam
+        iso = f"2026-11-{day:02d}"
+        _day(iso)
+        _sql("INSERT INTO daily_evaluations (employee_id, supervisor_id, eval_date, grade_key, grade_points, created_at) "
+             "VALUES (?, 1, ?, 'alo', 3, 'x')", (EMP, iso))
+        _sql("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_by, confirmed_at) VALUES (?, ?, 'manual', 1, 'x')",
+             (EMP, iso))
+
+
+def test_tariff3_award_for_disciplined_month(temp_db, monkeypatch):
+    _good_november(monkeypatch)
+    view = pv.month_view(EMP, "2026-11")
+    assert view["tariff"] == 3 and view["tariff_award"] == pv.TARIFF3_AWARD_SOM and view["star_bonus"] == 0
+    base = pv.compute_totals(view["plan_minutes"], view["fixed_salary"], view["worked_minutes"], view["work_bonus"],
+                             view["minus"], 0, 0)["total_amount"]
+    assert view["total_amount"] == base + pv.TARIFF3_AWARD_SOM
+
+
+def test_tariff3_award_lost_with_rule_minus(temp_db, monkeypatch):
+    _good_november(monkeypatch)
+    _penalty("2026-11-05", 10)
+    view = pv.month_view(EMP, "2026-11")
+    assert view["tariff_award"] == 0 and "nizom" in (view["tariff_note"] or "")
+
+
+def test_tariff2_gets_no_award_but_star_bonus_counts(temp_db, monkeypatch):
+    _good_november(monkeypatch, tariff=2)
+    _sql("INSERT INTO bonus_history (user_id, year_month, stars, bonus_amount, created_at) VALUES (?, '2026-11', 1, 50000, 'x')",
+         (EMP,))
+    view = pv.month_view(EMP, "2026-11")
+    assert view["tariff_award"] == 0 and view["star_bonus"] == 50_000
+    base = pv.compute_totals(view["plan_minutes"], view["fixed_salary"], view["worked_minutes"], view["work_bonus"],
+                             view["minus"], 0, 0)["total_amount"]
+    assert view["total_amount"] == base + 50_000

@@ -4,6 +4,10 @@ Tekshirilgan: 2026-10-28, manba: main HEAD `6011285c1d86d644a89997949bc7c5e7fdf1
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
+## Maosh: 3-tarif mukofoti, yulduz bonusi, "Xodim maoshi" — Draft (2026-10-31)
+- Muhammadiy qarori: 3-tarif mukofoti (300 000 so'm) faqat 3-tarifdagi xodimga, oy yulduz mezonlari bilan intizomli yakunlansa; oylik yulduz bonusi barcha tariflarga (ikkalasi alohida). payroll_view ikkalasini ham faqat O'QIYDI: tarif mukofoti har safar star_month mezonidan hisoblanadi (yozilmaydi), yulduz bonusi Founder tasdiqlagan bonus_history'dan.
+- `payroll_bot.py`: 📊 Hisobotlar → 💰 Xodim maoshi — xodimni ro'yxatdan tanlash, joriy/o'tgan oy to'liq tarkibi (fiks, ish bonusi, vaqt bonusi, minus, qo'shimcha ish, tarif, yulduz, JAMI).
+
 ## Maosh hisobi: vaqt bonusi, fiks chegarasi, qo'shimcha ish yulduzi, Jami — Draft (2026-10-30)
 - Muhammadiy qarorlari: vaqt bonusi = kuniga 2 ball (ish bonusi qatorida, minus undan ham ayriladi); rejadan ortiq o'tirish pul emas — fiks kelishuvdagi summadan oshmaydi; qo'shimcha ish faqat alohida kelishilgan "qo'shimcha ish yulduzi" bilan (minus ayrilmaydi); e'tirof alohida manba emas (= qo'shimcha ish).
 - `services/payroll_view.py`: TIME_BONUS_POINTS=2; fiks min(ishlangan, reja); Jami endi doim hisoblanadi (bonus manbasi yo'q bo'lsa 0).

@@ -585,7 +585,7 @@ def test_failed_correction_keeps_old_grade_balance_and_history_and_retry_has_no_
 
     assert result.changed and (result.old_grade_points, result.grade_points) == (3, 2)
     assert _state() == {"grade": ("norma", 2), "balance": 2, "history": [3, 2], "ledger": [3, -1]}
-    totals = discipline.get_period_point_totals(111)
+    totals = discipline.get_period_point_totals(111, _DAY[:7])  # baho oyi aniq — test sanaga bog'liq emas
     assert (totals["bonus"], totals["minus"], totals["net"]) == (2, 0, 2)  # soxta intizomiy minus yo'q
 
 

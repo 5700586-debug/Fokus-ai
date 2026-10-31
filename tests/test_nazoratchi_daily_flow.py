@@ -133,12 +133,19 @@ async def test_close_allows_pending_and_no_schedule_and_keeps_day_off(bot_dp):
     today = _today()
     attendance_service.set_scheduled_work_shift(111, today, "09:00", "18:00", "test")
     attendance_service.set_scheduled_day_off(113, today, "test")
-    sent = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
+    asked = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
+    # 2026-11-01 dan qat'iy yopish: baholanmagan qolsa avval izoh so'raladi, izohsiz yopilmaydi.
+    assert "kamida 5 belgili izoh" in _joined(asked) and "nazorati yopildi" not in _joined(asked)
+    sent = await send(main.dp, bot, SUPERVISOR, text="Vaqt yetmadi, ertaga tekshiraman")
     text = _joined(sent)
     assert "nazorati yopildi" in text and "baholanmadi" in text
     assert "Pending T" in text and "Nograf T" in text and "Damda: Dam T" in text
     assert discipline.get_daily_grade(111, today) is None and discipline.get_daily_grade(114, today) is None
     assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).already_closed
+    assert any(b.callback_data == "bos:today" for m in sent if getattr(m, "reply_markup", None) is not None
+               and hasattr(m.reply_markup, "inline_keyboard") for row in m.reply_markup.inline_keyboard for b in row)
+    again = await send(main.dp, bot, SUPERVISOR, text="Vaqt yetmadi, ertaga tekshiraman")  # takroriy izoh
+    assert "nazorati yopildi" not in _joined(again)  # ikkinchi marta yopilmaydi, hisobot qaytarilmaydi
 
 
 async def test_close_succeeds_after_all_required_graded_and_session_closed(bot_dp):
@@ -174,9 +181,11 @@ async def test_each_branch_session_is_separate(bot_dp):
     _employee(111, BRANCH_A, "Pending")
     _employee(222, BRANCH_B, "Botir")
     today = _today()
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_B, today).closed
+    note = "Vaqt yetmadi, ertaga tekshiraman"  # qat'iy yopish: baholanmagan qolsa izoh majburiy
+    assert not nazoratchi_day.close_session(SUPERVISOR, BRANCH_B, today).closed  # izohsiz yopilmaydi
+    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_B, today, note=note).closed
     assert discipline.get_closure(SUPERVISOR, today) is None
-    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today).closed
+    assert nazoratchi_day.close_session(SUPERVISOR, BRANCH_A, today, note=note).closed
     assert discipline.get_closure(SUPERVISOR, today) is not None
     assert discipline.get_daily_grade(111, today) is None
 

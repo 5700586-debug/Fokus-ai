@@ -527,6 +527,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
         permissions.ACTION_SUBMIT_INVENTORY_SNAPSHOT,
     ),
     ("savdo_boshligi", "/mealplan — Ovqat rejasini kiritish", permissions.ACTION_ENTER_MEAL_PLAN),
+    ("savdo_boshligi", "/qoshimchaish — Qo'shimcha ish yulduzi", permissions.ACTION_GIVE_EXTRA_STARS),
     ("haydovchi", "/drivercheck — Kunlik mashina/servis tekshiruvi", permissions.ACTION_DRIVER_DAILY_CHECK),
     ("taminotchi", "/marketlog — Bozor kuzatuvi qo'shish", permissions.ACTION_LOG_MARKET_OBSERVATION),
     ("taminotchi", "/xarid — Bugungi bozorlikni xarid qilish", permissions.ACTION_RECORD_SUPPLIER_PURCHASE),

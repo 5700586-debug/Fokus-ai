@@ -6,6 +6,7 @@ Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar �
 
 ## Maosh: 3-tarif mukofoti, yulduz bonusi, "Xodim maoshi" — Draft (2026-10-31)
 - Muhammadiy qarori: 3-tarif mukofoti (300 000 so'm) faqat 3-tarifdagi xodimga, oy yulduz mezonlari bilan intizomli yakunlansa; oylik yulduz bonusi barcha tariflarga (ikkalasi alohida). payroll_view ikkalasini ham faqat O'QIYDI: tarif mukofoti har safar star_month mezonidan hisoblanadi (yozilmaydi), yulduz bonusi Founder tasdiqlagan bonus_history'dan.
+- Qo'shimcha ish yulduzini filial rahbari (= savdo bo'limi boshlig'i, ACTION_GIVE_EXTRA_STARS) faqat o'z filiali xodimlariga beradi (menyuda /qoshimchaish); Founder — hammaga.
 - `payroll_bot.py`: 📊 Hisobotlar → 💰 Xodim maoshi — xodimni ro'yxatdan tanlash, joriy/o'tgan oy to'liq tarkibi (fiks, ish bonusi, vaqt bonusi, minus, qo'shimcha ish, tarif, yulduz, JAMI).
 
 ## Maosh hisobi: vaqt bonusi, fiks chegarasi, qo'shimcha ish yulduzi, Jami — Draft (2026-10-30)

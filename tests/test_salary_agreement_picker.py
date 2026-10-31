@@ -603,3 +603,34 @@ async def test_issue_and_alert_messages_have_no_version_wording(bot_dp):
     stale = await _cb(main, bot, f"sagr:ok:{first}", user=A)
     stale2 = await _cb(main, bot, f"sagr:no:{first}", user=A)
     assert "ersiya" not in _text(stale).lower() + _text(stale2).lower() and "Yangi kelishuvni" in _text(stale)
+
+
+async def test_after_save_founder_can_go_to_next_employee_or_menu(bot_dp):
+    """Muhammadiy (2026-11-01): saqlangandan keyin davom etish tugmasi bo'lmagan — endi ➡️ Keyingi xodim / 🏠 Menyu."""
+    main, bot = bot_dp
+    _employee(A, "Karimov", "Bobur")
+    _employee(B, "Aliyev", "Vali")
+    await send(main.dp, bot, FOUNDER_ID, text="/kelishuv")
+    await _cb(main, bot, f"sagr:new:{A}")
+    card = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    saved = await _cb(main, bot, next(d for d in _buttons(card) if d.startswith("sagr:save:")))
+    founder_card = [m for m in saved if getattr(m, "chat_id", None) == FOUNDER_ID]  # xodimga ketgan xabar emas
+    assert "Saqlandi" in _text(founder_card) and {"sagr:more", "sagr:home"} <= set(_buttons(founder_card))
+
+    nxt = await _cb(main, bot, "sagr:more")
+    assert any(d == f"sagr:new:{B}" for d in _buttons(nxt))  # ro'yxat qayta ochildi
+    from aiogram.methods import EditMessageText
+
+    assert not any(isinstance(m, EditMessageText) for m in nxt)  # saqlangan karta joyida qoladi (yangi xabar)
+
+    assert len(sa.list_history(A)) == 1
+    await _cb(main, bot, "sagr:more")  # eski kartadagi tugma qayta bosildi — takror saqlanmaydi
+    assert len(sa.list_history(A)) == 1
+
+    await _cb(main, bot, f"sagr:new:{B}")  # boshlangan kelishuv
+    await _cb(main, bot, "sagr:more")  # eski kartadagi tugma uni buzmaydi
+    card_b = await send(main.dp, bot, FOUNDER_ID, text=TERMS)
+    assert "Aliyev" in _text(card_b) and any(d.startswith("sagr:save:") for d in _buttons(card_b))
+
+    outsider = await _cb(main, bot, "sagr:more", user=A)  # Founder emas — ro'yxat ochilmaydi
+    assert not any(d.startswith("sagr:new:") for d in _buttons(outsider))

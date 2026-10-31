@@ -49,7 +49,7 @@ import secrets
 import company_time
 import discipline_bot
 import employees
-from config import ENVIRONMENT, FOUNDER_ID, RECRUITING_BRANCH_NAMES
+from config import ENVIRONMENT, FOUNDER_ID, SUPERVISION_BRANCH_NAMES as RECRUITING_BRANCH_NAMES
 from roles import get_role, role_name
 from services import attendance as attendance_service
 from repositories import discipline as discipline_repo
@@ -1049,7 +1049,9 @@ def register(dp: Dispatcher, openai_client) -> None:
         if message.from_user is None or message.from_user.id != FOUNDER_ID or ENVIRONMENT != "test":
             return
 
-        branch = RECRUITING_BRANCH_NAMES[0] if RECRUITING_BRANCH_NAMES else "Filial-1"
+        from config import RECRUITING_BRANCH_NAMES as _RECRUITING
+
+        branch = _RECRUITING[0] if _RECRUITING else "Filial-1"
         employees.submit_profile(
             message.from_user.id,
             {"familiya": "E2E", "ism": "Sinov", "branch": branch, "role_key": "kassir", "contacts": []},
@@ -1102,7 +1104,7 @@ def register(dp: Dispatcher, openai_client) -> None:
 
     def _card_keyboard(profile: dict, actor_id: int, *, show_time_bonus_button: bool) -> InlineKeyboardMarkup:
         return _employee_card_keyboard(
-            profile.get("branch"), profile["user_id"], show_time_bonus_button=show_time_bonus_button,
+            employees.supervision_branch(profile), profile["user_id"], show_time_bonus_button=show_time_bonus_button,
             work_date=nazoratchi_day.active_day(actor_id, company_time.now()).work_date,
         )
 
@@ -1121,7 +1123,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         show_button = (time_bonus is None) if show_time_bonus_button is None else show_time_bonus_button
         text = _simple_employee_card_text(profile, work_date, time_bonus)
         keyboard = _employee_card_keyboard(
-            profile.get("branch"), profile["user_id"], show_time_bonus_button=show_button, work_date=work_date
+            employees.supervision_branch(profile), profile["user_id"], show_time_bonus_button=show_button, work_date=work_date
         )
         return text, keyboard
 
@@ -1202,7 +1204,7 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer(_STALE_CARD_ANSWER, show_alert=True)
             return
         if any(
-            item["branch"] == profile.get("branch") and item["status"] == "closed"
+            item["branch"] == employees.supervision_branch(profile) and item["status"] == "closed"
             for item in snapshot["sessions"]
             if item["session_date"] == work_date
         ):
@@ -1212,7 +1214,7 @@ def register(dp: Dispatcher, openai_client) -> None:
         # Birinchi muvaffaqiyatli baho shu nazoratchi+filial+ish kuni sessiyasini (bitta tranzaksiyada) ochadi: shunda
         # "Filiallar -> xodim" orqali baholangan kun yarim tundan keyin ham yakunlanmagan kun sifatida davom etadi.
         # Filial aniqlanmasa taxminiy filial bilan sessiya yozilmaydi.
-        branch = profile.get("branch")
+        branch = employees.supervision_branch(profile)
         result = discipline.record_daily_grade(
             user_id, callback.from_user.id, work_date, grade_key,
             session_branch=branch if _branch_index(branch or "") is not None else None,

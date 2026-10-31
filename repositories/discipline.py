@@ -4,7 +4,12 @@ nazoratchi audit) uchun xom SQL qatlami. Biznes logika ``services/discipline.py`
 
 from datetime import datetime, timezone
 
+from config import SUPERVISION_GENERAL_BRANCH
 from db import get_connection
+
+# Filialga biriktirilmagan xodim nazoratda virtual "Umumiy (filialsiz)" bo'limida (nom tirnoqsiz — SQL literal xavfsiz).
+_EMP_BRANCH = f"COALESCE(NULLIF(branch, ''), '{SUPERVISION_GENERAL_BRANCH}')"
+_E_BRANCH = f"COALESCE(NULLIF(e.branch, ''), '{SUPERVISION_GENERAL_BRANCH}')"
 
 
 def _now() -> str:
@@ -1079,10 +1084,10 @@ def get_day_review_snapshot(supervisor_id: int, up_to_date: str, branches: list[
             "FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND session_date <= ? "
             "UNION ALL SELECT 'closure', closure_date, NULL, NULL FROM daily_closures "
             "WHERE supervisor_id = ? AND closure_date <= ? "
-            "UNION ALL SELECT DISTINCT 'branch', NULL, branch, NULL FROM employees "
+            f"UNION ALL SELECT DISTINCT 'branch', NULL, {_EMP_BRANCH}, NULL FROM employees "
             "WHERE status = 'approved' AND user_id != ? "
             "AND (role_key IS NULL OR role_key NOT IN ('founder', 'nazoratchi')) "
-            f"AND branch IN ({placeholders})",
+            f"AND {_EMP_BRANCH} IN ({placeholders})",
             (supervisor_id, up_to_date, supervisor_id, up_to_date, supervisor_id, *branches),
         ).fetchall()
     finally:
@@ -1199,7 +1204,7 @@ def close_expired_review_days(before_day: str, *, expected_version: str | None =
             counts = conn.execute(
                 "SELECT COUNT(*) AS total, COUNT(g.employee_id) AS evaluated FROM employees e "
                 "LEFT JOIN daily_evaluations g ON g.employee_id = e.user_id AND g.eval_date = ? "
-                "WHERE e.status = 'approved' AND e.branch = ? AND e.user_id != ? "
+                f"WHERE e.status = 'approved' AND {_E_BRANCH} = ? AND e.user_id != ? "
                 "AND (e.role_key IS NULL OR e.role_key NOT IN ('founder', 'nazoratchi'))",
                 (item["session_date"], item["branch"], item["supervisor_id"]),
             ).fetchone()
@@ -1214,7 +1219,7 @@ def close_expired_review_days(before_day: str, *, expected_version: str | None =
                 "SELECT COUNT(*) AS total, COUNT(g.employee_id) AS evaluated FROM employees e "
                 "LEFT JOIN daily_evaluations g ON g.employee_id = e.user_id AND g.eval_date = ? "
                 "WHERE e.status = 'approved' AND e.user_id != ? "
-                "AND e.branch IN (SELECT branch FROM nazoratchi_branch_sessions "
+                f"AND {_E_BRANCH} IN (SELECT branch FROM nazoratchi_branch_sessions "
                 "WHERE supervisor_id = ? AND session_date = ?) "
                 "AND (e.role_key IS NULL OR e.role_key NOT IN ('founder', 'nazoratchi'))",
                 (day, supervisor_id, supervisor_id, day),

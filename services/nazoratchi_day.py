@@ -43,9 +43,12 @@ def full_name(profile: dict) -> str:
 
 def branch_employees(branch: str, exclude_user_id: int | None = None) -> list[dict]:
     """Filialning tasdiqlangan oddiy xodimlari (nazoratchi/Founder va so'rovchining o'zi chiqarilgan)."""
+    from roles import get_role
+
     return [
         profile for profile in employees.list_approved_by_branch(branch)
         if profile.get("role_key") not in _MANAGEMENT_ROLE_KEYS and profile["user_id"] != exclude_user_id
+        and get_role(profile["user_id"]) not in _MANAGEMENT_ROLE_KEYS
     ]
 
 
@@ -99,7 +102,8 @@ def branch_statuses(branch: str, review_date: str, exclude_user_id: int | None =
 def coverage_branches(supervisor_id: int) -> list[str]:
     """Kun yopilishi uchun tekshirilishi SHART filiallar: mavjud filial ro'yxati (``RECRUITING_BRANCH_NAMES``) dan
     tekshiriladigan xodimi bor filiallar. Xodimi yo'q filial tekshiruv talab qilmaydi; tekshirilmagan filial hech qachon
-    yopilgan deb TAXMIN QILINMAYDI."""
+    yopilgan deb TAXMIN QILINMAYDI. Virtual "Umumiy (filialsiz)" bo'lim MAJBURIY EMAS (ochilsa — oddiy filial kabi
+    yopiladi; ochilmasa kunni yopishga to'siq emas va minus yo'q)."""
     return [branch for branch in RECRUITING_BRANCH_NAMES if branch_employees(branch, supervisor_id)]
 
 

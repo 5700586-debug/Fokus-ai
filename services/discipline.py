@@ -221,7 +221,7 @@ class GradePreparation:
 
 def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: str, grade_key: str) -> GradePreparation:
     """Shared BOS grade checks and save; handler owns only Telegram responses."""
-    from config import RECRUITING_BRANCH_NAMES
+    from config import SUPERVISION_BRANCH_NAMES as RECRUITING_BRANCH_NAMES
     from services import nazoratchi_day
 
     now = company_time.now()
@@ -234,7 +234,7 @@ def prepare_and_record_grade(employee_id: int, supervisor_id: int, eval_date: st
     if profile is None:
         log_grade_event(employee_id, eval_date, "bos_guard", "unknown_employee")
         return GradePreparation(None, grade_notice_reply(NOTICE_UNKNOWN_EMPLOYEE))
-    branch = profile.get("branch")
+    branch = employees.supervision_branch(profile)
     sessions = snapshot["sessions"]
     if any(s["branch"] == branch and s["session_date"] == eval_date and s["status"] == "closed" for s in sessions):
         log_grade_event(employee_id, eval_date, "bos_guard", "closed_branch")

@@ -150,6 +150,7 @@ def week_payload(user_id: int, week_start=None) -> dict:
                 cells.append({
                     "date": d,
                     "status": shift["status"] if shift else None,
+                    "inherited": bool(shift and shift.get("default_id")),
                     "start": shift.get("planned_start") if shift else None,
                     "end": shift.get("planned_end") if shift else None,
                     "version": versions.get((emp, d), -(shift["default_id"]) if shift and shift.get("default_id") else 0),

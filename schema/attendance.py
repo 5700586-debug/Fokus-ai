@@ -202,4 +202,22 @@ CREATE TABLE IF NOT EXISTS work_time_entry_revisions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_work_time_entries_date ON work_time_entries (work_date);
+
+-- Filial rahbari (savdo_boshligi) kunlik jamoa natijasi — filial nazorati YOPILGANDA muhrlanadi (keyingi tuzatishlar
+-- o'zgartirmaydi). time_points: 2/1/0, work_points: jamoa o'rtacha bahosi (bir kasr). Ma'lumot to'liq bo'lmasa
+-- shu qism 0 va ``incomplete`` sababi yoziladi. ``services/leader_bonus.py``.
+CREATE TABLE IF NOT EXISTS leader_daily_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    leader_id INTEGER NOT NULL,
+    branch TEXT NOT NULL,
+    work_date TEXT NOT NULL,
+    time_points INTEGER NOT NULL,
+    work_points REAL NOT NULL,
+    on_time INTEGER NOT NULL,
+    planned INTEGER NOT NULL,
+    graded INTEGER NOT NULL,
+    details TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(leader_id, branch, work_date)
+);
 """

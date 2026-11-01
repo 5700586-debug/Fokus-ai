@@ -142,3 +142,61 @@ def test_legacy_paths_respect_founder_toggle_and_star_lock():
         attendance.set_scheduled_work_shift(903, "2026-11-05", "09:00", "19:00", "test", created_by=901)
     assert sql("SELECT planned_start FROM employee_scheduled_shifts WHERE employee_id=903 AND shift_date='2026-11-05'") == [
         {"planned_start": "08:00"}]
+
+
+
+def test_one_query_resolves_versions_and_overrides_in_both_read_paths():
+    """Bulk, month-hours, and /mystars must agree without extra SQL reads."""
+    seed()
+    a = ps.set_default(903, "2026-11-04", "08:00", "18:00", 902, 0)
+    ps.set_default(903, "2026-11-08", "09:00", "19:00", 902, a["version"])
+    sql(
+        "INSERT INTO employee_scheduled_shifts (employee_id, shift_date, planned_start, "
+        "planned_end, status, source, created_at) VALUES (903, '2026-11-06', NULL, "
+        "NULL, 'off', 'test', 'x')"
+    )
+    from repositories import attendance as attendance_repo
+
+    class CountQueries:
+        def __init__(self, conn):
+            self.conn = conn
+            self.calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.calls += 1
+            return self.conn.execute(*args, **kwargs)
+
+    conn = get_connection()
+    try:
+        counted = CountQueries(conn)
+        bulk = ps.resolved_range(counted, 903, "2026-11-03", "2026-11-10")
+        assert counted.calls == 1
+        counted.calls = 0
+        from_repo = attendance_repo.get_schedule_for_range(
+            903, "2026-11-03", "2026-11-11", conn=counted
+        )
+        assert counted.calls == 1
+        counted.calls = 0
+        dashboard = attendance_repo.dashboard_records(
+            903, "2026-11-03", "2026-11-11", [], counted
+        )
+        assert counted.calls == 1
+    finally:
+        conn.close()
+
+    expected = {
+        "2026-11-04": ("work", "08:00"),
+        "2026-11-05": ("work", "08:00"),
+        "2026-11-06": ("off", None),
+        "2026-11-07": ("work", "08:00"),
+        "2026-11-08": ("work", "09:00"),
+        "2026-11-09": ("work", "09:00"),
+        "2026-11-10": ("work", "09:00"),
+    }
+    def concise(shifts):
+        return {day: (item["status"], item["planned_start"])
+                for day, item in shifts.items()}
+
+    assert concise(bulk) == expected
+    assert concise({x["shift_date"]: x for x in from_repo}) == expected
+    assert concise({x["shift_date"]: x for x in dashboard["shifts"]}) == expected

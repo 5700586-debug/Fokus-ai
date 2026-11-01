@@ -1,12 +1,19 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-11-01, manba: main HEAD `a0a2ffb` (+ PR #92 branch feat/my-salary)
+Tekshirilgan: 2026-11-01, manba: main HEAD `d118277` (+ PR3 branch feat/grafik-ui)
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
 ## Holat yangilanishi (2026-11-01, Sodiq tekshirgan)
 - LIVE (main'da, Render'da, Traceback yo'q): PR #87 oylik yulduz (f9a71a0), PR #88 vaqt bonusi/fiks chegarasi/qo'shimcha ish yulduzi (701e782), PR #89 3-tarif mukofoti + yulduz bonusi Jamiga + "💰 Xodim maoshi" + filial rahbari faqat o'z filialiga (1b6d9fd), PR #90 "Umumiy (filialsiz)" bo'lim (696f535), PR #91 📱 Baholash ekrani (a0a2ffb). Quyidagi "Draft" belgili maosh/yulduz/hisobot bo'limlari — merge qilingan.
 - Test asosi: sqlite 0 FAIL; postgres 4 eski FAIL (test_handler_metrics ×2, test_mystars_roundtrips ×2 — SQLite'ga xos instrumentatsiya).
+
+## Aniq ish vaqti, Keldi/Ketdi, Grafik ekrani (2026-11-01)
+- LIVE: PR #95 aniq ish vaqti yadrosi (874c0f7), PR #96 Baholash ekranida Keldi/Ketdi (d118277). Render LIVE, Traceback yo'q. Testlar: sqlite 0 FAIL; postgres faqat 4 eski FAIL.
+- `services/work_time.py`: 2026-11-01 dan ishlangan vaqt va vaqt bonusi FAQAT `work_time_entries`dan (oktyabr — eski attendance). Bonus = kelish < grafik boshlanishi; daqiqa har kuni grafik oynasiga kesiladi; tun smenasi; grafik/ketish yo'q kun taxmin qilinmaydi (oylikda "hisoblanmadi", yulduzda "kutilmoqda"). Bonus faqat `source='time_entry'`ga tegadi; noyabrdan qo'lda "vaqtida keldi" tugmasi yo'q. Grafik o'zgarsa bonus qayta hisoblanadi.
+- Mini App `/api/baholash/time`: bo'sh maydon o'zgarmaydi; versiya (revisions MAX id) — eskirgan ekran 409; yopilgan kun/filial — tranzaksiya ichida rad.
+- PR3 (feat/grafik-ui): 🗓 Grafik ekrani `/app/grafik`, `/api/grafik/week|save|history`, buyruq `/grafikekran` (menyuda nazoratchi va 📦 Ombor). Nazoratchi — hamma filial, boshlangan/o'tgan smenaga sabab majburiy; filial rahbari (`ACTION_EDIT_BRANCH_SCHEDULE`, eski Telegram grafik buyruqlarini OCHMAYDI) — faqat o'z filiali va boshlanmagan smenalar, kelish yozilgan kunga tegolmaydi; yulduz qarori chiqqan oy (`star_history`) qulflangan (vaqtinchalik — oylik tasdiq jadvali yo'q); bitta tranzaksiya; xodimga bitta xabar.
+- Keyingi: filial rahbari bonusi (xodimlari vaqt bonusiga bog'liq) — Muhammadiy chegarani tanlaydi; ChatGPT 2 tur tanqid; keyin Baholash Mini App dizayni (Face ID g'oyalari).
 
 ## 💰 Oyligim — xodim o'z maoshining to'liq tarkibi — PR #92 (2026-11-01)
 - `/mymaosh` (💰 Oyligim) endi `payroll_bot.salary_text` bilan Founder ekrani bilan bir xil tarkib: fiks, ish bonusi, vaqt bonusi, minus, qo'shimcha ish, 3-tarif, yulduz bonusi, JAMI. Faqat `from_user.id`, faqat shaxsiy chat; "📅 O'tgan oy / Joriy oy" (`mypay:0|1`, id yo'q).

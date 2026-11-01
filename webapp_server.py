@@ -3,6 +3,7 @@
 GET  /app/baholash        — bitta statik sahifa (inline JS/CSS).
 POST /api/baholash/day    — {"initData"} -> faol ish kuni, filiallar, xodimlar holati.
 POST /api/baholash/grade  — {"initData", "employee_id", "grade"} -> ``services.grading_webapp.grade``.
+POST /api/baholash/time   — {"initData", "employee_id", "arrival", "departure", "expected_version"} -> ``save_time``.
 
 Foydalanuvchi faqat imzolangan initData'dan aniqlanadi; CORS sarlavhalari yo'q; javob keshlanmaydi.
 """
@@ -79,6 +80,14 @@ def add_routes(app: web.Application, *, bot, bot_token: str, fsm_storage=None) -
 
         return await _handle(request, action)
 
+    async def save_time(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return grading_webapp.save_time(user_id, body.get("employee_id"), body.get("arrival"), body.get("departure"),
+                                            body.get("expected_version"))
+
+        return await _handle(request, action)
+
     app.router.add_get(PAGE_PATH, page)
     app.router.add_post("/api/baholash/day", day)
     app.router.add_post("/api/baholash/grade", grade)
+    app.router.add_post("/api/baholash/time", save_time)

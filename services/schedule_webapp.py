@@ -133,7 +133,7 @@ def week_payload(user_id: int, week_start=None) -> dict:
     finally:
         conn.close()
     payload = {
-        "week_start": days[0], "today": now.date().isoformat(), "full": full, "past_edit_enabled": past_enabled,
+        "week_start": days[0], "today": now.date().isoformat(), "full": full, "past_edit_enabled": past_enabled, "founder": permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES),
         "days": [{"date": d, "label": WEEKDAYS[i]} for i, d in enumerate(days)],
         "prev_week": (monday - timedelta(days=7)).isoformat(), "next_week": (monday + timedelta(days=7)).isoformat(),
         "branches": [],

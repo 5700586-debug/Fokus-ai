@@ -24,6 +24,7 @@ from pathlib import Path
 from db import get_connection
 from repositories import performance as performance_repo
 from services import rules as rules_service
+from services import work_time
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +109,22 @@ def evaluate(year_month: str) -> list[Decision]:
                                "WHERE grant_date >= ? AND grant_date <= ?", (start, end)):
             time_days.setdefault(row["employee_id"], set()).add(row["grant_date"])
         arrivals: dict[int, set] = {}
-        for row in _rows(conn, "SELECT employee_id, event_time FROM attendance_events WHERE event_type = 'check_in' "
-                               "AND event_time >= ? AND event_time < ?", (start, next_day)):
-            arrivals.setdefault(row["employee_id"], set()).add(str(row["event_time"])[:10])
+        exact = start >= work_time.ENTRIES_START  # 2026-11 dan: aniq kelish/ketish yagona manba
+        complete_days: dict[int, set] = {}
+        if exact:
+            shifts = {(row["employee_id"], row["shift_date"]): row for row in _rows(
+                conn, "SELECT * FROM employee_scheduled_shifts WHERE shift_date >= ? AND shift_date <= ?", (start, end))}
+            for row in _rows(conn, "SELECT employee_id, work_date, arrival, departure FROM work_time_entries "
+                                   "WHERE work_date >= ? AND work_date <= ?", (start, end)):
+                arrivals.setdefault(row["employee_id"], set()).add(row["work_date"])
+                result = work_time.compute_day(row["work_date"], shifts.get((row["employee_id"], row["work_date"])),
+                                               row["arrival"], row["departure"])
+                if result.status == work_time.STATUS_OK:
+                    complete_days.setdefault(row["employee_id"], set()).add(row["work_date"])
+        else:
+            for row in _rows(conn, "SELECT employee_id, event_time FROM attendance_events WHERE event_type = 'check_in' "
+                                   "AND event_time >= ? AND event_time < ?", (start, next_day)):
+                arrivals.setdefault(row["employee_id"], set()).add(str(row["event_time"])[:10])
         reasons: dict[int, dict] = {}
         for row in _rows(conn, "SELECT employee_id, event_date, reason_status FROM attendance_reasons "
                                "WHERE event_date >= ? AND event_date <= ?", (start, end)):
@@ -139,6 +153,13 @@ def evaluate(year_month: str) -> list[Decision]:
         if not worked and not penalties.get(uid):
             continue  # bu oy umuman ishlamagan/yangi — yulduz o'zgarmaydi
         own_penalties = penalties.get(uid, [])
+        incomplete = len(worked - complete_days.get(uid, set())) if exact else 0
+        if incomplete:
+            # Grafik / kelish-ketish to'liq bo'lmagan kun — shart "bajarildi" deb taxmin qilinmaydi (xodim ham yutqazmaydi).
+            decision.pending = True
+            decision.reasons.append(f"ma'lumot to'liq emas: {incomplete} kunda grafik yoki kelish/ketish vaqti yo'q")
+            decisions.append(decision)
+            continue
         if any(p["appeal_status"] == "pending" for p in own_penalties):
             decision.pending = True
             decision.reasons.append("e'tiroz hal bo'lmagan — kutilmoqda")
@@ -206,8 +227,8 @@ def preview_text(year_month: str, decisions: list[Decision]) -> str:
         lines.append("\n⬇️ −1 yulduz:")
         lines += [f"• {d.name}: {d.current_stars} → {d.new_stars} ⭐ ({'; '.join(d.reasons)})" for d in down]
     if waiting:
-        lines.append("\n⏳ Kutilmoqda (e'tiroz):")
-        lines += [f"• {d.name}" for d in waiting]
+        lines.append("\n⏳ Kutilmoqda:")
+        lines += [f"• {d.name} ({'; '.join(d.reasons)})" for d in waiting]
     if not decisions:
         lines.append("Yulduz hisobi noyabr oyidan boshlanadi." if year_month < FIRST_MONTH
                      else "Bu oy hisoblanadigan xodim yo'q.")

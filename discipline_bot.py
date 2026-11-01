@@ -1996,7 +1996,7 @@ async def _apply_stars(bot, year_month: str) -> str:
     waiting = sum(1 for d in decisions if d.pending)
     result = f"✅ {label}: {len(applied)} xodimning yulduzi yozildi."
     if waiting:
-        result += f"\n⏳ {waiting} xodim e'tiroz sabab kutmoqda — hal bo'lgach 📊 Hisobotlar → ⭐ Yulduzlar orqali qayta tasdiqlang."
+        result += f"\n⏳ {waiting} xodim kutmoqda (e'tiroz yoki to'liq bo'lmagan ma'lumot) — hal bo'lgach 📊 Hisobotlar → ⭐ Yulduzlar orqali qayta tasdiqlang."
     if not group_id:
         result += "\nℹ️ Guruh ulanmagan — jadval faqat sizga yuborildi."
     return result

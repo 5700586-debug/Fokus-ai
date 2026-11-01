@@ -79,10 +79,17 @@ CREATE TABLE IF NOT EXISTS employee_schedule_defaults (
     planned_end TEXT NOT NULL,
     created_by INTEGER NOT NULL,
     created_at TEXT NOT NULL,
-    reason TEXT
+    reason TEXT,
+    UNIQUE(employee_id, effective_from)
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_defaults_employee_date
     ON employee_schedule_defaults (employee_id, effective_from);
+
+-- Atomik optimistik versiya: parallel ikki yozuvchi bir paytda saqlay olmaydi.
+CREATE TABLE IF NOT EXISTS employee_schedule_default_versions (
+    employee_id INTEGER PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 0
+);
 
 -- Founder nazoratchining ESKI sana tahriri huquqini Mini App'dan boshqaradi.
 -- Qator yo'q bo'lsa default=1 (ruxsat bor). Tarix alohida append-only.

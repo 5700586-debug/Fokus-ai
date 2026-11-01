@@ -68,6 +68,38 @@ CREATE TABLE IF NOT EXISTS employee_schedule_revisions (
     is_late_change INTEGER NOT NULL DEFAULT 0
 );
 
+-- Doimiy smena: sanadan boshlab keyingi versiyagacha amal qiladi.
+-- Har o'zgarish yangi qator; o'tgan sanalardagi oldingi versiyalar SAQLANADI.
+-- Alohida kunlik shift yozuvi doim doimiy smenadan ustun.
+CREATE TABLE IF NOT EXISTS employee_schedule_defaults (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    effective_from TEXT NOT NULL,
+    planned_start TEXT NOT NULL,
+    planned_end TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_defaults_employee_date
+    ON employee_schedule_defaults (employee_id, effective_from);
+
+-- Founder nazoratchining ESKI sana tahriri huquqini Mini App'dan boshqaradi.
+-- Qator yo'q bo'lsa default=1 (ruxsat bor). Tarix alohida append-only.
+CREATE TABLE IF NOT EXISTS employee_schedule_edit_settings (
+    id INTEGER PRIMARY KEY,
+    allow_nazoratchi_past INTEGER NOT NULL DEFAULT 1,
+    changed_by INTEGER,
+    changed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS employee_schedule_edit_settings_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    old_enabled INTEGER NOT NULL,
+    new_enabled INTEGER NOT NULL,
+    changed_by INTEGER NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
 -- Xodimning grafik o'zgartirish SO'ROVI -- alohida schedule tizimi
 -- EMAS: tasdiqlangandan keyin natija baribir ``employee_scheduled_shifts``
 -- + ``employee_schedule_revisions``ga yoziladi (qarang

@@ -148,7 +148,7 @@
         var cls = "c" + (c.date === d.today ? " today" : "") + (s === "off" ? " off" : "") + (!s ? " none" : "") +
           (dr ? " dirty" : "") + (c.locked ? " lock" : "") + (c.late ? " late" : "");
         return '<button class="' + cls + '" data-e="' + e.id + '" data-d="' + c.date + '"><span class="dl">' +
-          d.days[i].label + " " + c.date.slice(8, 10) + "</span>" + cellText(s, esc(a), esc(bb)) + "</button>";
+          d.days[i].label + " " + c.date.slice(8, 10) + (c.inherited && !dr ? " ♾" : "") + "</span>" + cellText(s, esc(a), esc(bb)) + "</button>";
       }).join("") + "</div></div>";
     }).join("");
     html += '<div class="note">Belgilar: <b>—</b> grafik yo\'q · sariq — saqlanmagan · xira — o\'zgartirib bo\'lmaydi' +
@@ -330,7 +330,7 @@
       if (!j.ok) { state.note = { kind:"err", text:j.error || "Ochilmadi." }; render(); return; }
       var b = j.branches.find(function (x) { return x.name === state.branch; }) || j.branches[0];
       if (!b || !b.employees.length) return;
-      var p = '<h3>♾ Doimiy grafik</h3><div class="sub">Bir marta belgilang. Faqat belgilangan sanadan keyin ishlaydi; alohida kunlik «Dam» va tahrirlar saqlanadi.</div>' +
+      var p = '<h3>♾ Doimiy grafik</h3><div class="sub">Bir marta belgilang. Oldingi va kunlik alohida yozilgan grafiklar saqlanadi. ♾ belgisi doimiy grafikdan olingan kunni bildiradi.</div>' +
         '<div><label>Xodim</label><select id="dp-employee" style="width:100%;padding:10px">' +
         b.employees.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join('') +
         '</select></div><div id="dp-current" class="sub"></div>' +

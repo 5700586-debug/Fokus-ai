@@ -124,3 +124,139 @@ async def test_founder_button_sends_report_and_others_are_denied(bot_dp, monkeyp
     assert any(isinstance(m, SendPhoto) and m.chat_id == FOUNDER_ID for m in sent)
     denied = await send_callback(main.dp, bot, 999999, data="frep:weekly", target_chat_id=999999)
     assert not any(isinstance(m, SendPhoto) for m in denied)
+
+
+
+async def test_founder_report_ai_and_image_run_concurrently(monkeypatch, capsys):
+    """AI must not block the start of Pillow; unchanged PNG and caption reach Telegram once."""
+    import asyncio
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    report = SimpleNamespace(totals=SimpleNamespace(graded=1, penalty_count=0))
+    image_started = threading.Event()
+    private_text = "CONFIDENTIAL_TEST_CAPTION"
+    private_id = 1289912389
+    expected_png = b"PNG_FIXED_BYTES"
+
+    async def fake_ai(_client, _report):
+        # Sequential AI -> image code would fail this assertion.
+        started = await asyncio.to_thread(image_started.wait, 0.8)
+        assert started, "Image render did not begin while AI was still running"
+        return private_text
+
+    def fake_render(_report):
+        image_started.set()
+        time.sleep(0.025)
+        return expected_png
+
+    class Bot:
+        photos = []
+
+        async def send_photo(self, chat_id, photo, caption=None):
+            self.photos.append((chat_id, photo.data, caption))
+
+        async def send_message(self, *a, **kw):
+            raise AssertionError("Unexpected extra message")
+
+    monkeypatch.setattr(period_report, "collect", lambda _period: report)
+    monkeypatch.setattr(period_report, "ai_summary", fake_ai)
+    monkeypatch.setattr(period_report, "render_dashboard", fake_render)
+    monkeypatch.setattr(period_report, "_AI_TIMEOUT_SECONDS", 1.5)
+    bot = Bot()
+    await period_report.send_report(bot, object(), "month", private_id, date(2026, 11, 1))
+    log = capsys.readouterr().out
+    assert bot.photos == [(private_id, expected_png, private_text)]
+    assert log.count("FOUNDER_REPORT_TIMING ") == 1
+    assert private_text not in log and str(private_id) not in log
+    assert "ai_status=returned_or_fallback" in log and "image_status=ok outcome=ok" in log
+    assert all(f"{part}_ms=" in log for part in ("collect", "ai", "render", "telegram", "total"))
+
+
+async def test_founder_report_slow_ai_is_bounded_without_retries(monkeypatch, capsys):
+    """Slow API never delays sending PNG after the report-specific timeout."""
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    report = SimpleNamespace(totals=SimpleNamespace(graded=1, penalty_count=0))
+    private_id = 991238128
+    class SlowClient:
+        def __init__(self):
+            self.responses = self
+            self.options = []
+            self.cancelled = False
+
+        def with_options(self, **kwargs):
+            self.options.append(kwargs)
+            return self
+
+        async def create(self, **kwargs):
+            try:
+                await asyncio.sleep(2.0)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    class Bot:
+        photos = []
+
+        async def send_photo(self, chat_id, photo, caption=None):
+            self.photos.append((chat_id, photo.data, caption))
+
+        async def send_message(self, *a, **kw):
+            raise AssertionError("Expected PNG+caption")
+
+    client = SlowClient()
+    monkeypatch.setattr(period_report, "collect", lambda _period: report)
+    monkeypatch.setattr(period_report, "render_dashboard", lambda _report: b"ORIGINAL_PNG")
+    monkeypatch.setattr(period_report, "fallback_summary", lambda _report: "RULE_BASED_FALLBACK")
+    monkeypatch.setattr(period_report, "_AI_TIMEOUT_SECONDS", 0.05)
+    bot = Bot()
+    t = time.perf_counter()
+    await period_report.send_report(bot, client, "week", private_id, date(2026, 10, 26))
+    elapsed = time.perf_counter() - t
+    log = capsys.readouterr().out
+    assert elapsed < 1.0, "API must not delay report for seconds"
+    assert client.options == [{"timeout": 0.05, "max_retries": 0}]
+    assert client.cancelled
+    assert bot.photos == [(private_id, b"ORIGINAL_PNG", "RULE_BASED_FALLBACK")]
+    assert "ai_status=timeout_fallback" in log and "outcome=ok" in log
+    assert str(private_id) not in log and "RULE_BASED_FALLBACK" not in log
+
+
+async def test_founder_report_image_failure_keeps_fallback_text(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    report = SimpleNamespace(totals=SimpleNamespace(graded=0, penalty_count=0))
+    def broken_image(_report):
+        raise ValueError("SECRET_IMAGE_DETAILS")
+
+    class Bot:
+        messages = []
+
+        async def send_message(self, chat_id, message):
+            self.messages.append((chat_id, message))
+
+    monkeypatch.setattr(period_report, "collect", lambda _period: report)
+    monkeypatch.setattr(period_report, "render_dashboard", broken_image)
+    monkeypatch.setattr(period_report, "fallback_summary", lambda _report: "SUMMARIZED_TEXT")
+    bot = Bot()
+    await period_report.send_report(bot, None, "week", 888222111, date(2026, 10, 26))
+    output = capsys.readouterr().out
+    assert bot.messages == [(888222111, "SUMMARIZED_TEXT")]
+    assert "image_status=fallback" in output and "ai_status=skipped" in output
+    assert "SECRET_IMAGE_DETAILS" not in output and "888222111" not in output
+
+
+async def test_founder_report_db_error_is_not_swallowed_by_timing(monkeypatch, capsys):
+    def broken_collect(_period):
+        raise ValueError("SECRET_DATABASE_DETAILS")
+
+    monkeypatch.setattr(period_report, "collect", broken_collect)
+    with pytest.raises(ValueError, match="SECRET_DATABASE_DETAILS"):
+        await period_report.send_report(None, None, "month", 898123999, date(2026, 11, 1))
+    log = capsys.readouterr().out
+    assert "outcome=error" in log and "ai_ms=-1" in log and "render_ms=-1" in log
+    assert "SECRET_DATABASE_DETAILS" not in log and "898123999" not in log

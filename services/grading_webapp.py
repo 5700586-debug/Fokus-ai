@@ -44,7 +44,7 @@ class WebAppError(Exception):
         self.message = message
 
 
-def authenticate(init_data: str, bot_token: str, *, now: int | None = None) -> int:
+def authenticate(init_data: str, bot_token: str, *, now: int | None = None, allowed=None) -> int:
     """Imzo va muddat tekshirilgan initData'dan foydalanuvchi id. Klient yuborgan boshqa id'ga ishonilmaydi."""
     if not verify_init_data(init_data, bot_token, now=now, max_age=INIT_DATA_MAX_AGE):
         raise WebAppError(401, "Sessiya eskirgan — ekranni botdan qayta oching.")
@@ -53,7 +53,9 @@ def authenticate(init_data: str, bot_token: str, *, now: int | None = None) -> i
         user_id = int(user["id"])
     except (ValueError, TypeError, KeyError):
         raise WebAppError(401, "Sessiya eskirgan — ekranni botdan qayta oching.") from None
-    if not permissions.has_permission(user_id, permissions.ACTION_EVALUATE_EMPLOYEE):
+    ok = allowed(user_id) if allowed is not None else permissions.has_permission(
+        user_id, permissions.ACTION_EVALUATE_EMPLOYEE)
+    if not ok:  # ``allowed`` — boshqa ekran (masalan 📅 Grafik) o'z ruxsat tekshiruvini beradi
         raise WebAppError(403, "Ruxsat yo'q.")
     return user_id
 

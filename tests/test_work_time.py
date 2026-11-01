@@ -280,3 +280,31 @@ def test_new_employee_is_not_flagged_for_days_before_hire(temp_db, after_novembe
     unknown = [t for t in view["limitations"] if "noma'lum" in t]
     assert len(unknown) == 1 and unknown[0].startswith("9 kunda")  # faqat ishga kirgandan keyingi 22..30-nov; 1..19-nov hisobga olinmaydi
     assert not any("davomat kiritilmagan" in t for t in view["limitations"])
+
+
+@pytest.mark.parametrize(("hire_date", "year_month"), [
+    ("2026-12-01", "2026-11"),  # first day after the entire selected month
+    ("2027-01-01", "2026-11"),  # much later hire: no 30 false unknown days
+    ("2026-12-15", "2026-12"),  # current month, but not hired as of today
+])
+def test_month_before_hire_has_no_fake_salary_or_absence(
+    temp_db, after_november, hire_date, year_month,
+):
+    from services import payroll_view as pv
+    import payroll_bot
+
+    _profile(hire_date=hire_date)
+    _agreement_28x10()  # an agreement dated before hiring must not create salary
+    view = pv.month_view(EMP, year_month)
+    assert view["complete"] is False
+    assert view["worked_minutes"] is None and view["worked_days"] == 0
+    assert view["fixed_amount"] is None and view["total_amount"] is None
+    assert view["plan_minutes"] is None
+    assert any("ishga kirmagan" in note for note in view["limitations"])
+    assert all("noma'lum" not in note and "davomat kiritilmagan" not in note
+               for note in view["limitations"])
+    shown = payroll_bot.salary_text(
+        {"user_id": EMP, "ism": "Vali", "familiya": "Karimov"}, year_month,
+    )
+    assert "ishga kirmagan" in shown
+    assert "dastlabki" in shown.lower() if view["final"] else "yakuniy emas" in shown.lower()

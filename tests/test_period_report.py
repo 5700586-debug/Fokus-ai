@@ -212,6 +212,8 @@ async def test_founder_report_slow_ai_is_bounded_without_retries(monkeypatch, ca
     monkeypatch.setattr(period_report, "collect", lambda _period: report)
     monkeypatch.setattr(period_report, "render_dashboard", lambda _report: b"ORIGINAL_PNG")
     monkeypatch.setattr(period_report, "fallback_summary", lambda _report: "RULE_BASED_FALLBACK")
+    # Synthetic report has no employee lists; this test targets only SDK wait/cancel.
+    monkeypatch.setattr(period_report, "ai_input", lambda _report: "synthetic-only")
     monkeypatch.setattr(period_report, "_AI_TIMEOUT_SECONDS", 0.05)
     bot = Bot()
     t = time.perf_counter()

@@ -66,8 +66,8 @@ def set_default(employee_id: int, effective_from: str, start: str, end: str,
     a, b = _parse_hhmm(start), _parse_hhmm(end)
     if not a or not b or a == b:
         raise ScheduleConflict("Ish vaqtini to'g'ri kiriting")
-    if first < now.date() or (first == now.date() and (a[0], a[1]) <= (now.hour, now.minute)):
-        raise ScheduleConflict("Doimiy grafik o'tgan yoki boshlangan vaqtdan qo'llanmaydi")
+    if first <= now.date():
+        raise ScheduleConflict("Doimiy grafik faqat ertangi yoki undan keyingi sanadan boshlanadi")
     start, end = "%02d:%02d" % a, "%02d:%02d" % b
     conn = get_connection()
     try:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ GRADE_ORDER = ("alo", "norma", "chala", "bajarilmagan")
 GRADE_NAMES = {"alo": "A'lo", "norma": "Norma", "chala": "Chala", "bajarilmagan": "Bajarilmagan"}
 MONTHS = ("Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr")
 _AI_MODEL = "gpt-5-mini"
+_AI_TIMEOUT_SECONDS = 8.0  # Founder report AI only; never changes other bot AI calls.
 
 
 # ------------------------------------------------------------------ davr --
@@ -286,6 +288,9 @@ async def ai_summary(client, report: Report) -> str:
     if client is None or (not report.totals.graded and not report.totals.penalty_count):
         return fallback_summary(report)
     try:
+        # Scope SDK timeouts/retries to this report only; global OpenAI client unchanged.
+        if callable(getattr(client, "with_options", None)):
+            client = client.with_options(timeout=_AI_TIMEOUT_SECONDS, max_retries=0)
         response = await client.responses.create(
             model=_AI_MODEL,
             instructions=(
@@ -480,23 +485,83 @@ def render_dashboard(report: Report) -> bytes:
 
 
 async def send_report(bot, client, kind: str, chat_id: int, today: date) -> None:
-    """Hisobotni yig'ib, rasm + xulosa bilan yuboradi (bazaga yozmaydi)."""
+    """Parallel AI + unchanged PNG; bounded AI wait, with private stage timings."""
     import asyncio
 
     from aiogram.types import BufferedInputFile
 
-    period = last_full_period(kind, today)
-    report = await asyncio.to_thread(collect, period)
-    summary = await ai_summary(client, report)
+    started = time.perf_counter()
+    timings = {"collect": -1, "ai": -1, "render": -1, "telegram": -1}
+    outcome, image_status, ai_status = "error", "not_started", "not_started"
     try:
-        png = await asyncio.to_thread(render_dashboard, report)
-    except Exception as error:  # noqa: BLE001 - rasm chiqmasa ham xulosa yetib borsin
-        logger.warning("Dashboard rasmi chizilmadi: %s", type(error).__name__)
-        png = None
-    if png and len(summary) <= 1024:
-        await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"), caption=summary)
-    elif png:
-        await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"))
-        await bot.send_message(chat_id, summary)
-    else:
-        await bot.send_message(chat_id, summary)
+        period = last_full_period(kind, today)
+        t = time.perf_counter()
+        try:
+            report = await asyncio.to_thread(collect, period)
+        finally:
+            timings["collect"] = round((time.perf_counter() - t) * 1000)
+
+        async def make_summary() -> str:
+            nonlocal ai_status
+            t0 = time.perf_counter()
+            try:
+                # Hard wall-clock deadline even if an injected/non-SDK client hangs.
+                try:
+                    result = await asyncio.wait_for(
+                        ai_summary(client, report), timeout=_AI_TIMEOUT_SECONDS
+                    )
+                    ai_status = ("returned_or_fallback" if client is not None and
+                                 (report.totals.graded or report.totals.penalty_count) else "skipped")
+                    return result
+                except asyncio.TimeoutError:
+                    ai_status = "timeout_fallback"
+                    logger.warning("Founder report AI timed out; using rule-based summary")
+                    return fallback_summary(report)
+            finally:
+                timings["ai"] = round((time.perf_counter() - t0) * 1000)
+
+        async def make_image() -> bytes | None:
+            nonlocal image_status
+            t0 = time.perf_counter()
+            try:
+                try:
+                    result = await asyncio.to_thread(render_dashboard, report)
+                    image_status = "ok"
+                    return result
+                except Exception as error:  # noqa: BLE001 - image failure must not lose report
+                    image_status = "fallback"
+                    logger.warning("Dashboard rasmi chizilmadi: %s", type(error).__name__)
+                    return None
+            finally:
+                timings["render"] = round((time.perf_counter() - t0) * 1000)
+
+        # These operations use only the already-collected report and do not mutate DB.
+        summary, png = await asyncio.gather(make_summary(), make_image())
+
+        t = time.perf_counter()
+        try:
+            if png and len(summary) <= 1024:
+                await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"), caption=summary)
+            elif png:
+                await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"))
+                await bot.send_message(chat_id, summary)
+            else:
+                await bot.send_message(chat_id, summary)
+        finally:
+            timings["telegram"] = round((time.perf_counter() - t) * 1000)
+        outcome = "ok"
+    finally:
+        # No names, IDs, report contents, API keys, exception texts or prompts.
+        # Instrumentation must never change the result of the real handler.
+        try:
+            print(
+                "FOUNDER_REPORT_TIMING "
+                f"kind={kind if kind in ('week', 'month') else 'unknown'} "
+                f"collect_ms={timings['collect']} ai_ms={timings['ai']} "
+                f"render_ms={timings['render']} telegram_ms={timings['telegram']} "
+                f"total_ms={round((time.perf_counter() - started) * 1000)} "
+                f"ai_status={ai_status} image_status={image_status} outcome={outcome}",
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001 - never let metrics break a report
+            pass

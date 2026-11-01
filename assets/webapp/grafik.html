@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Grafik</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --warn: #e08a1e; --bad: #d64545; --ok: #1f9d55;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg2); color: var(--text);
+         font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 3; background: var(--bg); padding: 10px 14px 6px;
+           box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+  .wk { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .wk b { font-size: 16px; }
+  .nav { border: 0; background: var(--bg2); color: var(--text); border-radius: 10px; padding: 6px 12px; font-size: 16px; }
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 2px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; border: 0; border-radius: 18px; padding: 7px 12px; background: var(--bg2); color: var(--text); font-size: 14px; }
+  .tab.on { background: var(--accent); color: var(--accent-text); }
+  .tools { display: flex; gap: 6px; padding-top: 6px; }
+  .tool { flex: 1; border: 1.5px solid var(--bg2); background: var(--bg); color: var(--text); border-radius: 10px;
+          padding: 7px 4px; font-size: 13px; font-weight: 600; }
+  main { padding: 10px 12px 120px; }
+  .card { background: var(--bg); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
+  .name { font-weight: 600; margin-bottom: 6px; }
+  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .c { border: 1.5px solid var(--bg2); border-radius: 9px; background: var(--bg); color: var(--text); padding: 4px 1px;
+       font-size: 11px; line-height: 1.25; text-align: center; min-height: 52px; }
+  .c .dl { color: var(--hint); font-size: 10px; display: block; }
+  .c.today { border-color: var(--accent); }
+  .c.off { color: var(--hint); }
+  .c.none { color: var(--warn); }
+  .c.dirty { background: #fff3dd; border-color: var(--warn); color: #111; }
+  .c.lock { opacity: .45; }
+  .c.late::after { content: "•"; color: var(--bad); }
+  .msg { text-align: center; color: var(--hint); padding: 40px 16px; }
+  .note { font-size: 13px; padding: 8px 12px; border-radius: 10px; margin-bottom: 10px; background: var(--bg); }
+  .note.err { color: var(--bad); }
+  .note.ok { color: var(--ok); }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; background: var(--bg); padding: 10px 12px 14px;
+         box-shadow: 0 -1px 0 rgba(0,0,0,.08); display: none; }
+  .bar.on { display: block; }
+  .bar input { width: 100%; font: inherit; padding: 8px; border: 1.5px solid var(--warn); border-radius: 10px;
+               background: var(--bg); color: var(--text); margin-bottom: 8px; }
+  .row { display: flex; gap: 8px; }
+  .btn { flex: 1; border: 0; border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 600;
+         background: var(--accent); color: var(--accent-text); }
+  .btn.sec { background: var(--bg2); color: var(--text); flex: none; }
+  .btn:disabled { opacity: .5; }
+  .sheet { position: fixed; inset: 0; z-index: 5; background: rgba(0,0,0,.35); display: none; align-items: flex-end; }
+  .sheet.on { display: flex; }
+  .panel { background: var(--bg); width: 100%; border-radius: 16px 16px 0 0; padding: 14px 14px 18px; max-height: 85vh;
+           overflow-y: auto; }
+  .panel h3 { margin: 0 0 4px; font-size: 16px; }
+  .panel .sub { color: var(--hint); font-size: 13px; margin-bottom: 10px; }
+  .tin { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .tin label { font-size: 12px; color: var(--hint); display: block; }
+  .tin input { width: 100%; font: inherit; padding: 8px 6px; border: 1.5px solid var(--bg2); border-radius: 10px;
+               background: var(--bg); color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .chip { border: 1.5px solid var(--bg2); background: var(--bg); color: var(--text); border-radius: 16px; padding: 6px 10px;
+          font-size: 13px; }
+  .chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .hist { font-size: 13px; color: var(--hint); margin-top: 12px; border-top: 1px solid var(--bg2); padding-top: 8px; }
+  .hist div { padding: 3px 0; }
+  .err { color: var(--bad); font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wk"><button class="nav" id="prev">◀</button><b id="wk">🗓 Grafik</b><button class="nav" id="next">▶</button></div>
+  <div class="tabs" id="tabs"></div>
+  <div class="tools"><button class="tool" id="fill">⚡ Tez to'ldirish</button><button class="tool" id="copy">📋 O'tgan haftadan</button></div>
+</header>
+<main id="list"><div class="msg">Yuklanmoqda…</div></main>
+<div class="bar" id="bar">
+  <input id="reason" placeholder="Sabab (boshlangan/o'tgan smena uchun majburiy)" maxlength="300">
+  <div class="row"><button class="btn sec" id="discard">Bekor</button><button class="btn" id="save">Saqlash</button></div>
+</div>
+<div class="sheet" id="sheet"><div class="panel" id="panel"></div></div>
+<script>
+(function () {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var initData = tg ? tg.initData : "";
+  // drafts: "emp|date" -> {emp, date, status, start, end, base(version), late, name}. Hafta almashsa ham saqlanadi.
+  var state = { data: null, week: null, branch: null, drafts: {}, busy: false, note: null };
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function dm(iso) { return iso.slice(8, 10) + "." + iso.slice(5, 7); }
+  function haptic(k) { try { tg.HapticFeedback.notificationOccurred(k); } catch (e) {} }
+  function api(path, body) {
+    body = body || {}; body.initData = initData;
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: "Server javobi noto'g'ri." }; })
+        .then(function (j) { j._status = r.status; return j; }); });
+  }
+  function confirmBox(text, cb) {
+    try { tg.showConfirm(text, cb); } catch (e) { cb(window.confirm(text)); }
+  }
+  function key(emp, d) { return emp + "|" + d; }
+  function cellText(s, a, b) { return s === "work" ? a + "<br>" + b : (s === "off" ? "dam" : "—"); }
+  function sameAsCell(dr, c) {
+    if (dr.status !== c.status) return false;
+    return dr.status === "off" || (dr.start === c.start && dr.end === c.end);
+  }
+  function draftCount() { return Object.keys(state.drafts).length; }
+  function lateCount() { var n = 0; for (var k in state.drafts) if (state.drafts[k].late) n++; return n; }
+
+  function branch() {
+    var bs = state.data.branches;
+    for (var i = 0; i < bs.length; i++) if (bs[i].name === state.branch) return bs[i];
+    return null;
+  }
+  function findCell(emp, d) {
+    var found = null;
+    state.data.branches.forEach(function (b) { b.employees.forEach(function (e) {
+      if (e.id === emp) e.cells.forEach(function (c) { if (c.date === d) found = { e: e, c: c }; });
+    }); });
+    return found;
+  }
+
+  function render() {
+    var d = state.data;
+    $("wk").textContent = "🗓 " + dm(d.days[0].date) + " – " + dm(d.days[6].date);
+    if (!branch()) state.branch = d.branches.length ? d.branches[0].name : null;
+    $("tabs").innerHTML = d.branches.map(function (b, i) {
+      return '<button class="tab' + (b.name === state.branch ? " on" : "") + '" data-i="' + i + '">' + esc(b.name) + "</button>";
+    }).join("");
+    var b = branch();
+    var html = state.note ? '<div class="note ' + state.note.kind + '">' + esc(state.note.text) + "</div>" : "";
+    if (!b) { $("list").innerHTML = html + '<div class="msg">Bu yerda grafik tuziladigan xodim yo\'q.</div>'; renderBar(); return; }
+    html += b.employees.map(function (e) {
+      return '<div class="card"><div class="name">' + esc(e.name) + '</div><div class="days">' + e.cells.map(function (c, i) {
+        var dr = state.drafts[key(e.id, c.date)];
+        var s = dr ? dr.status : c.status, a = dr ? dr.start : c.start, bb = dr ? dr.end : c.end;
+        var cls = "c" + (c.date === d.today ? " today" : "") + (s === "off" ? " off" : "") + (!s ? " none" : "") +
+          (dr ? " dirty" : "") + (c.locked ? " lock" : "") + (c.late ? " late" : "");
+        return '<button class="' + cls + '" data-e="' + e.id + '" data-d="' + c.date + '"><span class="dl">' +
+          d.days[i].label + " " + c.date.slice(8, 10) + "</span>" + cellText(s, esc(a), esc(bb)) + "</button>";
+      }).join("") + "</div></div>";
+    }).join("");
+    html += '<div class="note">Belgilar: <b>—</b> grafik yo\'q · sariq — saqlanmagan · xira — o\'zgartirib bo\'lmaydi' +
+      (d.full ? " · <span style=\"color:var(--bad)\">•</span> boshlangan/o'tgan (sabab kerak)" : "") + "</div>";
+    $("list").innerHTML = html;
+    renderBar();
+  }
+  function renderBar() {
+    var n = draftCount();
+    $("bar").classList.toggle("on", n > 0);
+    $("reason").style.display = lateCount() ? "block" : "none";
+    $("save").textContent = state.busy ? "Saqlanmoqda…" : "Saqlash (" + n + ")";
+    $("save").disabled = state.busy;
+  }
+
+  // Server versiyasi o'zgargan qoralama — boshqa joyda o'zgartirilgan: bosib yozmaymiz, qoralamani olib tashlaymiz.
+  function reconcile() {
+    var dropped = 0;
+    for (var k in state.drafts) {
+      var dr = state.drafts[k], f = findCell(dr.emp, dr.date);
+      if (!f) continue;  // boshqa hafta — o'z versiyasi bilan qoladi
+      if (f.c.version !== dr.base || f.c.locked) { delete state.drafts[k]; dropped++; }
+      else if (sameAsCell(dr, f.c)) delete state.drafts[k];
+      else dr.late = f.c.late;
+    }
+    return dropped;
+  }
+
+  function load(week) {
+    return api("/api/grafik/week", { week_start: week || null }).then(function (j) {
+      if (!j.ok) { $("list").innerHTML = '<div class="msg">' + esc(j.error || "Xato") + "</div>"; return; }
+      state.data = j; state.week = j.week_start;
+      var dropped = reconcile();
+      if (dropped) state.note = { kind: "err", text: dropped + " ta katak boshqa joyda o'zgargan yoki qulflangan — qoralamasi olib tashlandi, qayta tekshiring." };
+      render();
+    }).catch(function () { $("list").innerHTML = '<div class="msg">Internet yo\'q — qayta urinib ko\'ring.</div>'; });
+  }
+
+  function setDraft(e, c, status, start, end) {
+    var k = key(e.id, c.date);
+    var dr = { emp: e.id, date: c.date, status: status, start: start, end: end, base: c.version, late: c.late, name: e.name };
+    if (sameAsCell(dr, c)) delete state.drafts[k]; else state.drafts[k] = dr;
+  }
+
+  function openCell(emp, d) {
+    var f = findCell(emp, d); if (!f) return;
+    var e = f.e, c = f.c, dr = state.drafts[key(emp, d)];
+    var cur = dr || c;
+    var p = '<h3>' + esc(e.name) + " — " + dm(d) + "</h3>";
+    if (c.locked) {
+      p += '<div class="sub">' + (c.locked === "star" ? "🔒 Bu oy yulduz qarori chiqqan — grafik qulflangan."
+        : "🔒 Smena boshlangan yoki o'tgan (yoki kelish/ketish yozilgan) — faqat nazoratchi o'zgartiradi.") + "</div>";
+    } else {
+      p += '<div class="sub">Hozir: ' + (c.status === "work" ? c.start + "–" + c.end : (c.status === "off" ? "dam" : "grafik yo'q")) +
+        (c.late ? " · ⚠️ boshlangan/o'tgan — sabab majburiy" : "") + "</div>" +
+        '<div class="err" id="cerr"></div>' +
+        '<div class="tin"><div><label>Boshlanish</label><input type="time" id="cs" value="' + esc(cur.status === "work" ? cur.start : (c.start || "08:00")) + '"></div>' +
+        '<div><label>Tugash</label><input type="time" id="ce" value="' + esc(cur.status === "work" ? cur.end : (c.end || "18:00")) + '"></div></div>' +
+        '<div class="row" style="margin-bottom:8px"><button class="btn" id="cwork">✅ Ish kuni</button><button class="btn sec" id="coff">🔴 Dam</button></div>' +
+        (dr ? '<div class="row"><button class="btn sec" style="flex:1" id="cundo">↩️ O\'zgarishni bekor qilish</button></div>' : "");
+    }
+    p += '<div class="row" style="margin-top:8px"><button class="btn sec" style="flex:1" id="cclose">Yopish</button></div>' +
+      '<div class="hist" id="hist">Tarix yuklanmoqda…</div>';
+    $("panel").innerHTML = p; $("sheet").classList.add("on");
+    function close() { $("sheet").classList.remove("on"); render(); }
+    $("cclose").onclick = close;
+    if (!c.locked) {
+      $("cwork").onclick = function () {
+        var a = $("cs").value, b = $("ce").value;
+        if (!a || !b || a === b) { $("cerr").textContent = "Boshlanish va tugash vaqtini to'g'ri kiriting."; return; }
+        setDraft(e, c, "work", a, b); close();
+      };
+      $("coff").onclick = function () { setDraft(e, c, "off", null, null); close(); };
+      if (dr) $("cundo").onclick = function () { delete state.drafts[key(emp, d)]; close(); };
+    }
+    api("/api/grafik/history", { employee_id: emp, date: d }).then(function (j) {
+      var h = $("hist"); if (!h) return;
+      if (!j.ok) { h.textContent = j.error || "Tarix ochilmadi."; return; }
+      h.innerHTML = "<b>Tarix</b>" + (j.items.length ? j.items.slice().reverse().map(function (it) {
+        return "<div>" + esc(it.at) + " · " + esc(it.by) + ": " + esc(it.old) + " → " + esc(it.new) +
+          (it.reason ? " (" + esc(it.reason) + ")" : "") + (it.late ? " ⚠️" : "") + "</div>";
+      }).join("") : "<div>O'zgarish yo'q.</div>");
+    }).catch(function () { var h = $("hist"); if (h) h.textContent = "Internet yo'q."; });
+  }
+
+  // Tez to'ldirish: tanlangan kunlarga (va xodimlarga) bitta vaqt yoki dam. Qulflangan kataklar o'tkazib yuboriladi.
+  function openFill() {
+    var b = branch(); if (!b) return;
+    var days = state.data.days;
+    var p = '<h3>⚡ Tez to\'ldirish — ' + esc(b.name) + '</h3><div class="sub">Faqat qoralama: «Saqlash» bosilmaguncha hech narsa yozilmaydi.</div>' +
+      '<div class="tin"><div><label>Boshlanish</label><input type="time" id="fs" value="08:00"></div>' +
+      '<div><label>Tugash</label><input type="time" id="fe" value="18:00"></div></div>' +
+      '<div class="chips" id="fk"><button class="chip on" data-k="work">✅ Ish kuni</button><button class="chip" data-k="off">🔴 Dam</button></div>' +
+      '<div class="sub">Kunlar</div><div class="chips" id="fd">' + days.map(function (x, i) {
+        return '<button class="chip' + (i < 6 ? " on" : "") + '" data-d="' + x.date + '">' + x.label + " " + x.date.slice(8, 10) + "</button>";
+      }).join("") + '</div><div class="sub">Xodimlar</div><div class="chips" id="fp">' + b.employees.map(function (e) {
+        return '<button class="chip on" data-e="' + e.id + '">' + esc(e.name) + "</button>";
+      }).join("") + '</div><div class="err" id="ferr"></div>' +
+      '<div class="row"><button class="btn sec" id="fcancel">Bekor</button><button class="btn" id="fapply">Qo\'llash</button></div>';
+    $("panel").innerHTML = p; $("sheet").classList.add("on");
+    $("panel").onclick = function (ev) {
+      var ch = ev.target.closest(".chip"); if (!ch) return;
+      if (ch.parentNode.id === "fk") { [].forEach.call(ch.parentNode.children, function (x) { x.classList.remove("on"); }); }
+      ch.classList.toggle("on", ch.parentNode.id === "fk" ? true : !ch.classList.contains("on"));
+    };
+    $("fcancel").onclick = function () { $("panel").onclick = null; $("sheet").classList.remove("on"); };
+    $("fapply").onclick = function () {
+      var kind = $("fk").querySelector(".on").getAttribute("data-k"), a = $("fs").value, bb = $("fe").value;
+      if (kind === "work" && (!a || !bb || a === bb)) { $("ferr").textContent = "Vaqtni to'g'ri kiriting."; return; }
+      var ds = [].map.call($("fd").querySelectorAll(".on"), function (x) { return x.getAttribute("data-d"); });
+      var ps = [].map.call($("fp").querySelectorAll(".on"), function (x) { return +x.getAttribute("data-e"); });
+      var n = 0, skipped = 0;
+      b.employees.forEach(function (e) { if (ps.indexOf(e.id) < 0) return; e.cells.forEach(function (c) {
+        if (ds.indexOf(c.date) < 0) return;
+        if (c.locked) { skipped++; return; }
+        setDraft(e, c, kind, kind === "work" ? a : null, kind === "work" ? bb : null); n++;
+      }); });
+      state.note = { kind: "ok", text: "⚡ " + n + " ta katak qoralamaga qo'yildi" + (skipped ? ", " + skipped + " ta qulflangan katak o'tkazib yuborildi" : "") + ". «Saqlash»ni bosing." };
+      $("panel").onclick = null; $("sheet").classList.remove("on"); render();
+    };
+  }
+
+  function copyPrev() {
+    var b = branch(); if (!b) return;
+    api("/api/grafik/week", { week_start: state.data.prev_week }).then(function (j) {
+      if (!j.ok) { state.note = { kind: "err", text: j.error || "O'tgan hafta ochilmadi." }; render(); return; }
+      var src = {};
+      j.branches.forEach(function (sb) { sb.employees.forEach(function (e) { src[e.id] = e.cells; }); });
+      function apply(onlyEmpty) {
+        var n = 0, skipped = 0;
+        b.employees.forEach(function (e) { (e.cells || []).forEach(function (c, i) {
+          var s = src[e.id] && src[e.id][i]; if (!s || !s.status) return;
+          if (onlyEmpty && (c.status || state.drafts[key(e.id, c.date)])) return;
+          if (c.locked) { skipped++; return; }
+          setDraft(e, c, s.status, s.start, s.end); n++;
+        }); });
+        state.note = { kind: "ok", text: "📋 " + n + " ta katak o'tgan haftadan qoralamaga ko'chirildi" + (skipped ? ", " + skipped + " ta qulflangan o'tkazib yuborildi" : "") + ". «Saqlash»ni bosing." };
+        render();
+      }
+      var text = "O'tgan haftani «" + b.name + "» uchun ko'chirish: faqat bo'sh kataklarga yoki hammasiga?";
+      try {
+        tg.showPopup({ message: text, buttons: [{ id: "empty", type: "default", text: "Faqat bo'sh" },
+          { id: "all", type: "destructive", text: "Hammasi" }, { id: "no", type: "cancel" }] },
+          function (id) { if (id === "empty") apply(true); else if (id === "all") apply(false); });
+      } catch (e) { if (window.confirm(text + "\n\nOK — faqat bo'sh kataklarga")) apply(true); }
+    }).catch(function () { state.note = { kind: "err", text: "Internet yo'q." }; render(); });
+  }
+
+  function save() {
+    if (state.busy || !draftCount()) return;
+    var reason = $("reason").value.trim();
+    if (lateCount() && !reason) { state.note = { kind: "err", text: "Boshlangan/o'tgan smena bor — sabab yozing." }; render(); $("reason").focus(); return; }
+    var changes = Object.keys(state.drafts).map(function (k) {
+      var dr = state.drafts[k];
+      return { employee_id: dr.emp, date: dr.date, status: dr.status, start: dr.start, end: dr.end, expected_version: dr.base };
+    });
+    state.busy = true; renderBar();
+    api("/api/grafik/save", { changes: changes, reason: reason || null }).then(function (j) {
+      state.busy = false;
+      if (j.ok) {
+        state.drafts = {}; $("reason").value = "";
+        state.note = { kind: "ok", text: "✅ Saqlandi: " + j.saved + " ta katak" + (j.notified ? " · " + j.notified + " xodimga xabar yuborildi" : "") + "." };
+        haptic("success");
+      } else {
+        state.note = { kind: "err", text: (j.error || "Saqlanmadi.") + " Hech narsa yozilmadi." };
+        haptic("error");
+      }
+      load(state.week);  // har doim server holatini qayta o'qiymiz; mos qoralamalar qoladi
+    }).catch(function () {
+      state.busy = false;
+      state.note = { kind: "err", text: "Aloqa uzildi — saqlangan-saqlanmagani tekshirilmoqda." };
+      load(state.week);
+    });
+  }
+
+  $("tabs").addEventListener("click", function (ev) {
+    var t = ev.target.closest(".tab"); if (!t) return;
+    state.branch = state.data.branches[+t.getAttribute("data-i")].name; state.note = null; render(); window.scrollTo(0, 0);
+  });
+  $("list").addEventListener("click", function (ev) {
+    var c = ev.target.closest(".c"); if (!c) return;
+    openCell(+c.getAttribute("data-e"), c.getAttribute("data-d"));
+  });
+  $("sheet").addEventListener("click", function (ev) { if (ev.target === $("sheet")) { $("panel").onclick = null; $("sheet").classList.remove("on"); render(); } });
+  $("prev").onclick = function () { if (state.data) { state.note = null; load(state.data.prev_week); } };
+  $("next").onclick = function () { if (state.data) { state.note = null; load(state.data.next_week); } };
+  $("fill").onclick = openFill;
+  $("copy").onclick = copyPrev;
+  $("save").onclick = save;
+  $("discard").onclick = function () {
+    confirmBox("Saqlanmagan " + draftCount() + " ta o'zgarish bekor qilinsinmi?", function (ok) {
+      if (ok) { state.drafts = {}; state.note = null; render(); }
+    });
+  };
+
+  if (!initData) {
+    $("list").innerHTML = '<div class="msg">Bu sahifani botdagi "🗓 Grafik ekrani" tugmasi orqali oching.</div>';
+    return;
+  }
+  try { tg.ready(); tg.expand(); } catch (e) {}
+  load(null);
+})();
+</script>
+</body>
+</html>

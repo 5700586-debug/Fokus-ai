@@ -552,6 +552,11 @@ def decide_schedule_change_request(request_id: int, approved: bool, decided_by: 
     if request is None:
         return False
 
+    if approved:
+        # Before committing an approved request, validate the same guards as direct schedule writes.
+        # Otherwise an approved request could remain without its shift being applied.
+        _check_finalized_month(request["employee_id"], request["shift_date"])
+        _check_nazoratchi_historical_permission(decided_by, request["shift_date"])
     new_status = SCHEDULE_REQUEST_APPROVED if approved else SCHEDULE_REQUEST_REJECTED
     if not attendance_repo.decide_schedule_change_request(
         request_id, SCHEDULE_REQUEST_PENDING, new_status, decided_by

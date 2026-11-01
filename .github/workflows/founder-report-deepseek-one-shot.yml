@@ -35,7 +35,7 @@ jobs:
           from urllib import request
 
           REPO = "5700586-debug/Fokus-ai"
-          MARKER = "ci(deepseek): one-shot founder report latency diagnosis"
+          MARKER = "ci(deepseek): retry founder report static audit with safe stage"
           SECTIONS = (
               ("services/period_report.py", ((146, 153), (285, 289), (297, 304),
                                               (339, 352), (470, 476), (482, 503))),
@@ -87,6 +87,7 @@ jobs:
               if len(raw) >= 180000:
                   raise ValueError("Response too large")
               return json.loads(raw.decode("utf-8"))
+          stage = 'start'
           try:
               sha, token, key = (os.getenv("PR_SHA", ""), os.getenv("GH_TOKEN", ""),
                                  os.getenv("DEEPSEEK_API_KEY", ""))
@@ -95,12 +96,14 @@ jobs:
               if not token:
                   raise ValueError("GitHub token missing")
               root = "https://api.github.com/repos/" + REPO + "/"
+              stage = "check original commit"
               commit = call(root + "commits/" + sha, token)
               if commit["commit"]["message"].splitlines()[0] != MARKER:
                   note("SKIP: one-shot already handled; DeepSeek NOT called.")
                   sys.exit(0)
               if not key:
                   raise ValueError("DeepSeek secret unavailable")
+              stage = "fetch snippet sources"
               snippets, refs = [], {}
               for path, spans in SECTIONS:
                   f = call(root + "contents/" + path + "?ref=" + sha, token)
@@ -119,6 +122,7 @@ jobs:
                           indexes.add(idx)
                   snippets.append({"file": path, "code": "\n".join(numbered)})
                   refs[path] = indexes
+              stage = "validate input"
               user = json.dumps({"sha": sha, "evidence": EVIDENCE, "snippets": snippets}, ensure_ascii=False)
               if len(user) + len(SYSTEM) > 12000:
                   raise ValueError("Input budget exceeded")
@@ -133,7 +137,9 @@ jobs:
                   "max_tokens": 1300, "thinking": {"type": "disabled"},
                   "response_format": {"type": "json_object"}, "stream": False
               }).encode("utf-8")
+              stage = "call DeepSeek"
               result = call("https://api.deepseek.com/chat/completions", key, data)
+              stage = "parse DeepSeek response"
               answer = result["choices"][0]
               if answer.get("finish_reason") != "stop":
                   raise ValueError("DeepSeek response incomplete")
@@ -162,7 +168,12 @@ jobs:
                   note("No line-grounded findings; NOT a PASS")
               note("Review ONLY: no code, no deploy, no production DB writes.")
           except Exception as e:
-              note("BLOCKER: one-shot audit incomplete: " + type(e).__name__ +
-                   ". No success claimed.")
+              allowed = {"Repository or SHA mismatch", "GitHub token missing",
+                         "DeepSeek secret unavailable", "Unexpected file encoding",
+                         "Source sections changed", "Input budget exceeded",
+                         "Secret-shaped data in source", "DeepSeek response incomplete",
+                         "Response too large"}
+              diagnosis = str(e) if isinstance(e, ValueError) and str(e) in allowed else type(e).__name__
+              note("BLOCKER at " + stage + ": " + diagnosis + ". No success claimed.")
               sys.exit(1)
           PY

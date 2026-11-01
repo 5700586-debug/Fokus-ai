@@ -64,7 +64,7 @@ async def test_nazoratchi_main_menu_and_commands_use_simple_uzbek(bot_dp):
 
     sent = await send(main.dp, bot, SUPERVISOR, text="🧑‍💼 Nazoratchi")
     labels = [button.text for row in sent[0].reply_markup.keyboard for button in row]
-    assert labels == ["🏬 Filialni tanlash", "📋 Baholash", "✅ Filialni yopish", "📅 Grafik so'rovlari", "🏆 Bugungi natija", "🔙 Orqaga"]
+    assert labels == ["🏬 Filialni tanlash", "📋 Baholash", "✅ Filialni yopish", "📅 Grafik so'rovlari", "🗓 Grafik ekrani", "🏆 Bugungi natija", "🔙 Orqaga"]
     _assert_clean(sent, "nazoratchi menyusi")
 
     for command in ("/baholash", "/kunniyop", "/filiallar"):

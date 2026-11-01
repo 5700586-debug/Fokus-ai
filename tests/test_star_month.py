@@ -44,6 +44,13 @@ def _seed(month_start: date = date(2026, 11, 1), days: int = 30) -> None:
                 if not (uid == TIME2 and offset in (3, 4)):
                     conn.execute("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_at) "
                                  "VALUES (?, ?, 'manual', 'x')", (uid, day))
+                # 2026-11 dan yulduz aniq kelish/ketish va grafik bilan to'liq kunlarga tayanadi.
+                conn.execute("INSERT INTO employee_scheduled_shifts (employee_id, shift_date, planned_start, planned_end, "
+                             "status, source, created_at) VALUES (?, ?, '08:00', '18:00', 'work', 'test', 'x')", (uid, day))
+                late = uid == TIME2 and offset in (3, 4)
+                conn.execute("INSERT INTO work_time_entries (employee_id, work_date, arrival, departure, entered_by, "
+                             "created_at, updated_at) VALUES (?, ?, ?, '18:00', 1, 'x', 'x')",
+                             (uid, day, "08:05" if late else "07:55"))
         for uid, status in ((MINUS, "none"), (PENDING, "pending")):
             conn.execute("INSERT INTO discipline_penalties (employee_id, supervisor_id, penalty_date, amount, rule_number, "
                          "appeal_status, created_at) VALUES (?, ?, ?, 10, 18, ?, 'x')",
@@ -146,3 +153,17 @@ async def test_founder_star_board_button(bot_dp):
     main, bot = bot_dp
     sent = await send_callback(main.dp, bot, FOUNDER_ID, data="stars:show", target_chat_id=FOUNDER_ID)
     assert any(isinstance(m, SendPhoto) for m in sent)
+
+
+def test_incomplete_data_makes_decision_pending_not_failed():
+    """Grafik yoki ketish vaqti yo'q kun — "shart bajarildi" ham, "bajarilmadi" ham deb taxmin qilinmaydi."""
+    _seed()
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE work_time_entries SET departure = NULL WHERE employee_id = ? AND work_date = '2026-11-02'", (GOOD,))
+        conn.commit()
+    finally:
+        conn.close()
+    decision = _by_id(star_month.evaluate("2026-11"))[GOOD]
+    assert decision.pending and not decision.passed and decision.new_stars == decision.current_stars
+    assert any("to'liq emas" in r for r in decision.reasons)

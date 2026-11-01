@@ -236,9 +236,22 @@ async def test_vazifabekor_removes_task_from_card(bot_dp):
 
 
 # --------------------------------------------------- 3-bosqich: vaqt bonusi --
+# Qo'lda tasdiqlash — faqat 2026-11 gacha bo'lgan ish kunlari uchun (keyin bonus aniq kelish vaqtidan avtomatik).
 
 
-async def test_card_shows_time_bonus_button_when_not_yet_confirmed(bot_dp):
+@pytest.fixture
+def _october(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import company_time
+
+    fixed = datetime(2026, 10, 28, 12, tzinfo=ZoneInfo("Asia/Tashkent"))
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+    monkeypatch.setattr(company_time, "today", lambda: fixed.date())
+
+
+async def test_card_shows_time_bonus_button_when_not_yet_confirmed(bot_dp, _october):
     main, bot = bot_dp
     _make_nazoratchi()
     _make_kassir(700010)
@@ -250,7 +263,7 @@ async def test_card_shows_time_bonus_button_when_not_yet_confirmed(bot_dp):
     assert "nzr_timebonus:700010" in buttons
 
 
-async def test_confirming_time_bonus_updates_card_and_hides_button(bot_dp):
+async def test_confirming_time_bonus_updates_card_and_hides_button(bot_dp, _october):
     main, bot = bot_dp
     _make_nazoratchi()
     _make_kassir(700011)
@@ -263,7 +276,7 @@ async def test_confirming_time_bonus_updates_card_and_hides_button(bot_dp):
     assert "nzr_timebonus:700011" not in buttons
 
 
-async def test_double_click_on_time_bonus_button_does_not_duplicate(bot_dp):
+async def test_double_click_on_time_bonus_button_does_not_duplicate(bot_dp, _october):
     main, bot = bot_dp
     _make_nazoratchi()
     _make_kassir(700012)
@@ -277,6 +290,27 @@ async def test_double_click_on_time_bonus_button_does_not_duplicate(bot_dp):
     status = time_bonus_service.get_today_status(700012)
     assert status["confirmed_by"] == first_confirmed_by
     assert second  # ikkinchi bosish ham javob beradi (masalan "allaqachon" toast)
+
+
+async def test_from_november_time_bonus_is_not_manual(bot_dp, monkeypatch):
+    """2026-11 dan vaqt bonusi faqat aniq kelish vaqtidan: karta tugmasi yo'q, eski tugma hech narsa yozmaydi."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import company_time
+    from services import time_bonus as time_bonus_service
+
+    fixed = datetime(2026, 11, 3, 12, tzinfo=ZoneInfo("Asia/Tashkent"))
+    monkeypatch.setattr(company_time, "now", lambda: fixed)
+    monkeypatch.setattr(company_time, "today", lambda: fixed.date())
+    main, bot = bot_dp
+    _make_nazoratchi()
+    _make_kassir(700013)
+    sent = await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_emp:700013", target_chat_id=_NAZORATCHI_ID)
+    buttons = [btn.callback_data for row in sent[0].reply_markup.inline_keyboard for btn in row]
+    assert "nzr_timebonus:700013" not in buttons
+    await send_callback(main.dp, bot, _NAZORATCHI_ID, data="nzr_timebonus:700013", target_chat_id=_NAZORATCHI_ID)
+    assert time_bonus_service.get_status(700013, "2026-11-03") is None
 
 
 # --------------------------------------------------- 4-bosqich: ish bahosi --

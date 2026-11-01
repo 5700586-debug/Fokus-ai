@@ -214,7 +214,11 @@ def _good_november(monkeypatch, tariff=3):
         if day % 7 == 0:
             continue  # dam
         iso = f"2026-11-{day:02d}"
-        _day(iso)
+        # 2026-11 dan ishlangan vaqt aniq kelish/ketish + grafikdan (work_time_entries, employee_scheduled_shifts).
+        _sql("INSERT INTO employee_scheduled_shifts (employee_id, shift_date, planned_start, planned_end, status, source, "
+             "created_at) VALUES (?, ?, '08:00', '18:00', 'work', 'test', 'x')", (EMP, iso))
+        _sql("INSERT INTO work_time_entries (employee_id, work_date, arrival, departure, entered_by, created_at, updated_at) "
+             "VALUES (?, ?, '07:55', '18:00', 1, 'x', 'x')", (EMP, iso))
         _sql("INSERT INTO daily_evaluations (employee_id, supervisor_id, eval_date, grade_key, grade_points, created_at) "
              "VALUES (?, 1, ?, 'alo', 3, 'x')", (EMP, iso))
         _sql("INSERT INTO time_bonus_grants (employee_id, grant_date, source, confirmed_by, confirmed_at) VALUES (?, ?, 'manual', 1, 'x')",

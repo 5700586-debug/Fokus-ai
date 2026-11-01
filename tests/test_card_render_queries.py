@@ -34,7 +34,7 @@ async def test_one_render_computes_active_day_and_time_bonus_once_with_matching_
     main, bot = bot_dp
     _setup()
     calls = {"active_day": 0, "time_bonus": 0}
-    real_active, real_status = nazoratchi_day.active_day, time_bonus.get_today_status
+    real_active, real_status = nazoratchi_day.active_day, time_bonus.get_status
 
     def counting_active(*args, **kwargs):
         calls["active_day"] += 1
@@ -45,7 +45,7 @@ async def test_one_render_computes_active_day_and_time_bonus_once_with_matching_
         return real_status(*args, **kwargs)
 
     monkeypatch.setattr(nazoratchi_day, "active_day", counting_active)
-    monkeypatch.setattr(time_bonus, "get_today_status", counting_status)
+    monkeypatch.setattr(time_bonus, "get_status", counting_status)
 
     sent = await send_callback(main.dp, bot, SUP, data=f"nzr_emp:{EMP}", target_chat_id=SUP)
 
@@ -71,8 +71,8 @@ async def test_grade_press_still_validates_on_the_server_and_rerenders_once(bot_
     assert "Bu tugma eskirgan" in " ".join(getattr(m, "text", "") or "" for m in stale)
 
     calls = {"n": 0}
-    real = time_bonus.get_today_status
-    monkeypatch.setattr(time_bonus, "get_today_status", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), real(*a, **k))[1])
+    real = time_bonus.get_status
+    monkeypatch.setattr(time_bonus, "get_status", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), real(*a, **k))[1])
     await send_callback(main.dp, bot, SUP, data=button, target_chat_id=SUP)
 
     from services import discipline

@@ -381,8 +381,12 @@
           else $("ps-status").textContent = v.error || "Xato";
         }).catch(function () { $("ps-status").textContent = "Aloqa xatosi"; });
       }
-      $("ps-on").onclick = function () { set(true); };
-      $("ps-off").onclick = function () { set(false); };
+      $("ps-on").onclick = function () {
+        confirmBox("Nazoratchiga eski grafikni o'zgartirish ruxsati berilsinmi?", function (ok) { if (ok) set(true); });
+      };
+      $("ps-off").onclick = function () {
+        confirmBox("Nazoratchining eski grafikni o'zgartirish ruxsati yopilsinmi?", function (ok) { if (ok) set(false); });
+      };
     });
   }
 

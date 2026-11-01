@@ -62,9 +62,16 @@ def salary_text(profile: dict, year_month: str) -> str:
     if v.get("worked_minutes") is not None and v.get("plan_minutes"):
         lines.append(f"🕒 Ishlagan: {v['worked_minutes'] // 60} soat / reja {v['plan_minutes'] // 60} soat")
     lines.append(f"📌 Fiks: {_som(v['fixed_amount'])}")
-    grade_points = (v["work_bonus"] or 0) - v.get("time_bonus", 0)
-    lines.append(f"⭐ Ish bonusi: {grade_points} ball")
-    lines.append(f"⏰ Vaqt bonusi: {v.get('time_bonus_days', 0)} kun × {payroll_view.TIME_BONUS_POINTS} = {v.get('time_bonus', 0)} ball")
+    leader = v.get("leader")
+    if leader is not None:  # filial rahbari: jamoa natijasi (kun yopilganda muhrlangan)
+        work = str(leader["work_points"]).replace(".", ",")
+        lines.append(f"👔 Jamoa natijasi: {leader['days']} kun")
+        lines.append(f"⭐ Ish bonusi (jamoa o'rtacha bahosi): {work} ball")
+        lines.append(f"⏰ Vaqt bonusi (jamoa o'z vaqtida): {leader['time_points']} ball")
+    else:
+        grade_points = (v["work_bonus"] or 0) - v.get("time_bonus", 0)
+        lines.append(f"⭐ Ish bonusi: {grade_points} ball")
+        lines.append(f"⏰ Vaqt bonusi: {v.get('time_bonus_days', 0)} kun × {payroll_view.TIME_BONUS_POINTS} = {v.get('time_bonus', 0)} ball")
     lines.append(f"➖ Minus: {v['minus'] or 0} ball (ayirildi: {v['minus_applied'] or 0})")
     lines.append(f"➕ Qo'shimcha ish: {v['extra_work'] or 0} ball (minus tegmaydi)")
     if v["total_stars"] is not None:

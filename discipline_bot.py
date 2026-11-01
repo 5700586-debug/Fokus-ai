@@ -2093,5 +2093,10 @@ def start_scheduler(bot):
     scheduler.add_job(_star_month_tick, "cron", day=1, hour=9, minute=11, args=[bot],
                       id="founder_star_month", misfire_grace_time=6 * 3600, coalesce=True)
     scheduler.add_job(_agreement_issue_reminder_tick, "interval", minutes=10, args=[bot], id="salary_agreement_issue_reminder")
+    from services import leader_bonus
+
+    # 👔 Filial rahbari: yopilgan filial-kun natijasini muhrlab, rahbarga bitta xabar.
+    scheduler.add_job(leader_bonus.tick, "interval", minutes=5, args=[bot], id="leader_daily_results",
+                      coalesce=True, max_instances=1)
     scheduler.start()
     return scheduler

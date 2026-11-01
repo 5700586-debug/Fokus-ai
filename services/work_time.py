@@ -134,10 +134,8 @@ def get_entry(employee_id: int, work_date: str, conn=None) -> dict | None:
 
 
 def _shift(employee_id: int, work_date: str, conn) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?", (employee_id, work_date)
-    ).fetchone()
-    return dict(row) if row else None
+    from services.permanent_schedule import resolved_shift
+    return resolved_shift(conn, employee_id, work_date)
 
 
 def save_entry(employee_id: int, work_date: str, arrival, departure, entered_by: int, *, guard=None,
@@ -236,12 +234,8 @@ def month_summary(employee_id: int, start: str, last: str, conn=None) -> dict:
                 "WHERE employee_id = ? AND work_date >= ? AND work_date <= ?", (employee_id, start, last),
             ).fetchall()
         }
-        shifts = {
-            row["shift_date"]: dict(row) for row in conn.execute(
-                "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date <= ?",
-                (employee_id, start, last),
-            ).fetchall()
-        }
+        from services.permanent_schedule import resolved_range
+        shifts = resolved_range(conn, employee_id, start, last)
     finally:
         if owns:
             conn.close()

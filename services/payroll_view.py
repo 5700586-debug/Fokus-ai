@@ -96,6 +96,12 @@ def _star_bonus(employee_id: int, year_month: str) -> int:
     return int(row["bonus_amount"]) if row else 0
 
 
+def _is_branch_leader(employee_id: int) -> bool:
+    from roles import get_role
+
+    return get_role(employee_id) == "savdo_boshligi"
+
+
 def month_view(employee_id: int, year_month: str) -> dict:
     """Bir oy uchun hisob komponentlari va jami. Faqat o'qiydi. ``complete`` — hamma manba bor va cheklov yo'q."""
     start, next_start = _month_bounds(year_month)
@@ -163,6 +169,14 @@ def month_view(employee_id: int, year_month: str) -> dict:
     time_bonus = sources["time_bonus_days"] * TIME_BONUS_POINTS
     has_bonus_source = sources["evaluations"] or sources["audits"] or sources["time_bonus_days"]
     work_bonus = (sum(e["grade_points"] for e in sources["evaluations"]) + full_bonus + time_bonus) if has_bonus_source else None
+    leader = None
+    if _is_branch_leader(employee_id) and start.isoformat() >= work_time.ENTRIES_START:
+        # Filial rahbari: ish va vaqt bonusi O'Z bahosi/kelishidan emas, JAMOA natijasidan (kun yopilganda muhrlangan).
+        from services import leader_bonus
+
+        leader = leader_bonus.month_points(employee_id, start.isoformat(), last.isoformat())
+        time_bonus = leader["time_points"]
+        work_bonus = int(round(leader["time_points"] + leader["work_points"] + 1e-9)) if leader["days"] else None
     if work_bonus is None:
         unavailable["work_bonus"] = f"{NO_DATA}: shu oyda kunlik ish bahosi yo'q"
     minus = sum(p["amount"] for p in sources["penalties"]) + sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] != "day_full_bonus")
@@ -203,6 +217,7 @@ def month_view(employee_id: int, year_month: str) -> dict:
         "worked_days": worked["days"], "work_bonus": work_bonus, "time_bonus": time_bonus,
         "time_bonus_days": sources["time_bonus_days"], "minus": minus, "recognition": recognition, "extra_work": extra_work,
         "tariff": tariff, "tariff_award": tariff_award, "tariff_note": tariff_note, "star_bonus": star_bonus,
+        "leader": leader,
         **totals, "unavailable": unavailable, "limitations": limitations,
         "complete": not unavailable and not limitations and totals["total_amount"] is not None,
     }

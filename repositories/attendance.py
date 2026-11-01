@@ -100,14 +100,11 @@ _SHIFT_UPDATE_CLAUSE = ", ".join(f"{col} = excluded.{col}" for col in _SHIFT_UPS
 def get_shift_for_date(employee_id: int, shift_date: str) -> dict | None:
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?",
-            (employee_id, shift_date),
-        ).fetchone()
+        from services.permanent_schedule import resolved_shift
+        return resolved_shift(conn, employee_id, shift_date)
     finally:
         conn.close()
 
-    return dict(row) if row else None
 
 
 def _record_schedule_revision(

@@ -386,6 +386,20 @@ def _is_late_change(employee_id: int, shift_date: str) -> bool:
 
 
 
+
+def _check_finalized_month(employee_id: int, shift_date: str) -> None:
+    """Never change a star-decided month from legacy schedule paths."""
+    from db import get_connection
+    conn = get_connection()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM star_history WHERE user_id = ? AND year_month = ?",
+            (employee_id, shift_date[:7]),
+        ).fetchone():
+            raise PermissionError("Bu oy yulduz qarori bilan qulflangan.")
+    finally:
+        conn.close()
+
 def _check_nazoratchi_historical_permission(created_by: int | None, shift_date: str) -> None:
     """Legacy Telegram paths respect Founder's Mini App toggle."""
     if not created_by or shift_date >= company_time.today().isoformat():
@@ -417,6 +431,7 @@ def set_scheduled_work_shift(
     (``resolve_schedule_mode``) olinadi -- faqat audit/ma'lumot uchun,
     UNKNOWN bo'lsa ham yozuvning o'zi baribir amalga oshadi (chunki
     aniq ``start_text``/``end_text`` berilgan)."""
+    _check_finalized_month(employee_id, shift_date)
     _check_nazoratchi_historical_permission(created_by, shift_date)
     start_parsed = _parse_hhmm(start_text)
     end_parsed = _parse_hhmm(end_text)
@@ -440,6 +455,7 @@ def set_scheduled_day_off(
     employee_id: int, shift_date: str, source: str, created_by: int | None = None,
     schedule_mode: str | None = None, reason: str | None = None,
 ) -> None:
+    _check_finalized_month(employee_id, shift_date)
     _check_nazoratchi_historical_permission(created_by, shift_date)
     mode = schedule_mode if schedule_mode is not None else resolve_schedule_mode(employee_id)
     is_late = _is_late_change(employee_id, shift_date)

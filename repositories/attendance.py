@@ -79,10 +79,12 @@ def dashboard_records(employee_id: int, start_date: str, end_date: str, recent_d
         f"FROM attendance_reasons WHERE employee_id = ? AND event_date IN ({placeholders}) ORDER BY day",
         (employee_id, start_date, end_date, employee_id, start_date, end_date, employee_id, *recent_dates),
     ).fetchall()
+    # Dashboard uses the same effective-dated view as payroll (event/reason query remains unchanged).
+    shifts = get_schedule_for_range(employee_id, start_date, end_date, conn=conn)
     return {
         "events": [{"event_time": r["day"], "event_type": r["event_type"]} for r in rows if r["kind"] == "event"],
-        "shifts": [{"shift_date": r["day"], "planned_start": r["planned_start"], "planned_end": r["planned_end"],
-                    "status": r["status"]} for r in rows if r["kind"] == "shift"],
+        "shifts": [{"shift_date": r["shift_date"], "planned_start": r["planned_start"], "planned_end": r["planned_end"],
+                    "status": r["status"]} for r in shifts,
         "reasons": {r["day"]: {"reason_status": r["status"], "note": r["note"]}
                     for r in rows if r["kind"] == "reason"},
     }
@@ -229,16 +231,14 @@ def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive
     if owns:
         conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
-            "ORDER BY shift_date",
-            (employee_id, start_date, end_date_exclusive),
-        ).fetchall()
+        from datetime import date, timedelta
+        from services.permanent_schedule import resolved_range
+        first = date.fromisoformat(start_date)
+        last = date.fromisoformat(end_date_exclusive) - timedelta(days=1)
+        return list(resolved_range(conn, employee_id, first.isoformat(), last.isoformat()).values()) if last >= first else []
     finally:
         if owns:
             conn.close()
-
-    return [dict(row) for row in rows]
 
 
 # -------------------------------------- grafik o'zgartirish so'rovlari --

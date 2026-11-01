@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ENVIRONMENT: test
+      # Synthetic token; tests use RecordingBot and never contact Telegram.
+      TEST_BOT_TOKEN: '123456:TEST-TOKEN'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

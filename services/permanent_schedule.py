@@ -73,6 +73,9 @@ def set_default(employee_id: int, effective_from: str, start: str, end: str,
     try:
         if latest_version(conn, employee_id) != expected_version:
             raise ScheduleConflict("Grafik boshqa oynada o'zgargan")
+        if conn.execute("SELECT 1 FROM star_history WHERE user_id = ? AND year_month >= ? LIMIT 1",
+                        (employee_id, effective_from[:7])).fetchone():
+            raise ScheduleConflict("Yulduz qarori chiqqan oyga doimiy grafik kiritilmaydi")
         if conn.execute("SELECT 1 FROM employee_schedule_defaults WHERE employee_id = ? AND effective_from = ?",
                         (employee_id, effective_from)).fetchone():
             raise ScheduleConflict("Bu sanada doimiy grafik allaqachon belgilangan")

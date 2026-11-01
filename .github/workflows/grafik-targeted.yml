@@ -16,6 +16,8 @@ on:
       - 'assets/webapp/grafik.html'
       - 'tests/test_permanent_schedule.py'
       - 'tests/test_schedule_webapp.py'
+      - 'tests/test_period_report.py'
+      - 'services/period_report.py'
       - '.github/workflows/grafik-targeted.yml'
   workflow_dispatch: {}
 
@@ -35,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q tests/test_permanent_schedule.py tests/test_schedule_webapp.py tests/test_work_time.py tests/test_payroll_view.py tests/test_star_month.py
+      - run: python -m pytest -q tests/test_permanent_schedule.py tests/test_schedule_webapp.py tests/test_work_time.py tests/test_payroll_view.py tests/test_star_month.py tests/test_period_report.py
 
   postgres:
     runs-on: ubuntu-latest
@@ -77,4 +79,4 @@ jobs:
           assert parsed.hostname == "localhost" and parsed.path == "/fokus_test", "Non-test database blocked"
           assert os.environ["ENVIRONMENT"] == "test"
           PY
-      - run: python -m pytest -q tests/test_permanent_schedule.py tests/test_schedule_webapp.py tests/test_work_time.py tests/test_payroll_view.py tests/test_star_month.py
+      - run: python -m pytest -q tests/test_permanent_schedule.py tests/test_schedule_webapp.py tests/test_work_time.py tests/test_payroll_view.py tests/test_star_month.py tests/test_period_report.py

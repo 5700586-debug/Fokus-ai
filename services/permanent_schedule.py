@@ -72,10 +72,9 @@ def resolved_range(conn, employee_id: int, first: str, last: str) -> dict[str, d
 
 def latest_version(conn, employee_id: int) -> int:
     row = conn.execute(
-        "SELECT MAX(id) AS v FROM employee_schedule_defaults WHERE employee_id = ?",
-        (employee_id,),
+        "SELECT version FROM employee_schedule_default_versions WHERE employee_id = ?", (employee_id,),
     ).fetchone()
-    return int(row["v"] or 0)
+    return int(row["version"]) if row else 0
 
 
 def set_default(employee_id: int, effective_from: str, start: str, end: str,
@@ -109,11 +108,22 @@ def set_default(employee_id: int, effective_from: str, start: str, end: str,
         if old and old["planned_start"] == start and old["planned_end"] == end:
             return {"changed": False, "version": expected_version}
         conn.execute(
+            "INSERT INTO employee_schedule_default_versions(employee_id, version) VALUES(?, 0) "
+            "ON CONFLICT(employee_id) DO NOTHING", (employee_id,),
+        )
+        updated = conn.execute(
+            "UPDATE employee_schedule_default_versions SET version = version + 1 "
+            "WHERE employee_id = ? AND version = ? RETURNING version",
+            (employee_id, expected_version),
+        ).fetchone()
+        if updated is None:
+            raise ScheduleConflict("Grafik boshqa joyda o'zgargan")
+        conn.execute(
             "INSERT INTO employee_schedule_defaults (employee_id, effective_from, planned_start, planned_end, "
             "created_by, created_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (employee_id, effective_from, start, end, actor, now.isoformat(), reason),
         )
-        version = latest_version(conn, employee_id)
+        version = int(updated["version"])
         conn.commit()
         return {"changed": True, "version": version}
     except Exception:

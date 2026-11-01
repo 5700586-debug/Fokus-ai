@@ -121,6 +121,15 @@ def _star_bonus(employee_id: int, year_month: str) -> int:
     return int(row["bonus_amount"]) if row else 0
 
 
+def _unavailable_month(result: dict, reason: str) -> dict:
+    """No employment/period data: never display a calculated salary for days outside employment."""
+    return {**result, "plan_minutes": None, "fixed_salary": None, "worked_minutes": None, "worked_days": 0, "work_bonus": None,
+            "time_bonus": 0, "time_bonus_days": 0, "tariff": None, "tariff_award": 0, "tariff_note": None,
+            "star_bonus": 0, "minus": None, "recognition": None, "extra_work": None,
+            **compute_totals(None, None, None, None, None, None, None),
+            "unavailable": {"month": reason}, "limitations": [reason], "complete": False}
+
+
 def month_view(employee_id: int, year_month: str) -> dict:
     """Bir oy uchun hisob komponentlari va jami. Faqat o'qiydi. ``complete`` — hamma manba bor va cheklov yo'q."""
     start, next_start = _month_bounds(year_month)
@@ -131,12 +140,7 @@ def month_view(employee_id: int, year_month: str) -> dict:
     result = {"employee_id": employee_id, "year_month": year_month, "final": today >= next_start, "star_value": STAR_VALUE_SOM}
 
     if last < start:
-        reason = f"{NO_DATA}: oy hali boshlanmagan"
-        return {**result, "plan_minutes": None, "fixed_salary": None, "worked_minutes": None, "worked_days": 0, "work_bonus": None,
-                "time_bonus": 0, "time_bonus_days": 0, "tariff": None, "tariff_award": 0, "tariff_note": None,
-                "star_bonus": 0,
-                "minus": None, "recognition": None, "extra_work": None, **compute_totals(None, None, None, None, None, None, None),
-                "unavailable": {"month": reason}, "limitations": [reason], "complete": False}
+        return _unavailable_month(result, f"{NO_DATA}: oy hali boshlanmagan")
 
     # --- kelishuv (reja va fiks) ---
     agreements = agreements_repo.list_agreements(employee_id)
@@ -165,7 +169,11 @@ def month_view(employee_id: int, year_month: str) -> dict:
             # 2026-11 dan: aniq kelish/ketish, har kun grafik oynasiga kesilgan (yagona manba — aralashma yo'q).
             profile = employees.get_profile(employee_id, conn=conn, include_contacts=False)
             hire = (profile or {}).get("hire_date")
-            first = max(start.isoformat(), hire) if hire and hire[:10] <= last.isoformat() else start.isoformat()
+            # The employee was not employed during this period. Do not mark pre-hire days
+            # as missing/unknown or calculate a salary from an old-dated agreement.
+            if hire and hire[:10] > last.isoformat():
+                return _unavailable_month(result, f"{NO_DATA}: bu davrda xodim hali ishga kirmagan")
+            first = max(start.isoformat(), hire[:10]) if hire else start.isoformat()
             summary = work_time.month_summary(employee_id, first, last.isoformat(), conn=conn)
             worked = {"minutes": summary["minutes"], "days": summary["days"], "incomplete": 0, "exact": True}
             limitations += _day_gaps(summary)

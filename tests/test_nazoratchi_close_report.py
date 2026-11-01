@@ -9,7 +9,7 @@ from repositories import discipline as discipline_repo
 from repositories import time_bonus as time_bonus_repo
 from services import attendance as attendance_service
 from services import discipline, nazoratchi_close_report as report, nazoratchi_day
-from tests.bot_harness import send_callback
+from tests.bot_harness import send, send_callback
 
 pytestmark = pytest.mark.anyio
 
@@ -210,8 +210,10 @@ async def test_bot_sends_report_only_after_successful_close(bot_dp, rule):
     attendance_service.set_scheduled_work_shift(111, _today(), "09:00", "18:00", "test")
     _grade(113, discipline.GRADE_ALO)
 
-    blocked = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
-    text = blocked[0].text
+    asked = await send_callback(main.dp, bot, SUPERVISOR, data=f"bos:close:0:{_ymd()}", target_chat_id=SUPERVISOR)
+    assert "kamida 5 belgili izoh" in asked[0].text  # qat'iy yopish: hisobot faqat izoh bilan yopilgandan keyin
+    blocked = await send(main.dp, bot, SUPERVISOR, text="Vaqt yetmadi, ertaga tekshiraman")
+    text = next(m.text for m in blocked if "nazorati yopildi" in (getattr(m, "text", "") or ""))
     assert "baholanmadi" in text and discipline.get_daily_grade(111, _today()) is None
     assert f"✅ {BRANCH_A} nazorati yopildi" in text and "baholangan: 1/2" in text
     assert "• Pending T" in text and "• Nograf T" in text

@@ -273,6 +273,78 @@ def save(user_id: int, raw_changes, reason) -> dict:
     return {"ok": True, "saved": saved, "notify": notify}
 
 
+
+def permanent_info(user_id: int) -> dict:
+    """Only scoped employees; no phone/salary data."""
+    conn = get_connection()
+    try:
+        branches = []
+        for branch in visible_branches(user_id):
+            people = nazoratchi_day.branch_employees(branch, exclude_user_id=user_id)
+            items = []
+            for profile in people:
+                emp = profile["user_id"]
+                row = conn.execute(
+                    "SELECT * FROM employee_schedule_defaults WHERE employee_id = ? "
+                    "ORDER BY effective_from DESC, id DESC LIMIT 1", (emp,),
+                ).fetchone()
+                items.append({"id": emp, "name": nazoratchi_day.full_name(profile),
+                              "default": {"start": row["planned_start"], "end": row["planned_end"],
+                                          "effective_from": row["effective_from"]} if row else None,
+                              "version": permanent_schedule.latest_version(conn, emp)})
+            branches.append({"name": branch, "employees": items})
+        return {"ok": True, "branches": branches}
+
+
+def save_permanent(user_id: int, employee_id, effective_from, start, end, expected_version, reason=None) -> dict:
+    if not isinstance(employee_id, int) or isinstance(employee_id, bool) or not isinstance(expected_version, int):
+        raise WebAppError(400, "Noto'g'ri ma'lumot.")
+    if employee_id == user_id:
+        raise WebAppError(403, "O'zingizning grafigingizni o'zgartira olmaysiz.")
+    profile = employees.get_profile(employee_id, include_contacts=False)
+    if profile is None or employees.supervision_branch(profile) not in set(visible_branches(user_id)):
+        raise WebAppError(403, "Bu xodim sizning filialingizda emas.")
+    if employee_id not in {p["user_id"] for p in nazoratchi_day.branch_employees(
+            employees.supervision_branch(profile), exclude_user_id=user_id)}:
+        raise WebAppError(403, "Bu xodimga ruxsat yo'q.")
+    try:
+        applied = permanent_schedule.set_default(
+            employee_id, str(effective_from), str(start), str(end), user_id, expected_version,
+            (str(reason).strip()[:300] or None) if reason else None,
+        )
+    except (ValueError, TypeError) as err:
+        raise WebAppError(409, str(err)) from None
+    return {"ok": True, **applied, "employee_id": employee_id, "effective_from": effective_from,
+            "start": start, "end": end}
+
+
+def edit_settings(user_id: int) -> dict:
+    if not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES):
+        raise WebAppError(403, "Faqat Asoschi.")
+    conn = get_connection()
+    try:
+        return {"ok": True, "allow_nazoratchi_past": permanent_schedule.can_edit_past(conn)}
+    finally:
+        conn.close()
+
+
+def save_edit_settings(user_id: int, enabled) -> dict:
+    if not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES):
+        raise WebAppError(403, "Faqat Asoschi.")
+    if not isinstance(enabled, bool):
+        raise WebAppError(400, "Ruxsat qiymati noto'g'ri.")
+    conn = get_connection()
+    try:
+        changed = permanent_schedule.set_past_permission(conn, enabled, user_id)
+        conn.commit()
+        return {"ok": True, "changed": changed, "allow_nazoratchi_past": enabled}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def notify_text(lines: list[tuple[str, str]]) -> str:
     """Bitta saqlashda xodimga bitta xabar: kunlar tartib bilan."""
     body = "\n".join(text for _day, text in sorted(lines))

@@ -1119,8 +1119,15 @@ def register(dp: Dispatcher, openai_client) -> None:
             work_date = nazoratchi_day.active_day(actor_id, now, snapshot=snapshot).work_date
         else:
             work_date = nazoratchi_day.active_day(actor_id, company_time.now()).work_date
-        time_bonus = time_bonus_service.get_today_status(profile["user_id"])
-        show_button = (time_bonus is None) if show_time_bonus_button is None else show_time_bonus_button
+        from services import work_time
+
+        # Vaqt bonusi holati ISH KUNI bo'yicha (06:00 chegarasi, baho bilan bir xil). 2026-11 dan bonus faqat aniq
+        # kelish vaqtidan avtomatik — qo'lda tasdiqlash tugmasi ko'rsatilmaydi.
+        time_bonus = time_bonus_service.get_status(profile["user_id"], work_date)
+        if work_date >= work_time.ENTRIES_START:
+            show_button = False
+        else:
+            show_button = (time_bonus is None) if show_time_bonus_button is None else show_time_bonus_button
         text = _simple_employee_card_text(profile, work_date, time_bonus)
         keyboard = _employee_card_keyboard(
             employees.supervision_branch(profile), profile["user_id"], show_time_bonus_button=show_button, work_date=work_date
@@ -1158,7 +1165,13 @@ def register(dp: Dispatcher, openai_client) -> None:
             await callback.answer("Xodim topilmadi.", show_alert=True)
             return
 
-        granted = time_bonus_service.confirm_manual(user_id, callback.from_user.id)
+        from services import work_time
+
+        work_date = nazoratchi_day.active_day(callback.from_user.id, company_time.now()).work_date
+        if work_date >= work_time.ENTRIES_START:
+            await callback.answer("Vaqt bonusi endi kelish vaqtidan avtomatik beriladi.", show_alert=True)
+            return
+        granted = time_bonus_service.confirm_manual(user_id, callback.from_user.id, work_date)
         await callback.answer("✅ Vaqt bonusi tasdiqlandi." if granted else "ℹ️ Bugun uchun allaqachon tasdiqlangan.")
 
         if callback.message:

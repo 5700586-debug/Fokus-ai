@@ -132,18 +132,27 @@ def month_view(employee_id: int, year_month: str) -> dict:
 
     from db import get_connection
 
+    from services import work_time
+
     conn = get_connection()
     try:
-        worked = _worked(employee_id, start, last, conn)
+        if start.isoformat() >= work_time.ENTRIES_START:
+            # 2026-11 dan: aniq kelish/ketish, har kun grafik oynasiga kesilgan (yagona manba — aralashma yo'q).
+            summary = work_time.month_summary(employee_id, start.isoformat(), last.isoformat(), conn=conn)
+            worked = {"minutes": summary["minutes"], "days": summary["days"], "incomplete": len(summary["no_departure"])}
+            if summary["no_schedule"]:
+                limitations.append(f"{len(summary['no_schedule'])} kunda grafik yo'q — o'sha kunlar hisoblanmadi")
+        else:
+            worked = _worked(employee_id, start, last, conn)
         sources = view_repo.month_sources(employee_id, start.isoformat(), (last + timedelta(days=1)).isoformat(), conn=conn)
     finally:
         conn.close()
 
     worked_minutes = worked["minutes"] if worked["days"] else None
     if worked_minutes is None:
-        unavailable["worked"] = f"{NO_DATA}: davomatda kirish va chiqishi to'liq kun yo'q"
+        unavailable["worked"] = f"{NO_DATA}: kelish va ketishi to'liq kiritilgan kun yo'q"
     if worked["incomplete"]:
-        limitations.append(f"{worked['incomplete']} kunda kirish bor, chiqish yo'q — ishlangan vaqt to'liq bo'lmasligi mumkin")
+        limitations.append(f"{worked['incomplete']} kunda ketish vaqti yo'q — o'sha kunlar hisoblanmadi")
 
     full_bonus = -sum(a["penalty_amount"] for a in sources["audits"] if a["event_type"] == "day_full_bonus")
     time_bonus = sources["time_bonus_days"] * TIME_BONUS_POINTS

@@ -12,11 +12,15 @@ SOURCE_AUTO = time_bonus_repo.SOURCE_AUTO
 SOURCE_MANUAL = time_bonus_repo.SOURCE_MANUAL
 
 
-def confirm_manual(employee_id: int, confirmed_by: int) -> bool:
-    """``True`` — bugungi kun uchun qo'lda tasdiqlandi (yangi yozuv),
-    ``False`` — bugun uchun allaqachon (AUTO yoki MANUAL) yozuv bor edi."""
-    today = company_time.today().isoformat()
-    return time_bonus_repo.grant(employee_id, today, SOURCE_MANUAL, confirmed_by)
+def confirm_manual(employee_id: int, confirmed_by: int, work_date: str | None = None) -> bool:
+    """``True`` — shu ish kuni uchun qo'lda tasdiqlandi (yangi yozuv), ``False`` — allaqachon yozuv bor edi.
+    ``work_date`` — 06:00 ish kuni (baho bilan bir xil); berilmasa kalendar bugun (eski chaqiruvlar uchun)."""
+    day = work_date or company_time.today().isoformat()
+    return time_bonus_repo.grant(employee_id, day, SOURCE_MANUAL, confirmed_by)
+
+
+def get_status(employee_id: int, work_date: str) -> dict | None:
+    return time_bonus_repo.get_for_date(employee_id, work_date)
 
 
 def get_today_status(employee_id: int) -> dict | None:

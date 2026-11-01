@@ -96,6 +96,9 @@ ACTION_DECIDE_ATTENDANCE_PERMISSION = "decide_attendance_permission"
 # ataylab qilinadigan qaror bo'lishi kerak, avtomatik emas.
 ACTION_MANAGE_SCHEDULE_POLICY = "manage_schedule_policy"
 ACTION_MANAGE_DAILY_SCHEDULE = "manage_daily_schedule"
+# 📅 Grafik ekrani (Mini App) — FAQAT shu ekran yo'llarida tekshiriladi; eski Telegram grafik buyruqlarini OCHMAYDI.
+# Filial rahbari: faqat o'z filiali va faqat boshlanmagan smenalar (``services/schedule_webapp.py``).
+ACTION_EDIT_BRANCH_SCHEDULE = "edit_branch_schedule"
 ACTION_MANAGE_MOBILITY_POLICY = "manage_mobility_policy"
 ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS = "manage_branch_visit_requirements"
 
@@ -160,6 +163,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         ACTION_EVALUATE_EMPLOYEE,
         ACTION_CLOSE_DAY,
         ACTION_MANAGE_DAILY_SCHEDULE,
+        ACTION_EDIT_BRANCH_SCHEDULE,
         ACTION_MANAGE_MOBILITY_POLICY,
         ACTION_MANAGE_BRANCH_VISIT_REQUIREMENTS,
         ACTION_OFFBOARD_EMPLOYEE,
@@ -168,6 +172,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "taminotchi": {ACTION_LOG_MARKET_OBSERVATION, ACTION_RECORD_SUPPLIER_PURCHASE, ACTION_VIEW_SUPPLIER_RESULTS},
     "savdo_boshligi": {
         ACTION_ENTER_MEAL_PLAN, ACTION_SUBMIT_INVENTORY_SNAPSHOT, ACTION_VIEW_BRANCH_AGREEMENT, ACTION_GIVE_EXTRA_STARS,
+        ACTION_EDIT_BRANCH_SCHEDULE,
     },
     "haydovchi": {ACTION_DRIVER_DAILY_CHECK},
     # Kassir faqat smenani boshlaydi/topshiradi; xarajatni rahbar/moliyachi kiritadi (ACTION_LOG_CASH_EXPENSE).

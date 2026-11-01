@@ -96,6 +96,10 @@ Robot (Claude Code) ishga tushirish usuli
 ✅ Founder hisobotlari: haftalik (har dushanba, o'tgan hafta) va oylik dashboard — tushunarli, zamonaviy.
 ✅ Ish tartibi (2026-10-31, qat'iy): har qadamda avval ChatGPT bilan tanqid/fidbek (2 raund), keyin bajarish. Test: kichik tuzatishda tez test, botga qo'shishdan oldin bir marta to'liq; pul/yulduz ishlarida doim to'liq.
 
+✅ Aniq ish vaqti (Muhammadiy, 2026-11-01): vaqt minut aniqligida kiritiladi; vaqt bonusi faqat grafik boshlanishidan OLDIN kelganda (07:59 → ha, 08:00 → yo'q) — erta kelish madaniyati uchun, erta ketsa ham qoladi; ishlangan vaqt = [max(kelish, boshlanish), min(ketish, tugash)] (18:20 → 18:00 gacha, 17:50 → 17:50); ortiqcha ish faqat qo'shimcha ish yulduzi orqali; Keldi/Ketdi'ni nazoratchi baholashda kiritadi, bonus va daqiqani bot grafikdan chiqaradi.
+✅ Grafik tahriri — c varianti (Muhammadiy, 2026-11-01): filial rahbari o'z filialini, nazoratchi hammasini tahrirlaydi; o'zgarish tarixi saqlanadi.
+💡 Filial rahbari bonusi xodimlari vaqt bonusiga bog'liq (Muhammadiy, 2026-11-01, NEW): tavsiya — oylik ulush (sababli kunlarsiz, rahbar kechiktirgan smenalarsiz), pog'onali (masalan ≥95% to'liq, 90–94% yarim). Chegara Muhammadiy qarorini kutmoqda.
+
 ## 5. Kelajak g'oyalari (tasdiqlanmagan yoki qisman)
 💡 Bot + Mini App bo'linishi (3-qism). Bot: xabar beradi, eslatadi, savol beradi, tasdiqlaydi. Mini App: ko'rsatadi, boshqaradi, taqqoslaydi. Hozir Mini App ga tegilmaydi.
 💡 Bugungi muammolar — Founder oynasi. Barcha modullar muammosi bitta ekranda. Holat: 🔴 shoshilinch · 🟡 bugun · ⏳ kutilmoqda · 🟢 hal. Tugma: 👀 ko'rdim · ➡️ mas'ulga · ✅ hal · ⏰ keyin eslat. Quruq qo'rqinchli ro'yxat emas. V1: faqat Founder, moliya yo'q, guruhga yubormaydi, AI hukm yo'q. (V1 qurilgan)

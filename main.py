@@ -514,6 +514,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
         "/grafiksorov — Grafik o'zgartirish so'rovlari",
         permissions.ACTION_MANAGE_DAILY_SCHEDULE,
     ),
+    ("nazoratchi", "/grafikekran — 📅 Grafik ekrani (hafta)", permissions.ACTION_EDIT_BRANCH_SCHEDULE),
     ("nazoratchi", "/natijam — Ta'minotchi bugungi natijasi", permissions.ACTION_VIEW_SUPPLIER_RESULTS),
     ("kassir", "/openshift — Kassa smenasini ochish", permissions.ACTION_OPEN_CASH_SHIFT),
     ("kassir", "/closeshift — Kassa smenasini yopish", permissions.ACTION_CLOSE_CASH_SHIFT),
@@ -529,6 +530,7 @@ _MENU_ENTRIES: list[tuple[str, str, str]] = [
     ),
     ("savdo_boshligi", "/mealplan — Ovqat rejasini kiritish", permissions.ACTION_ENTER_MEAL_PLAN),
     ("savdo_boshligi", "/qoshimchaish — Qo'shimcha ish yulduzi", permissions.ACTION_GIVE_EXTRA_STARS),
+    ("savdo_boshligi", "/grafikekran — 📅 Grafik ekrani (hafta)", permissions.ACTION_EDIT_BRANCH_SCHEDULE),
     ("haydovchi", "/drivercheck — Kunlik mashina/servis tekshiruvi", permissions.ACTION_DRIVER_DAILY_CHECK),
     ("taminotchi", "/marketlog — Bozor kuzatuvi qo'shish", permissions.ACTION_LOG_MARKET_OBSERVATION),
     ("taminotchi", "/xarid — Bugungi bozorlikni xarid qilish", permissions.ACTION_RECORD_SUPPLIER_PURCHASE),
@@ -706,6 +708,7 @@ _NAZORATCHI_BUTTON_LABELS: dict[str, str] = {
     "/baholash": "📋 Baholash",
     "/kunniyop": "✅ Filialni yopish",
     "/grafiksorov": "📅 Grafik so'rovlari",
+    "/grafikekran": "🗓 Grafik ekrani",
     "/natijam": "🏆 Bugungi natija",
 }
 
@@ -731,6 +734,7 @@ _OTHER_BUTTON_LABELS: dict[str, str] = {
     "/inventorysummary": "📈 Ombor xulosasi",
     "/mealplan": "🍽 Ovqat rejasi",
     "/qoshimchaish": "➕ Qo'shimcha ish yulduzi",
+    "/grafikekran": "🗓 Grafik ekrani",
     "/drivercheck": "🚚 Mashina tekshiruvi",
     "/marketlog": "📝 Bozor kuzatuvi",
     "/xarid": "🛒 Bozorlik xaridi",

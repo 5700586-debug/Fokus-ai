@@ -137,7 +137,7 @@ async def test_nazoratchi_menu_buttons_are_friendly_and_paired_two_per_row(bot_d
 
     assert [btn.text for btn in rows[0]] == ["🏬 Filialni tanlash", "📋 Baholash"]
     assert [btn.text for btn in rows[1]] == ["✅ Filialni yopish", "📅 Grafik so'rovlari"]
-    assert [btn.text for btn in rows[2]] == ["🏆 Bugungi natija"]
+    assert [btn.text for btn in rows[2]] == ["🗓 Grafik ekrani", "🏆 Bugungi natija"]
     assert [btn.text for btn in rows[3]] == ["🔙 Orqaga"]
     assert "⭐ Oylik ball qo'yish" not in [btn.text for row in rows for btn in row]  # nazoratchida oylik ball yo'q
 

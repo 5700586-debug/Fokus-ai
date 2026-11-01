@@ -4,6 +4,10 @@ GET  /app/baholash        — bitta statik sahifa (inline JS/CSS).
 POST /api/baholash/day    — {"initData"} -> faol ish kuni, filiallar, xodimlar holati.
 POST /api/baholash/grade  — {"initData", "employee_id", "grade"} -> ``services.grading_webapp.grade``.
 POST /api/baholash/time   — {"initData", "employee_id", "arrival", "departure", "expected_version"} -> ``save_time``.
+GET  /app/grafik          — 📅 Grafik ekrani (nazoratchi — hamma filial; filial rahbari — o'z filiali).
+POST /api/grafik/week     — {"initData", "week_start"} -> ``services.schedule_webapp.week_payload``.
+POST /api/grafik/save     — {"initData", "changes": [...], "reason"} -> bitta tranzaksiya; xodimga bitta xabar.
+POST /api/grafik/history  — {"initData", "employee_id", "date"} -> katak tarixi.
 
 Foydalanuvchi faqat imzolangan initData'dan aniqlanadi; CORS sarlavhalari yo'q; javob keshlanmaydi.
 """
@@ -16,22 +20,24 @@ from pathlib import Path
 
 from aiohttp import web
 
-from services import grading_webapp
+from services import grading_webapp, schedule_webapp
 
 logger = logging.getLogger(__name__)
 
 PAGE_PATH = "/app/baholash"
+GRAFIK_PATH = "/app/grafik"
 _PAGE_FILE = Path(__file__).resolve().parent / "assets" / "webapp" / "baholash.html"
+_GRAFIK_FILE = Path(__file__).resolve().parent / "assets" / "webapp" / "grafik.html"
 _MAX_BODY = 16 * 1024
 _NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
-def page_url() -> str | None:
+def page_url(path: str = PAGE_PATH) -> str | None:
     """Mini App manzili. Render ``RENDER_EXTERNAL_URL``ni o'zi beradi; boshqa joyda ``WEBAPP_BASE_URL``. Faqat https."""
     base = (os.getenv("WEBAPP_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
     if not base.startswith("https://"):
         return None
-    return base + PAGE_PATH
+    return base + path
 
 
 def _json(data: dict, status: int = 200) -> web.Response:
@@ -51,15 +57,18 @@ async def _read_body(request: web.Request) -> dict:
 
 
 def add_routes(app: web.Application, *, bot, bot_token: str, fsm_storage=None) -> None:
-    async def page(request: web.Request) -> web.Response:
-        return web.Response(
-            text=_PAGE_FILE.read_text(encoding="utf-8"), content_type="text/html", charset="utf-8", headers=_NO_STORE
-        )
+    def _page(file: Path):
+        async def page(request: web.Request) -> web.Response:
+            return web.Response(
+                text=file.read_text(encoding="utf-8"), content_type="text/html", charset="utf-8", headers=_NO_STORE
+            )
 
-    async def _handle(request: web.Request, action) -> web.Response:
+        return page
+
+    async def _handle(request: web.Request, action, allowed=None) -> web.Response:
         try:
             body = await _read_body(request)
-            user_id = grading_webapp.authenticate(str(body.get("initData") or ""), bot_token)
+            user_id = grading_webapp.authenticate(str(body.get("initData") or ""), bot_token, allowed=allowed)
             grading_webapp.check_rate(user_id)
             return _json(await action(user_id, body))
         except grading_webapp.WebAppError as error:
@@ -87,7 +96,37 @@ def add_routes(app: web.Application, *, bot, bot_token: str, fsm_storage=None) -
 
         return await _handle(request, action)
 
-    app.router.add_get(PAGE_PATH, page)
+    async def grafik_week(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return {"ok": True, **schedule_webapp.week_payload(user_id, body.get("week_start"))}
+
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    async def grafik_save(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            result = schedule_webapp.save(user_id, body.get("changes"), body.get("reason"))
+            notify = result.pop("notify")
+            for employee_id, lines in notify.items():  # saqlangandan KEYIN; xabar ketmasa grafik baribir saqlangan
+                try:
+                    await bot.send_message(employee_id, schedule_webapp.notify_text(lines))
+                except Exception:  # noqa: BLE001 - xodim botni bloklagan bo'lishi mumkin
+                    logger.warning("Grafik xabari yuborilmadi: %s", employee_id)
+            result["notified"] = len(notify)
+            return result
+
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    async def grafik_history(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return schedule_webapp.history(user_id, body.get("employee_id"), body.get("date"))
+
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    app.router.add_get(PAGE_PATH, _page(_PAGE_FILE))
+    app.router.add_get(GRAFIK_PATH, _page(_GRAFIK_FILE))
+    app.router.add_post("/api/grafik/week", grafik_week)
+    app.router.add_post("/api/grafik/save", grafik_save)
+    app.router.add_post("/api/grafik/history", grafik_history)
     app.router.add_post("/api/baholash/day", day)
     app.router.add_post("/api/baholash/grade", grade)
     app.router.add_post("/api/baholash/time", save_time)

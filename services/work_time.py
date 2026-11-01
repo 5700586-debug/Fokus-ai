@@ -205,19 +205,23 @@ def _sync_time_bonus(conn, employee_id: int, work_date: str, earned: bool, actor
         )
 
 
-def resync_day(employee_id: int, work_date: str, actor: int) -> DayResult | None:
-    """Grafik keyin kiritilgan/o'zgargan kun uchun vaqt bonusini qayta sinxronlash (yozuv bo'lsa)."""
-    conn = get_connection()
+def resync_day(employee_id: int, work_date: str, actor: int, conn=None) -> DayResult | None:
+    """Grafik keyin kiritilgan/o'zgargan kun uchun vaqt bonusini qayta sinxronlash (yozuv bo'lsa).
+    ``conn`` berilsa — chaqiruvchi tranzaksiyasi ICHIDA (commit chaqiruvchida)."""
+    owns = conn is None
+    conn = conn or get_connection()
     try:
         entry = get_entry(employee_id, work_date, conn=conn)
         if entry is None or work_date < ENTRIES_START:
             return None
         result = compute_day(work_date, _shift(employee_id, work_date, conn), entry["arrival"], entry["departure"])
         _sync_time_bonus(conn, employee_id, work_date, result.time_bonus, actor, _now())
-        conn.commit()
+        if owns:
+            conn.commit()
         return result
     finally:
-        conn.close()
+        if owns:
+            conn.close()
 
 
 def month_summary(employee_id: int, start: str, last: str, conn=None) -> dict:

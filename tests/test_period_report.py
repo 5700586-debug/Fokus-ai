@@ -124,3 +124,96 @@ async def test_founder_button_sends_report_and_others_are_denied(bot_dp, monkeyp
     assert any(isinstance(m, SendPhoto) and m.chat_id == FOUNDER_ID for m in sent)
     denied = await send_callback(main.dp, bot, 999999, data="frep:weekly", target_chat_id=999999)
     assert not any(isinstance(m, SendPhoto) for m in denied)
+
+
+
+async def test_founder_report_timing_stages_and_privacy(monkeypatch, capsys):
+    """Live diagnostics separate AI and Pillow; never print captions, IDs, or report data."""
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    fake_report = SimpleNamespace(totals=SimpleNamespace(graded=1, penalty_count=0))
+    private_caption = "ONLY_TEST_PRIVATE_CAPTION"
+
+    def fake_collect(_period):
+        time.sleep(0.015)
+        return fake_report
+
+    async def fake_ai(_client, _report):
+        await asyncio.sleep(0.035)
+        return private_caption
+
+    def fake_render(_report):
+        time.sleep(0.030)
+        return b"fake image bytes"
+
+    class Bot:
+        sent = 0
+
+        async def send_photo(self, chat_id, photo, caption=None):
+            assert chat_id == 123456789 and caption == private_caption
+            await asyncio.sleep(0.020)
+            self.sent += 1
+
+        async def send_message(self, *_args, **_kwargs):
+            raise AssertionError("Expected one photo, not text fallback")
+
+    monkeypatch.setattr(period_report, "collect", fake_collect)
+    monkeypatch.setattr(period_report, "ai_summary", fake_ai)
+    monkeypatch.setattr(period_report, "render_dashboard", fake_render)
+    bot = Bot()
+    await period_report.send_report(bot, object(), "month", 123456789, date(2026, 11, 1))
+    log = capsys.readouterr().out
+    assert bot.sent == 1 and log.count("FOUNDER_REPORT_TIMING ") == 1
+    assert private_caption not in log and "123456789" not in log
+    fields = dict(pair.split("=", 1) for pair in log.split("FOUNDER_REPORT_TIMING ", 1)[1].split())
+    assert fields["kind"] == "month" and fields["outcome"] == "ok"
+    assert fields["render_status"] == "ok" and fields["ai_requested"] == "1"
+    assert int(fields["collect_ms"]) >= 10
+    assert int(fields["ai_ms"]) >= 30
+    assert int(fields["render_ms"]) >= 25
+    assert int(fields["telegram_ms"]) >= 15
+    assert int(fields["total_ms"]) >= sum(int(fields[f"{s}_ms"]) for s in
+                                         ("collect", "ai", "render", "telegram")) - 4
+
+
+async def test_founder_report_render_failure_logs_fallback_and_still_sends(monkeypatch, capsys):
+    from types import SimpleNamespace
+    fake_report = SimpleNamespace(totals=SimpleNamespace(graded=0, penalty_count=0))
+
+    def bad_render(_report):
+        raise RuntimeError("PRIVATE_IMAGE_ERROR")
+
+    async def fake_ai(_client, _report):
+        return "Qisqa xulosa"
+
+    class Bot:
+        messages = []
+
+        async def send_message(self, chat_id, text):
+            self.messages.append((chat_id, text))
+
+    monkeypatch.setattr(period_report, "collect", lambda _period: fake_report)
+    monkeypatch.setattr(period_report, "ai_summary", fake_ai)
+    monkeypatch.setattr(period_report, "render_dashboard", bad_render)
+    bot = Bot()
+    await period_report.send_report(bot, None, "week", 123456789, date(2026, 10, 26))
+    log = capsys.readouterr().out
+    assert bot.messages == [(123456789, "Qisqa xulosa")]
+    assert "PRIVATE_IMAGE_ERROR" not in log and "123456789" not in log
+    assert "render_status=fallback" in log and "ai_requested=0" in log
+    assert "outcome=ok" in log and "telegram_ms=" in log
+
+
+async def test_founder_report_collect_error_still_logs_without_changing_exception(monkeypatch, capsys):
+    def bad_collect(_period):
+        raise ValueError("PRIVATE_DB_ERROR")
+
+    monkeypatch.setattr(period_report, "collect", bad_collect)
+    with pytest.raises(ValueError, match="PRIVATE_DB_ERROR"):
+        await period_report.send_report(None, None, "week", 123456789, date(2026, 10, 26))
+    log = capsys.readouterr().out
+    assert "outcome=error" in log and "collect_ms=" in log
+    assert "ai_ms=-1" in log and "render_ms=-1" in log and "telegram_ms=-1" in log
+    assert "PRIVATE_DB_ERROR" not in log and "123456789" not in log

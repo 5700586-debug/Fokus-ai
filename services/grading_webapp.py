@@ -112,10 +112,8 @@ def time_payload(employee_id: int, work_date: str) -> dict:
 
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?", (employee_id, work_date)
-        ).fetchone()
-        shift = dict(row) if row else None
+        from services.permanent_schedule import resolved_shift
+        shift = resolved_shift(conn, employee_id, work_date)
         entry = work_time.get_entry(employee_id, work_date, conn=conn)
         version = work_time.current_version(employee_id, work_date, conn=conn)
     finally:

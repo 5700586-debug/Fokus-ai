@@ -134,10 +134,8 @@ def get_entry(employee_id: int, work_date: str, conn=None) -> dict | None:
 
 
 def _shift(employee_id: int, work_date: str, conn) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?", (employee_id, work_date)
-    ).fetchone()
-    return dict(row) if row else None
+    from services.permanent_schedule import resolved_shift
+    return resolved_shift(conn, employee_id, work_date)
 
 
 def save_entry(employee_id: int, work_date: str, arrival, departure, entered_by: int, *, guard=None,
@@ -224,9 +222,23 @@ def resync_day(employee_id: int, work_date: str, actor: int, conn=None) -> DayRe
             conn.close()
 
 
+# attendance_reasons: rahbar ruxsati tasdiqlangan yoki fors-major (grafikdagi "dam" bilan bir xil narsa EMAS)
+_APPROVED_ABSENCE = frozenset({"manager_permission_approved", "force_majeure"})
+
+
 def month_summary(employee_id: int, start: str, last: str, conn=None) -> dict:
-    """``[start, last]`` ish kunlari bo'yicha: ishlangan daqiqa (faqat hisoblangan kunlar), kunlar soni va
-    hisoblanmagan kunlar (grafik yo'q / ketish yo'q). Faqat O'QIYDI."""
+    """``[start, last]`` bo'yicha kunlar tasnifi. Faqat O'QIYDI; noma'lum kun HECH QACHON "kelmagan" yoki 0 soat deb
+    yozilmaydi:
+
+    * ``minutes``/``days`` — hisoblangan (kelish+ketish bor) kunlar;
+    * ``no_schedule`` (yozuv bor, grafik yo'q/dam), ``no_arrival``, ``no_departure`` — yozuvi to'liq bo'lmagan kunlar;
+    * ``day_off`` — grafikda dam, yozuvsiz (tasdiqlangan dam, muammo emas);
+    * ``permitted`` — ish kuni, yozuvsiz, lekin rahbar ruxsati/fors-major tasdiqlangan (to'lov qoidasi bu yerda hal qilinmaydi);
+    * ``missing`` — grafikda ish kuni, smena tugagan, yozuv ham, tasdiqlangan sabab ham yo'q;
+    * ``unknown`` — na grafik, na yozuv, na sabab;
+    * ``ongoing`` — smena hali tugamagan (tungi smena, bugungi kun): hali baholanmaydi."""
+    import company_time
+
     owns = conn is None
     conn = conn or get_connection()
     try:
@@ -236,25 +248,58 @@ def month_summary(employee_id: int, start: str, last: str, conn=None) -> dict:
                 "WHERE employee_id = ? AND work_date >= ? AND work_date <= ?", (employee_id, start, last),
             ).fetchall()
         }
-        shifts = {
-            row["shift_date"]: dict(row) for row in conn.execute(
-                "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date <= ?",
-                (employee_id, start, last),
+        reasons = {
+            row["event_date"]: row["reason_status"] for row in conn.execute(
+                "SELECT event_date, reason_status FROM attendance_reasons "
+                "WHERE employee_id = ? AND event_date >= ? AND event_date <= ?", (employee_id, start, last),
             ).fetchall()
         }
+        from services.permanent_schedule import resolved_range
+        shifts = resolved_range(conn, employee_id, start, last)
     finally:
         if owns:
             conn.close()
-    summary = {"minutes": 0, "days": 0, "no_schedule": [], "no_departure": [], "bonus_days": []}
-    for work_date, entry in sorted(entries.items()):
-        result = compute_day(work_date, shifts.get(work_date), entry["arrival"], entry["departure"])
-        if result.time_bonus:
-            summary["bonus_days"].append(work_date)
-        if result.status == STATUS_OK:
-            summary["minutes"] += result.minutes
-            summary["days"] += 1
-        elif result.status in (STATUS_NO_SCHEDULE, STATUS_DAY_OFF):
-            summary["no_schedule"].append(work_date)
-        elif result.status in (STATUS_NO_DEPARTURE, STATUS_NO_ARRIVAL):
-            summary["no_departure"].append(work_date)
+    summary = {"minutes": 0, "days": 0, "no_schedule": [], "no_departure": [], "no_arrival": [], "bonus_days": [],
+               "day_off": [], "permitted": [], "missing": [], "unknown": [], "ongoing": []}
+    tz, now, today = company_time.resolve_timezone(), company_time.now(), company_time.today().isoformat()
+
+    def closed(work_date: str, shift: dict | None) -> bool:
+        if not shift or shift.get("status") != "work" or not shift.get("planned_start") or not shift.get("planned_end"):
+            return work_date < today
+        day = date.fromisoformat(work_date)
+        begin, end = _at(day, shift["planned_start"], tz), _at(day, shift["planned_end"], tz)
+        if end <= begin:  # tungi smena
+            end += timedelta(days=1)
+        return now >= end
+
+    day = date.fromisoformat(start)
+    while day <= date.fromisoformat(last):
+        work_date, shift, entry = day.isoformat(), shifts.get(day.isoformat()), entries.get(day.isoformat())
+        day += timedelta(days=1)
+        if entry is not None:
+            result = compute_day(work_date, shift, entry["arrival"], entry["departure"])
+            if result.time_bonus:
+                summary["bonus_days"].append(work_date)
+            if result.status == STATUS_OK:
+                summary["minutes"] += result.minutes
+                summary["days"] += 1
+            elif result.status in (STATUS_NO_SCHEDULE, STATUS_DAY_OFF):
+                summary["no_schedule"].append(work_date)
+            elif not closed(work_date, shift):
+                summary["ongoing"].append(work_date)
+            elif result.status == STATUS_NO_ARRIVAL:
+                summary["no_arrival"].append(work_date)
+            else:
+                summary["no_departure"].append(work_date)
+            continue
+        if shift is not None and shift.get("status") == "off":
+            summary["day_off"].append(work_date)
+        elif reasons.get(work_date) in _APPROVED_ABSENCE:
+            summary["permitted"].append(work_date)
+        elif shift is not None and shift.get("status") == "work":
+            summary["missing" if closed(work_date, shift) else "ongoing"].append(work_date)
+        elif work_date >= today:
+            summary["ongoing"].append(work_date)
+        else:
+            summary["unknown"].append(work_date)
     return summary

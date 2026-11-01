@@ -80,7 +80,7 @@
 <header>
   <div class="wk"><button class="nav" id="prev">◀</button><b id="wk">🗓 Grafik</b><button class="nav" id="next">▶</button></div>
   <div class="tabs" id="tabs"></div>
-  <div class="tools"><button class="tool" id="fill">⚡ Tez to'ldirish</button><button class="tool" id="copy">📋 O'tgan haftadan</button></div>
+  <div class="tools"><button class="tool" id="fill">⚡ Tez to'ldirish</button><button class="tool" id="copy">📋 O'tgan haftadan</button><button class="tool" id="permanent">♾ Doimiy grafik</button><button class="tool" id="past-settings" style="display:none">⚙️ Ruxsatlar</button></div>
 </header>
 <main id="list"><div class="msg">Yuklanmoqda…</div></main>
 <div class="bar" id="bar">
@@ -133,6 +133,7 @@
   function render() {
     var d = state.data;
     $("wk").textContent = "🗓 " + dm(d.days[0].date) + " – " + dm(d.days[6].date);
+    $("past-settings").style.display = d.founder ? "inline-block" : "none";
     if (!branch()) state.branch = d.branches.length ? d.branches[0].name : null;
     $("tabs").innerHTML = d.branches.map(function (b, i) {
       return '<button class="tab' + (b.name === state.branch ? " on" : "") + '" data-i="' + i + '">' + esc(b.name) + "</button>";
@@ -147,7 +148,7 @@
         var cls = "c" + (c.date === d.today ? " today" : "") + (s === "off" ? " off" : "") + (!s ? " none" : "") +
           (dr ? " dirty" : "") + (c.locked ? " lock" : "") + (c.late ? " late" : "");
         return '<button class="' + cls + '" data-e="' + e.id + '" data-d="' + c.date + '"><span class="dl">' +
-          d.days[i].label + " " + c.date.slice(8, 10) + "</span>" + cellText(s, esc(a), esc(bb)) + "</button>";
+          d.days[i].label + " " + c.date.slice(8, 10) + (c.inherited && !dr ? " ♾" : "") + "</span>" + cellText(s, esc(a), esc(bb)) + "</button>";
       }).join("") + "</div></div>";
     }).join("");
     html += '<div class="note">Belgilar: <b>—</b> grafik yo\'q · sariq — saqlanmagan · xira — o\'zgartirib bo\'lmaydi' +
@@ -323,6 +324,72 @@
     });
   }
 
+  // Sanali doimiy grafik: alohida kunlar va o'tgan maoshga tegmaydi.
+  function openPermanent() {
+    api("/api/grafik/permanent", {}).then(function (j) {
+      if (!j.ok) { state.note = { kind:"err", text:j.error || "Ochilmadi." }; render(); return; }
+      var b = j.branches.find(function (x) { return x.name === state.branch; }) || j.branches[0];
+      if (!b || !b.employees.length) return;
+      var p = '<h3>♾ Doimiy grafik</h3><div class="sub">Bir marta belgilang. Oldingi va kunlik alohida yozilgan grafiklar saqlanadi. ♾ belgisi doimiy grafikdan olingan kunni bildiradi.</div>' +
+        '<div><label>Xodim</label><select id="dp-employee" style="width:100%;padding:10px">' +
+        b.employees.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join('') +
+        '</select></div><div id="dp-current" class="sub"></div>' +
+        '<div><label>Qachondan</label><input type="date" id="dp-date" value="' + (function () { var d = new Date(state.data.today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0,10); })() + '" style="width:100%;padding:10px"></div>' +
+        '<div class="tin"><div><label>Boshlanish</label><input type="time" id="dp-start" value="08:00"></div>' +
+        '<div><label>Tugash</label><input type="time" id="dp-end" value="18:00"></div></div>' +
+        '<div><label>Sabab (ixtiyoriy)</label><input id="dp-reason" maxlength="300"></div>' +
+        '<div class="err" id="dp-error"></div><div class="row"><button class="btn sec" id="dp-cancel">Bekor</button><button class="btn" id="dp-save">Saqlash</button></div>';
+      $("panel").innerHTML = p; $("sheet").classList.add("on");
+      function selected() { return b.employees.find(function (e) { return +$("dp-employee").value === e.id; }); }
+      function refresh() { var e = selected(); $("dp-current").textContent = e.default ?
+        ("Hozir: " + e.default.start + "–" + e.default.end + " (" + e.default.effective_from + " dan)") :
+        "Doimiy grafik hali yo'q."; if (e.default) { $("dp-start").value = e.default.start; $("dp-end").value = e.default.end; } }
+      $("dp-employee").onchange = refresh; refresh();
+      $("dp-cancel").onclick = function () { $("sheet").classList.remove("on"); };
+      $("dp-save").onclick = function () {
+        var e = selected(), from = $("dp-date").value, a = $("dp-start").value, end = $("dp-end").value;
+        if (!from || !a || !end || a === end) { $("dp-error").textContent = "Sana va vaqtni tekshiring."; return; }
+        confirmBox(e.name + ": " + from + " sanadan " + a + "–" + end + " doimiy grafik saqlansinmi?", function (ok) {
+          if (!ok) return;
+          $("dp-save").disabled = true;
+          api("/api/grafik/permanent/save", {employee_id:e.id, effective_from:from, start:a, end:end,
+              expected_version:e.version, reason:$("dp-reason").value}).then(function (response) {
+            $("dp-save").disabled = false;
+            if (!response.ok) { $("dp-error").textContent = response.error || "Saqlanmadi."; return; }
+            $("sheet").classList.remove("on");
+            state.note = {kind:"ok",text:response.changed ? "✅ Doimiy grafik saqlandi." : "Grafik o'zgarmadi."};
+            load(state.week);
+          }).catch(function () { $("dp-save").disabled = false; $("dp-error").textContent = "Aloqa uzildi. Qayta ochib tekshiring."; });
+        });
+      };
+    }).catch(function () { state.note = {kind:"err",text:"Internet yo'q."}; render(); });
+  }
+
+  function openPastSettings() {
+    api("/api/grafik/settings", {}).then(function (j) {
+      if (!j.ok) return;
+      $("panel").innerHTML = '<h3>⚙️ Eski grafik ruxsati</h3><div class="sub">Nazoratchi eski kunlarni sabab ko\'rsatib o\'zgartira olsinmi?</div>' +
+        '<div class="row"><button class="btn" id="ps-on">✅ Yoqish</button><button class="btn sec" id="ps-off">⛔ O\'chirish</button></div>' +
+        '<div class="sub" id="ps-status"></div><button class="btn sec" id="ps-close">Yopish</button>';
+      $("sheet").classList.add("on");
+      function status(enabled) { $("ps-status").textContent = "Hozir: " + (enabled ? "Yoqilgan" : "O'chirilgan"); }
+      status(j.allow_nazoratchi_past);
+      $("ps-close").onclick = function () { $("sheet").classList.remove("on"); load(state.week); };
+      function set(enabled) {
+        api("/api/grafik/settings/save", {allow_nazoratchi_past:enabled}).then(function (v) {
+          if (v.ok) status(v.allow_nazoratchi_past);
+          else $("ps-status").textContent = v.error || "Xato";
+        }).catch(function () { $("ps-status").textContent = "Aloqa xatosi"; });
+      }
+      $("ps-on").onclick = function () {
+        confirmBox("Nazoratchiga eski grafikni o'zgartirish ruxsati berilsinmi?", function (ok) { if (ok) set(true); });
+      };
+      $("ps-off").onclick = function () {
+        confirmBox("Nazoratchining eski grafikni o'zgartirish ruxsati yopilsinmi?", function (ok) { if (ok) set(false); });
+      };
+    });
+  }
+
   $("tabs").addEventListener("click", function (ev) {
     var t = ev.target.closest(".tab"); if (!t) return;
     state.branch = state.data.branches[+t.getAttribute("data-i")].name; state.note = null; render(); window.scrollTo(0, 0);
@@ -336,6 +403,8 @@
   $("next").onclick = function () { if (state.data) { state.note = null; load(state.data.next_week); } };
   $("fill").onclick = openFill;
   $("copy").onclick = copyPrev;
+  $("permanent").onclick = openPermanent;
+  $("past-settings").onclick = openPastSettings;
   $("save").onclick = save;
   $("discard").onclick = function () {
     confirmBox("Saqlanmagan " + draftCount() + " ta o'zgarish bekor qilinsinmi?", function (ok) {

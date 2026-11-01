@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -480,23 +481,63 @@ def render_dashboard(report: Report) -> bytes:
 
 
 async def send_report(bot, client, kind: str, chat_id: int, today: date) -> None:
-    """Hisobotni yig'ib, rasm + xulosa bilan yuboradi (bazaga yozmaydi)."""
+    """Hisobotni yuboradi; to'rtta bosqich vaqtini shaxsiy ma'lumotsiz o'lchaydi."""
     import asyncio
 
     from aiogram.types import BufferedInputFile
 
-    period = last_full_period(kind, today)
-    report = await asyncio.to_thread(collect, period)
-    summary = await ai_summary(client, report)
+    # -1 = bosqich boshlanmagan. Diagnostika xatosi hisobotni to'xtatmaydi.
+    stage_ms = {"collect": -1, "ai": -1, "render": -1, "telegram": -1}
+    started = time.perf_counter()
+    outcome, render_status, ai_requested = "error", "not_started", False
     try:
-        png = await asyncio.to_thread(render_dashboard, report)
-    except Exception as error:  # noqa: BLE001 - rasm chiqmasa ham xulosa yetib borsin
-        logger.warning("Dashboard rasmi chizilmadi: %s", type(error).__name__)
-        png = None
-    if png and len(summary) <= 1024:
-        await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"), caption=summary)
-    elif png:
-        await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"))
-        await bot.send_message(chat_id, summary)
-    else:
-        await bot.send_message(chat_id, summary)
+        period = last_full_period(kind, today)
+        stage_start = time.perf_counter()
+        try:
+            report = await asyncio.to_thread(collect, period)
+        finally:
+            stage_ms["collect"] = round((time.perf_counter() - stage_start) * 1000)
+
+        ai_requested = client is not None and bool(report.totals.graded or report.totals.penalty_count)
+        stage_start = time.perf_counter()
+        try:
+            summary = await ai_summary(client, report)
+        finally:
+            stage_ms["ai"] = round((time.perf_counter() - stage_start) * 1000)
+
+        stage_start = time.perf_counter()
+        try:
+            try:
+                png = await asyncio.to_thread(render_dashboard, report)
+                render_status = "ok"
+            except Exception as error:  # noqa: BLE001 - rasm chiqmasa ham xulosa yetib borsin
+                logger.warning("Dashboard rasmi chizilmadi: %s", type(error).__name__)
+                png, render_status = None, "fallback"
+        finally:
+            stage_ms["render"] = round((time.perf_counter() - stage_start) * 1000)
+
+        stage_start = time.perf_counter()
+        try:
+            if png and len(summary) <= 1024:
+                await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"), caption=summary)
+            elif png:
+                await bot.send_photo(chat_id, BufferedInputFile(png, filename=f"{kind}-{period.start}.png"))
+                await bot.send_message(chat_id, summary)
+            else:
+                await bot.send_message(chat_id, summary)
+        finally:
+            stage_ms["telegram"] = round((time.perf_counter() - stage_start) * 1000)
+        outcome = "ok"
+    finally:
+        try:
+            print(
+                "FOUNDER_REPORT_TIMING "
+                f"kind={kind if kind in ('week', 'month') else 'unknown'} "
+                f"collect_ms={stage_ms['collect']} ai_ms={stage_ms['ai']} "
+                f"render_ms={stage_ms['render']} telegram_ms={stage_ms['telegram']} "
+                f"total_ms={round((time.perf_counter() - started) * 1000)} "
+                f"ai_requested={int(ai_requested)} render_status={render_status} outcome={outcome}",
+                flush=True,
+            )
+        except Exception:  # noqa: BLE001 - faqat diagnostika; botning asl natijasiga tegmasin
+            pass

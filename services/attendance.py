@@ -385,6 +385,37 @@ def _is_late_change(employee_id: int, shift_date: str) -> bool:
     return company_time.now() >= shift_start_dt
 
 
+
+
+def _check_finalized_month(employee_id: int, shift_date: str) -> None:
+    """Never change a star-decided month from legacy schedule paths."""
+    from db import get_connection
+    conn = get_connection()
+    try:
+        if conn.execute(
+            "SELECT 1 FROM star_history WHERE user_id = ? AND year_month = ?",
+            (employee_id, shift_date[:7]),
+        ).fetchone():
+            raise PermissionError("Bu oy yulduz qarori bilan qulflangan.")
+    finally:
+        conn.close()
+
+def _check_nazoratchi_historical_permission(created_by: int | None, shift_date: str) -> None:
+    """Legacy Telegram paths respect Founder's Mini App toggle."""
+    if not created_by or shift_date >= company_time.today().isoformat():
+        return
+    from roles import get_role
+    if get_role(created_by) != "nazoratchi":
+        return
+    from db import get_connection
+    from services.permanent_schedule import can_edit_past
+    conn = get_connection()
+    try:
+        if not can_edit_past(conn):
+            raise PermissionError("Asoschi eski grafikni tahrirlash ruxsatini o'chirgan.")
+    finally:
+        conn.close()
+
 def set_scheduled_work_shift(
     employee_id: int, shift_date: str, start_text: str, end_text: str, source: str,
     created_by: int | None = None, schedule_mode: str | None = None, reason: str | None = None,
@@ -400,6 +431,8 @@ def set_scheduled_work_shift(
     (``resolve_schedule_mode``) olinadi -- faqat audit/ma'lumot uchun,
     UNKNOWN bo'lsa ham yozuvning o'zi baribir amalga oshadi (chunki
     aniq ``start_text``/``end_text`` berilgan)."""
+    _check_finalized_month(employee_id, shift_date)
+    _check_nazoratchi_historical_permission(created_by, shift_date)
     start_parsed = _parse_hhmm(start_text)
     end_parsed = _parse_hhmm(end_text)
     if start_parsed is None or end_parsed is None or start_parsed == end_parsed:
@@ -422,6 +455,8 @@ def set_scheduled_day_off(
     employee_id: int, shift_date: str, source: str, created_by: int | None = None,
     schedule_mode: str | None = None, reason: str | None = None,
 ) -> None:
+    _check_finalized_month(employee_id, shift_date)
+    _check_nazoratchi_historical_permission(created_by, shift_date)
     mode = schedule_mode if schedule_mode is not None else resolve_schedule_mode(employee_id)
     is_late = _is_late_change(employee_id, shift_date)
     attendance_repo.set_day_off(employee_id, shift_date, mode, source, created_by, reason, is_late)
@@ -517,6 +552,11 @@ def decide_schedule_change_request(request_id: int, approved: bool, decided_by: 
     if request is None:
         return False
 
+    if approved:
+        # Before committing an approved request, validate the same guards as direct schedule writes.
+        # Otherwise an approved request could remain without its shift being applied.
+        _check_finalized_month(request["employee_id"], request["shift_date"])
+        _check_nazoratchi_historical_permission(decided_by, request["shift_date"])
     new_status = SCHEDULE_REQUEST_APPROVED if approved else SCHEDULE_REQUEST_REJECTED
     if not attendance_repo.decide_schedule_change_request(
         request_id, SCHEDULE_REQUEST_PENDING, new_status, decided_by

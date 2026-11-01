@@ -58,7 +58,9 @@ def _month(offset: int) -> str:
 def salary_text(profile: dict, year_month: str) -> str:
     v = payroll_view.month_view(profile["user_id"], year_month)
     star = payroll_view.STAR_VALUE_SOM
-    lines = [f"💰 {_name(profile)} — {year_month}" + ("" if v["final"] else " (hozirgacha — yakuniy emas)")]
+    # ``final`` faqat kalendar oy tugaganini bildiradi (oylik tasdiqlandi degani emas); ma'lumot yetishmasa hisob dastlabki.
+    suffix = " (hozirgacha — yakuniy emas)" if not v["final"] else ("" if v["complete"] else " (dastlabki — ma'lumot yetishmaydi)")
+    lines = [f"💰 {_name(profile)} — {year_month}{suffix}"]
     if v.get("worked_minutes") is not None and v.get("plan_minutes"):
         lines.append(f"🕒 Ishlagan: {v['worked_minutes'] // 60} soat / reja {v['plan_minutes'] // 60} soat")
     lines.append(f"📌 Fiks: {_som(v['fixed_amount'])}")
@@ -76,7 +78,8 @@ def salary_text(profile: dict, year_month: str) -> str:
             lines.append(f"🏅 3-tarif mukofoti: {_som(v['tariff_award'])}" + (f" ({v['tariff_note']})" if v.get("tariff_note") else ""))
     if v.get("star_bonus"):
         lines.append(f"🌟 Oylik yulduz bonusi: {_som(v['star_bonus'])}")
-    lines.append(f"\n💵 JAMI{'' if v['final'] else ' (hozirgacha)'}: {_som(v['total_amount'])}")
+    total_label = " (hozirgacha)" if not v["final"] else ("" if v["complete"] else " (dastlabki)")
+    lines.append(f"\n💵 JAMI{total_label}: {_som(v['total_amount'])}")
     notes = list(v["unavailable"].values()) + v["limitations"]
     if notes:
         lines.append("\nℹ️ " + "\nℹ️ ".join(dict.fromkeys(notes)))

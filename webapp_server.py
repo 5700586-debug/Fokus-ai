@@ -122,11 +122,39 @@ def add_routes(app: web.Application, *, bot, bot_token: str, fsm_storage=None) -
 
         return await _handle(request, action, schedule_webapp.can_open)
 
+    async def grafik_permanent(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return schedule_webapp.permanent_info(user_id)
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    async def grafik_permanent_save(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return schedule_webapp.save_permanent(
+                user_id, body.get("employee_id"), body.get("effective_from"),
+                body.get("start"), body.get("end"), body.get("expected_version"),
+                body.get("reason"),
+            )
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    async def grafik_settings(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return schedule_webapp.edit_settings(user_id)
+        return await _handle(request, action, schedule_webapp.can_open)
+
+    async def grafik_settings_save(request: web.Request) -> web.Response:
+        async def action(user_id, body):
+            return schedule_webapp.save_edit_settings(user_id, body.get("allow_nazoratchi_past"))
+        return await _handle(request, action, schedule_webapp.can_open)
+
     app.router.add_get(PAGE_PATH, _page(_PAGE_FILE))
     app.router.add_get(GRAFIK_PATH, _page(_GRAFIK_FILE))
     app.router.add_post("/api/grafik/week", grafik_week)
     app.router.add_post("/api/grafik/save", grafik_save)
     app.router.add_post("/api/grafik/history", grafik_history)
+    app.router.add_post("/api/grafik/permanent", grafik_permanent)
+    app.router.add_post("/api/grafik/permanent/save", grafik_permanent_save)
+    app.router.add_post("/api/grafik/settings", grafik_settings)
+    app.router.add_post("/api/grafik/settings/save", grafik_settings_save)
     app.router.add_post("/api/baholash/day", day)
     app.router.add_post("/api/baholash/grade", grade)
     app.router.add_post("/api/baholash/time", save_time)

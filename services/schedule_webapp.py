@@ -20,7 +20,7 @@ import employees
 from config import SUPERVISION_BRANCH_NAMES
 from db import get_connection
 from repositories import attendance as attendance_repo
-from services import attendance, nazoratchi_day, permissions, work_time
+from services import attendance, nazoratchi_day, permissions, work_time, permanent_schedule
 from services.grading_webapp import WebAppError
 
 MAX_CHANGES = 300
@@ -92,11 +92,9 @@ def _week_data(conn, ids: list[int], first: str, last: str) -> tuple[dict, dict,
     shifts, versions, entries, stars = {}, {}, set(), set()
     if not ids:
         return shifts, versions, entries, stars
-    for row in conn.execute(
-        f"SELECT * FROM employee_scheduled_shifts WHERE employee_id IN ({_in(ids)}) AND shift_date >= ? "
-        "AND shift_date <= ?", (*ids, first, last),
-    ).fetchall():
-        shifts[(row["employee_id"], row["shift_date"])] = dict(row)
+    for emp in ids:
+        for d, shift in permanent_schedule.resolved_range(conn, emp, first, last).items():
+            shifts[(emp, d)] = shift
     for row in conn.execute(
         f"SELECT employee_id, shift_date, MAX(id) AS v FROM employee_schedule_revisions WHERE employee_id IN ({_in(ids)}) "
         "AND shift_date >= ? AND shift_date <= ? GROUP BY employee_id, shift_date", (*ids, first, last),
@@ -131,10 +129,11 @@ def week_payload(user_id: int, week_start=None) -> dict:
     conn = get_connection()
     try:
         shifts, versions, entries, stars = _week_data(conn, ids, days[0], days[-1])
+        past_enabled = permanent_schedule.can_edit_past(conn)
     finally:
         conn.close()
     payload = {
-        "week_start": days[0], "today": now.date().isoformat(), "full": full,
+        "week_start": days[0], "today": now.date().isoformat(), "full": full, "past_edit_enabled": past_enabled, "founder": permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES),
         "days": [{"date": d, "label": WEEKDAYS[i]} for i, d in enumerate(days)],
         "prev_week": (monday - timedelta(days=7)).isoformat(), "next_week": (monday + timedelta(days=7)).isoformat(),
         "branches": [],
@@ -147,13 +146,14 @@ def week_payload(user_id: int, week_start=None) -> dict:
             for d in days:
                 shift = shifts.get((emp, d))
                 started = _started(d, shift, None, (emp, d) in entries, now)
-                lock = LOCK_STAR if (emp, d[:7]) in stars else (LOCK_STARTED if started and not full else None)
+                lock = LOCK_STAR if (emp, d[:7]) in stars else (LOCK_STARTED if started and (not full or (d < now.date().isoformat() and not past_enabled and not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES))) else None)
                 cells.append({
                     "date": d,
                     "status": shift["status"] if shift else None,
+                    "inherited": bool(shift and shift.get("default_id")),
                     "start": shift.get("planned_start") if shift else None,
                     "end": shift.get("planned_end") if shift else None,
-                    "version": versions.get((emp, d), 0),
+                    "version": versions.get((emp, d), -(shift["default_id"]) if shift and shift.get("default_id") else 0),
                     "locked": lock,
                     "late": bool(started and full),  # nazoratchi uchun: o'zgartirsa sabab so'raladi
                 })
@@ -224,13 +224,16 @@ def save(user_id: int, raw_changes, reason) -> dict:
             current = conn.execute(
                 "SELECT MAX(id) AS v FROM employee_schedule_revisions WHERE employee_id = ? AND shift_date = ?", (emp, day),
             ).fetchone()
-            if int(current["v"] or 0) != c["version"]:
+            raw_version = int(current["v"] or 0)
+            current_effective = permanent_schedule.resolved_shift(conn, emp, day)
+            effective_version = raw_version if raw_version else -(current_effective["default_id"]) if current_effective and current_effective.get("default_id") else 0
+            if effective_version != c["version"]:
                 raise WebAppError(409, f"{where}: boshqa joyda o'zgartirilgan — ekran yangilandi, qayta tekshiring.")
             row = conn.execute(
                 "SELECT status, planned_start, planned_end FROM employee_scheduled_shifts WHERE employee_id = ? "
                 "AND shift_date = ?", (emp, day),
             ).fetchone()
-            existing = dict(row) if row else None
+            existing = dict(row) if row else current_effective
             if existing and existing["status"] == c["status"] and (
                 c["status"] == "off" or (existing["planned_start"], existing["planned_end"]) == (c["start"], c["end"])
             ):
@@ -241,6 +244,8 @@ def save(user_id: int, raw_changes, reason) -> dict:
             late = _started(day, existing, c["start"], has_entry, now)
             if late and not full:
                 raise WebAppError(403, f"{where}: smena boshlangan yoki o'tgan — faqat nazoratchi o'zgartiradi.")
+            if day < today and full and not permanent_schedule.can_edit_past(conn) and not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES):
+                raise WebAppError(403, f"{where}: eski kun tahririni Asoschi yopgan.")
             if late and not reason:
                 raise WebAppError(400, f"{where}: boshlangan/o'tgan smena — sabab yozing.")
             attendance_repo._record_schedule_revision(
@@ -267,6 +272,80 @@ def save(user_id: int, raw_changes, reason) -> dict:
     finally:
         conn.close()
     return {"ok": True, "saved": saved, "notify": notify}
+
+
+
+def permanent_info(user_id: int) -> dict:
+    """Only scoped employees; no phone/salary data."""
+    conn = get_connection()
+    try:
+        branches = []
+        for branch in visible_branches(user_id):
+            people = nazoratchi_day.branch_employees(branch, exclude_user_id=user_id)
+            items = []
+            for profile in people:
+                emp = profile["user_id"]
+                row = conn.execute(
+                    "SELECT * FROM employee_schedule_defaults WHERE employee_id = ? "
+                    "ORDER BY effective_from DESC, id DESC LIMIT 1", (emp,),
+                ).fetchone()
+                items.append({"id": emp, "name": nazoratchi_day.full_name(profile),
+                              "default": {"start": row["planned_start"], "end": row["planned_end"],
+                                          "effective_from": row["effective_from"]} if row else None,
+                              "version": permanent_schedule.latest_version(conn, emp)})
+            branches.append({"name": branch, "employees": items})
+        return {"ok": True, "branches": branches}
+    finally:
+        conn.close()
+
+
+def save_permanent(user_id: int, employee_id, effective_from, start, end, expected_version, reason=None) -> dict:
+    if not isinstance(employee_id, int) or isinstance(employee_id, bool) or not isinstance(expected_version, int):
+        raise WebAppError(400, "Noto'g'ri ma'lumot.")
+    if employee_id == user_id:
+        raise WebAppError(403, "O'zingizning grafigingizni o'zgartira olmaysiz.")
+    profile = employees.get_profile(employee_id, include_contacts=False)
+    if profile is None or employees.supervision_branch(profile) not in set(visible_branches(user_id)):
+        raise WebAppError(403, "Bu xodim sizning filialingizda emas.")
+    if employee_id not in {p["user_id"] for p in nazoratchi_day.branch_employees(
+            employees.supervision_branch(profile), exclude_user_id=user_id)}:
+        raise WebAppError(403, "Bu xodimga ruxsat yo'q.")
+    try:
+        applied = permanent_schedule.set_default(
+            employee_id, str(effective_from), str(start), str(end), user_id, expected_version,
+            (str(reason).strip()[:300] or None) if reason else None,
+        )
+    except (ValueError, TypeError) as err:
+        raise WebAppError(409, str(err)) from None
+    return {"ok": True, **applied, "employee_id": employee_id, "effective_from": effective_from,
+            "start": start, "end": end}
+
+
+def edit_settings(user_id: int) -> dict:
+    if not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES):
+        raise WebAppError(403, "Faqat Asoschi.")
+    conn = get_connection()
+    try:
+        return {"ok": True, "allow_nazoratchi_past": permanent_schedule.can_edit_past(conn)}
+    finally:
+        conn.close()
+
+
+def save_edit_settings(user_id: int, enabled) -> dict:
+    if not permissions.has_permission(user_id, permissions.ACTION_MANAGE_ROLES):
+        raise WebAppError(403, "Faqat Asoschi.")
+    if not isinstance(enabled, bool):
+        raise WebAppError(400, "Ruxsat qiymati noto'g'ri.")
+    conn = get_connection()
+    try:
+        changed = permanent_schedule.set_past_permission(conn, enabled, user_id)
+        conn.commit()
+        return {"ok": True, "changed": changed, "allow_nazoratchi_past": enabled}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def notify_text(lines: list[tuple[str, str]]) -> str:

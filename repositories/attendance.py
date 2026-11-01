@@ -67,26 +67,43 @@ def list_events_for_range(employee_id: int, start_date: str, end_date_exclusive:
 
 
 def dashboard_records(employee_id: int, start_date: str, end_date: str, recent_dates: list[str], conn) -> dict:
-    """One bounded read for the /mystars attendance view; reuse events for both summaries."""
+    """One SQL read for events, reasons, daily overrides, and permanent versions."""
+    from datetime import date, timedelta
+    from services.permanent_schedule import _expand_range
+
     placeholders = ", ".join("?" for _ in recent_dates) or "NULL"
     rows = conn.execute(
         "SELECT 'event' AS kind, event_time AS day, event_type, NULL AS planned_start, "
-        "NULL AS planned_end, NULL AS status, NULL AS note FROM attendance_events "
-        "WHERE employee_id = ? AND event_time >= ? AND event_time < ? "
-        "UNION ALL SELECT 'shift', shift_date, NULL, planned_start, planned_end, status, NULL "
+        "NULL AS planned_end, NULL AS status, NULL AS note, NULL AS schedule_id "
+        "FROM attendance_events WHERE employee_id = ? AND event_time >= ? AND event_time < ? "
+        "UNION ALL SELECT 'shift', shift_date, NULL, planned_start, planned_end, status, NULL, id "
         "FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
-        "UNION ALL SELECT 'reason', event_date, NULL, NULL, NULL, reason_status, note "
+        "UNION ALL SELECT 'default', effective_from, NULL, planned_start, planned_end, 'work', NULL, id "
+        "FROM employee_schedule_defaults WHERE employee_id = ? AND effective_from < ? "
+        "UNION ALL SELECT 'reason', event_date, NULL, NULL, NULL, reason_status, note, NULL "
         f"FROM attendance_reasons WHERE employee_id = ? AND event_date IN ({placeholders}) ORDER BY day",
-        (employee_id, start_date, end_date, employee_id, start_date, end_date, employee_id, *recent_dates),
+        (employee_id, start_date, end_date, employee_id, start_date, end_date,
+         employee_id, end_date, employee_id, *recent_dates),
     ).fetchall()
+    versions = [
+        {"id": r["schedule_id"], "employee_id": employee_id, "effective_from": r["day"],
+         "planned_start": r["planned_start"], "planned_end": r["planned_end"]}
+        for r in rows if r["kind"] == "default"
+    ]
+    overrides = {
+        r["day"]: {"shift_date": r["day"], "planned_start": r["planned_start"],
+                   "planned_end": r["planned_end"], "status": r["status"]}
+        for r in rows if r["kind"] == "shift"
+    }
+    last = (date.fromisoformat(end_date) - timedelta(days=1)).isoformat()
+    shifts = _expand_range(start_date, last, versions, overrides)
     return {
         "events": [{"event_time": r["day"], "event_type": r["event_type"]} for r in rows if r["kind"] == "event"],
-        "shifts": [{"shift_date": r["day"], "planned_start": r["planned_start"], "planned_end": r["planned_end"],
-                    "status": r["status"]} for r in rows if r["kind"] == "shift"],
+        "shifts": [{"shift_date": r["shift_date"], "planned_start": r["planned_start"],
+                    "planned_end": r["planned_end"], "status": r["status"]} for r in shifts.values()],
         "reasons": {r["day"]: {"reason_status": r["status"], "note": r["note"]}
                     for r in rows if r["kind"] == "reason"},
     }
-
 
 # ------------------------------------------------- reja smena jadvali --
 
@@ -100,14 +117,11 @@ _SHIFT_UPDATE_CLAUSE = ", ".join(f"{col} = excluded.{col}" for col in _SHIFT_UPS
 def get_shift_for_date(employee_id: int, shift_date: str) -> dict | None:
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?",
-            (employee_id, shift_date),
-        ).fetchone()
+        from services.permanent_schedule import resolved_shift
+        return resolved_shift(conn, employee_id, shift_date)
     finally:
         conn.close()
 
-    return dict(row) if row else None
 
 
 def _record_schedule_revision(
@@ -153,7 +167,11 @@ def set_work_shift(
             "WHERE employee_id = ? AND shift_date = ?",
             (employee_id, shift_date),
         ).fetchone()
-        existing = dict(existing) if existing else None
+        if not existing:
+            from services.permanent_schedule import effective_default
+            existing = effective_default(conn, employee_id, shift_date)
+        else:
+            existing = dict(existing)
 
         _record_schedule_revision(
             conn, employee_id, shift_date, existing, "work", planned_start, planned_end,
@@ -185,7 +203,11 @@ def set_day_off(
             "WHERE employee_id = ? AND shift_date = ?",
             (employee_id, shift_date),
         ).fetchone()
-        existing = dict(existing) if existing else None
+        if not existing:
+            from services.permanent_schedule import effective_default
+            existing = effective_default(conn, employee_id, shift_date)
+        else:
+            existing = dict(existing)
 
         _record_schedule_revision(
             conn, employee_id, shift_date, existing, "off", None, None, created_by, reason, is_late_change,
@@ -224,16 +246,14 @@ def get_schedule_for_range(employee_id: int, start_date: str, end_date_exclusive
     if owns:
         conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date >= ? AND shift_date < ? "
-            "ORDER BY shift_date",
-            (employee_id, start_date, end_date_exclusive),
-        ).fetchall()
+        from datetime import date, timedelta
+        from services.permanent_schedule import resolved_range
+        first = date.fromisoformat(start_date)
+        last = date.fromisoformat(end_date_exclusive) - timedelta(days=1)
+        return list(resolved_range(conn, employee_id, first.isoformat(), last.isoformat()).values()) if last >= first else []
     finally:
         if owns:
             conn.close()
-
-    return [dict(row) for row in rows]
 
 
 # -------------------------------------- grafik o'zgartirish so'rovlari --

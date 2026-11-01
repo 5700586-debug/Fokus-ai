@@ -150,7 +150,11 @@ def set_work_shift(
             "WHERE employee_id = ? AND shift_date = ?",
             (employee_id, shift_date),
         ).fetchone()
-        existing = dict(existing) if existing else None
+        if not existing:
+            from services.permanent_schedule import effective_default
+            existing = effective_default(conn, employee_id, shift_date)
+        else:
+            existing = dict(existing)
 
         _record_schedule_revision(
             conn, employee_id, shift_date, existing, "work", planned_start, planned_end,
@@ -182,7 +186,11 @@ def set_day_off(
             "WHERE employee_id = ? AND shift_date = ?",
             (employee_id, shift_date),
         ).fetchone()
-        existing = dict(existing) if existing else None
+        if not existing:
+            from services.permanent_schedule import effective_default
+            existing = effective_default(conn, employee_id, shift_date)
+        else:
+            existing = dict(existing)
 
         _record_schedule_revision(
             conn, employee_id, shift_date, existing, "off", None, None, created_by, reason, is_late_change,

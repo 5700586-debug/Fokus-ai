@@ -133,3 +133,16 @@ def test_payroll_uses_clamped_daily_minutes_from_november(temp_db, monkeypatch):
     view = pv.month_view(EMP, "2026-11")
     assert view["worked_minutes"] == 600 + 540  # 3-kun 600 (ortig'i yo'q), 4-kun 540 (1 soat kam)
     assert view["time_bonus_days"] == 1  # faqat 07:00 da kelgan kun
+
+
+def test_schedule_change_resyncs_time_bonus(temp_db):
+    """Grafik keyin o'zgarsa (08:00 -> 07:30), 07:50 da kelgan xodimning bonusi avtomatik olib tashlanadi."""
+    from services import attendance
+
+    assert attendance.set_scheduled_work_shift(EMP, "2026-11-06", "08:00", "18:00", "test", created_by=1)
+    wt.save_entry(EMP, "2026-11-06", "07:50", "18:00", entered_by=1)
+    assert _sql("SELECT source FROM time_bonus_grants WHERE employee_id = ?", (EMP,)) == [{"source": "time_entry"}]
+    assert attendance.set_scheduled_work_shift(EMP, "2026-11-06", "07:30", "18:00", "test", created_by=1)
+    assert _sql("SELECT source FROM time_bonus_grants WHERE employee_id = ?", (EMP,)) == []
+    attendance.set_scheduled_day_off(EMP, "2026-11-06", "test", created_by=1)
+    assert wt.month_summary(EMP, "2026-11-01", "2026-11-30")["bonus_days"] == []

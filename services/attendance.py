@@ -18,6 +18,7 @@ import employees
 import company_time
 from repositories import attendance as attendance_repo
 from services import rules as rules_service
+from services import work_time
 
 SOURCE_MANUAL_ENTRY = "manual_nazoratchi_entry"
 SOURCE_SCHEDULE_REQUEST = "employee_schedule_request"
@@ -412,6 +413,8 @@ def set_scheduled_work_shift(
     attendance_repo.set_work_shift(
         employee_id, shift_date, planned_start, planned_end, mode, source, created_by, reason, is_late,
     )
+    # Grafik o'zgarsa, shu kungi kiritilgan kelish vaqti bo'yicha vaqt bonusi qayta hisoblanadi (taxminsiz).
+    work_time.resync_day(employee_id, shift_date, actor=created_by or 0)
     return True
 
 
@@ -422,6 +425,7 @@ def set_scheduled_day_off(
     mode = schedule_mode if schedule_mode is not None else resolve_schedule_mode(employee_id)
     is_late = _is_late_change(employee_id, shift_date)
     attendance_repo.set_day_off(employee_id, shift_date, mode, source, created_by, reason, is_late)
+    work_time.resync_day(employee_id, shift_date, actor=created_by or 0)
 
 
 def apply_daily_work_schedule(

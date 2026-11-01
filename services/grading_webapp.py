@@ -20,7 +20,7 @@ import company_time
 import employees
 from config import SUPERVISION_BRANCH_NAMES
 from repositories import discipline as discipline_repo
-from services import discipline, nazoratchi_day, permissions
+from services import discipline, nazoratchi_day, permissions, work_time
 from services.telegram_webapp import verify_init_data
 
 INIT_DATA_MAX_AGE = 3600
@@ -93,10 +93,87 @@ def day_payload(supervisor_id: int) -> dict:
                 "name": item.name,
                 "status": item.status,
                 "grade": grade["grade_key"] if grade else None,
+                "time": time_payload(item.profile["user_id"], day.work_date),
             })
         if people:
             payload["branches"].append({"name": branch, "closed": branch in closed, "employees": people})
     return payload
+
+
+def _result_payload(result) -> dict:
+    return {"status": result.status, "minutes": result.minutes, "time_bonus": result.time_bonus}
+
+
+def time_payload(employee_id: int, work_date: str) -> dict:
+    """Xodimning shu ish kunidagi grafigi, kiritilgan kelish/ketish, versiya va server hisobi (taxminsiz)."""
+    from db import get_connection
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? AND shift_date = ?", (employee_id, work_date)
+        ).fetchone()
+        shift = dict(row) if row else None
+        entry = work_time.get_entry(employee_id, work_date, conn=conn)
+        version = work_time.current_version(employee_id, work_date, conn=conn)
+    finally:
+        conn.close()
+    arrival, departure = (entry or {}).get("arrival"), (entry or {}).get("departure")
+    payload = {
+        "shift": (f"{shift['planned_start']}–{shift['planned_end']}" if shift and shift.get("status") == "work"
+                  and shift.get("planned_start") and shift.get("planned_end") else None),
+        "day_off": bool(shift and shift.get("status") == "off"),
+        "arrival": arrival,
+        "departure": departure,
+        "version": version,
+        "result": None,
+    }
+    if entry is not None:
+        payload["result"] = _result_payload(work_time.compute_day(work_date, shift, arrival, departure))
+    return payload
+
+
+def _closed_guard(supervisor_id: int, employee_id: int, work_date: str):
+    """``save_entry`` tranzaksiyasi ICHIDA: kun yoki xodim filiali yopilgan bo'lsa — hech narsa yozilmaydi."""
+    branch = employees.supervision_branch(employees.get_profile(employee_id) or {})
+
+    def guard(conn) -> None:
+        if conn.execute(
+            "SELECT 1 FROM daily_closures WHERE supervisor_id = ? AND closure_date = ?", (supervisor_id, work_date)
+        ).fetchone():
+            raise work_time.WorkTimeError("Bu ish kuni yopilgan.")
+        if conn.execute(
+            "SELECT 1 FROM nazoratchi_branch_sessions WHERE supervisor_id = ? AND branch = ? AND session_date = ? "
+            "AND status = 'closed'", (supervisor_id, branch, work_date),
+        ).fetchone():
+            raise work_time.WorkTimeError("Bu filial shu ish kunida yopilgan.")
+
+    return guard
+
+
+def save_time(supervisor_id: int, employee_id, arrival, departure, expected_version) -> dict:
+    """Kelish/ketish (bo'sh maydon — o'zgarmaydi). Sana server ish kuni; eskirgan ekran (versiya farqi) — 409."""
+    if not isinstance(employee_id, int) or isinstance(employee_id, bool):
+        raise WebAppError(400, "Noto'g'ri so'rov.")
+    if expected_version is not None and (not isinstance(expected_version, int) or isinstance(expected_version, bool)):
+        raise WebAppError(400, "Noto'g'ri so'rov.")
+    if not _visible_to(supervisor_id, employee_id):
+        raise WebAppError(403, "Bu xodimni baholay olmaysiz.")
+    now = company_time.now()
+    status = nazoratchi_day.check_active(supervisor_id, nazoratchi_day.current_work_date(now), now)
+    work_date = nazoratchi_day.current_work_date(now)
+    if status is not None:
+        raise WebAppError(409, "Bu ish kuni yopilgan." if status == "closed" else "Ish kuni eskirgan.")
+    try:
+        work_time.save_entry(
+            employee_id, work_date, arrival, departure, supervisor_id,
+            guard=_closed_guard(supervisor_id, employee_id, work_date), expected_version=expected_version,
+        )
+    except work_time.WorkTimeConflict as error:
+        raise WebAppError(409, str(error)) from None
+    except work_time.WorkTimeError as error:
+        raise WebAppError(409 if "yopilgan" in str(error) else 400, str(error)) from None
+    return {"ok": True, "employee_id": employee_id, "time": time_payload(employee_id, work_date)}
 
 
 def _visible_to(supervisor_id: int, employee_id: int) -> bool:

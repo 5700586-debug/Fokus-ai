@@ -36,6 +36,25 @@ class WorkTimeError(ValueError):
     """Foydalanuvchiga ko'rsatiladigan tushunarli xato."""
 
 
+class WorkTimeConflict(WorkTimeError):
+    """Yozuv boshqa joyda (masalan ikkinchi qurilmada) o'zgartirilgan — eskirgan ekran ustidan yozilmaydi."""
+
+
+def current_version(employee_id: int, work_date: str, conn=None) -> int:
+    """Yozuv versiyasi = oxirgi o'zgarish tarixi qatorining id'si (har o'zgarishda qat'iy o'sadi); yozuv yo'q — 0."""
+    owns = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT MAX(id) AS v FROM work_time_entry_revisions WHERE employee_id = ? AND work_date = ?",
+            (employee_id, work_date),
+        ).fetchone()
+        return int(row["v"] or 0)
+    finally:
+        if owns:
+            conn.close()
+
+
 def parse_hhmm(text) -> str | None:
     """"7:59", "07:59" → "07:59". Bo'sh → None. Noto'g'ri → ``WorkTimeError``."""
     if text is None:
@@ -121,7 +140,8 @@ def _shift(employee_id: int, work_date: str, conn) -> dict | None:
     return dict(row) if row else None
 
 
-def save_entry(employee_id: int, work_date: str, arrival, departure, entered_by: int, *, guard=None) -> DayResult:
+def save_entry(employee_id: int, work_date: str, arrival, departure, entered_by: int, *, guard=None,
+               expected_version: int | None = None) -> DayResult:
     """Kelish/ketishni yozadi (bo'sh qiymat — o'zgarmaydi), tarixni saqlaydi va vaqt bonusini sinxronlaydi.
 
     ``guard(conn)`` — shu tranzaksiya ICHIDA chaqiriladi (masalan kun/filial yopilmaganini tekshirish); xato bo'lsa
@@ -135,6 +155,8 @@ def save_entry(employee_id: int, work_date: str, arrival, departure, entered_by:
     try:
         if guard is not None:
             guard(conn)
+        if expected_version is not None and current_version(employee_id, work_date, conn=conn) != expected_version:
+            raise WorkTimeConflict("Bu vaqt boshqa joyda o'zgartirilgan — ekran yangilandi, qayta tekshiring.")
         old = get_entry(employee_id, work_date, conn=conn)
         arrival_value = new_arrival or (old or {}).get("arrival")
         departure_value = new_departure or (old or {}).get("departure")

@@ -106,7 +106,7 @@ def test_day_payload_has_general_branch_and_no_private_fields():
     assert names == [RECRUITING_BRANCH_NAMES[0], SUPERVISION_GENERAL_BRANCH]
     people = [e for b in payload["branches"] for e in b["employees"]]
     assert {e["id"] for e in people} == {CASHIER, DRIVER}
-    assert set(people[0]) == {"id", "name", "status", "grade"}
+    assert set(people[0]) == {"id", "name", "status", "grade", "time"}
     assert "+998" not in json.dumps(payload)
 
 
@@ -246,6 +246,94 @@ async def test_http_routes(bot_dp, monkeypatch):
         body = await graded.json()
         assert graded.status == 200 and body["ok"]
         assert _grades() == [{"employee_id": CASHIER, "eval_date": "2026-11-03", "grade_key": "chala"}]  # sana — serverniki
+
+
+def _shift(employee_id: int, start="08:00", end="18:00") -> None:
+    conn = get_connection()
+    try:
+        conn.execute("INSERT INTO employee_scheduled_shifts (employee_id, shift_date, planned_start, planned_end, status, "
+                     "source, created_at) VALUES (?, '2026-11-03', ?, ?, 'work', 'test', 'x')", (employee_id, start, end))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _time_status(fn) -> int:
+    with pytest.raises(grading_webapp.WebAppError) as error:
+        fn()
+    return error.value.status
+
+
+def test_save_time_shows_only_server_result_and_keeps_blank_unchanged():
+    _seed()
+    _shift(CASHIER)
+    empty = grading_webapp.day_payload(NAZ)["branches"][0]["employees"][0]["time"]
+    assert empty == {"shift": "08:00–18:00", "day_off": False, "arrival": None, "departure": None, "version": 0,
+                     "result": None}
+    first = grading_webapp.save_time(NAZ, CASHIER, "07:59", None, 0)["time"]  # faqat kelish — ruxsat
+    assert first["result"] == {"status": "no_departure", "minutes": 0, "time_bonus": True} and first["version"] > 0
+    second = grading_webapp.save_time(NAZ, CASHIER, None, "18:20", first["version"])["time"]  # bo'sh kelish — o'zgarmaydi
+    assert (second["arrival"], second["departure"]) == ("07:59", "18:20")
+    assert second["result"] == {"status": "ok", "minutes": 600, "time_bonus": True}  # 18:20 -> 18:00 gacha
+    assert second["version"] > first["version"]  # versiya qat'iy o'sadi
+
+
+def test_save_time_stale_screen_gets_409_and_writes_nothing():
+    _seed()
+    _shift(CASHIER)
+    first = grading_webapp.save_time(NAZ, CASHIER, "07:50", "18:00", 0)["time"]
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, CASHIER, "08:30", "18:00", 0)) == 409  # eski ekran
+    from services import work_time
+
+    assert work_time.get_entry(CASHIER, "2026-11-03")["arrival"] == "07:50"
+    assert work_time.current_version(CASHIER, "2026-11-03") == first["version"]
+
+
+def test_save_time_without_schedule_is_saved_but_not_counted():
+    _seed()
+    time = grading_webapp.save_time(NAZ, DRIVER, "07:50", "18:00", 0)["time"]
+    assert time["shift"] is None and time["result"]["status"] == "no_schedule" and not time["result"]["time_bonus"]
+
+
+def test_save_time_rejects_bad_input_invisible_and_closed(monkeypatch):
+    _seed()
+    _shift(CASHIER)
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, "901", "07:50", None, 0)) == 400
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, CASHIER, "07:50", None, "0")) == 400
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, CASHIER, "25:00", None, 0)) == 400
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, FOUNDER_ID, "07:50", None, 0)) == 403
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, 424242, "07:50", None, 0)) == 403
+    from services import nazoratchi_day, work_time
+
+    monkeypatch.setattr(nazoratchi_day, "check_active", lambda *a, **k: None)  # tranzaksiya ichidagi tekshiruv ishlasin
+    conn = get_connection()
+    try:
+        conn.execute("INSERT INTO daily_closures (supervisor_id, closure_date, evaluated_count, total_count, closed_at) "
+                     "VALUES (?, '2026-11-03', 0, 0, 'x')", (NAZ,))
+        conn.commit()
+    finally:
+        conn.close()
+    assert _time_status(lambda: grading_webapp.save_time(NAZ, CASHIER, "07:50", None, 0)) == 409
+    assert work_time.get_entry(CASHIER, "2026-11-03") is None
+
+
+async def test_time_route(bot_dp, monkeypatch):
+    main, bot = bot_dp
+    _seed()
+    _shift(CASHIER)
+    app = web.Application()
+    webapp_server.add_routes(app, bot=bot, bot_token=_token(), fsm_storage=main.dp.storage)
+    monkeypatch.setattr(grading_webapp, "verify_init_data", lambda *a, **k: True)
+    async with test_utils.TestClient(test_utils.TestServer(app)) as client:
+        init = _signed(NAZ, _token())
+        saved = await client.post("/api/baholash/time", json={"initData": init, "employee_id": CASHIER,
+                                                               "arrival": "07:59", "departure": "17:50",
+                                                               "expected_version": 0, "work_date": "2020-01-01"})
+        body = await saved.json()
+        assert saved.status == 200 and body["time"]["result"] == {"status": "ok", "minutes": 590, "time_bonus": True}
+        stale = await client.post("/api/baholash/time", json={"initData": init, "employee_id": CASHIER,
+                                                               "arrival": "08:00", "expected_version": 0})
+        assert stale.status == 409 and not (await stale.json())["ok"]
 
 
 def test_page_url_requires_https(monkeypatch):

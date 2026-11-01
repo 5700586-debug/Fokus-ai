@@ -32,43 +32,68 @@ def resolved_shift(conn, employee_id: int, day: str) -> dict | None:
     return dict(row) if row else effective_default(conn, employee_id, day)
 
 
-def resolved_range(conn, employee_id: int, first: str, last: str) -> dict[str, dict]:
-    """Inclusive, 2 bulk reads rather than one/two SQL queries per calendar day."""
+def _expand_range(first: str, last: str, versions: list[dict], overrides: dict[str, dict]) -> dict[str, dict]:
+    """Pure resolution: one effective default per day, with a daily override taking precedence."""
+    from datetime import timedelta
+
     start, end = date.fromisoformat(first), date.fromisoformat(last)
     if end < start:
         return {}
     if (end - start).days > 93:
         raise ValueError("Grafik davri juda uzun")
-    from datetime import timedelta
-    versions = [
-        dict(row) for row in conn.execute(
-            "SELECT * FROM employee_schedule_defaults WHERE employee_id = ? AND effective_from <= ? "
-            "ORDER BY effective_from, id", (employee_id, last),
-        ).fetchall()
-    ]
-    overrides = {
-        row["shift_date"]: dict(row) for row in conn.execute(
-            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? "
-            "AND shift_date >= ? AND shift_date <= ?", (employee_id, first, last),
-        ).fetchall()
-    }
+
+    ordered = sorted(versions, key=lambda row: (row["effective_from"], row["id"]))
     result: dict[str, dict] = {}
     day, idx, current = start, 0, None
     while day <= end:
         key = day.isoformat()
-        while idx < len(versions) and versions[idx]["effective_from"] <= key:
-            current = versions[idx]
+        while idx < len(ordered) and ordered[idx]["effective_from"] <= key:
+            current = ordered[idx]
             idx += 1
         if key in overrides:
             result[key] = overrides[key]
         elif current is not None:
             result[key] = {
-                "employee_id": employee_id, "shift_date": key, "status": "work",
+                "employee_id": current["employee_id"], "shift_date": key, "status": "work",
                 "planned_start": current["planned_start"], "planned_end": current["planned_end"],
                 "source": "permanent_default", "default_id": current["id"],
             }
         day += timedelta(days=1)
     return result
+
+
+def resolved_range(conn, employee_id: int, first: str, last: str) -> dict[str, dict]:
+    """Inclusive schedule resolved from ONE bulk SQL query, never one query per day."""
+    start, end = date.fromisoformat(first), date.fromisoformat(last)
+    if end < start:
+        return {}
+    if (end - start).days > 93:
+        raise ValueError("Grafik davri juda uzun")
+
+    # A single UNION ALL read keeps default versions and daily overrides together.
+    # The same Python resolver is reused by dashboard_records (already one UNION query).
+    rows = conn.execute(
+        "SELECT 'default' AS row_kind, id, employee_id, effective_from, NULL AS shift_date, "
+        "planned_start, planned_end, 'work' AS status, 'permanent_default' AS source, "
+        "created_by, created_at FROM employee_schedule_defaults "
+        "WHERE employee_id = ? AND effective_from <= ? "
+        "UNION ALL "
+        "SELECT 'shift' AS row_kind, id, employee_id, NULL AS effective_from, shift_date, "
+        "planned_start, planned_end, status, source, created_by, created_at "
+        "FROM employee_scheduled_shifts WHERE employee_id = ? "
+        "AND shift_date >= ? AND shift_date <= ?",
+        (employee_id, last, employee_id, first, last),
+    ).fetchall()
+    versions, overrides = [], {}
+    for raw in rows:
+        row = dict(raw)
+        if row.pop("row_kind") == "default":
+            versions.append(row)
+        else:
+            row.pop("effective_from", None)
+            overrides[row["shift_date"]] = row
+    return _expand_range(first, last, versions, overrides)
+
 
 def latest_version(conn, employee_id: int) -> int:
     row = conn.execute(

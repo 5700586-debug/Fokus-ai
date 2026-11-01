@@ -146,3 +146,137 @@ def test_schedule_change_resyncs_time_bonus(temp_db):
     assert _sql("SELECT source FROM time_bonus_grants WHERE employee_id = ?", (EMP,)) == []
     attendance.set_scheduled_day_off(EMP, "2026-11-06", "test", created_by=1)
     assert wt.month_summary(EMP, "2026-11-01", "2026-11-30")["bonus_days"] == []
+
+
+# ------------------------------------------- yozilmagan kun yakuniy maosh bo'lib chiqmasin --
+
+
+def _november_28_plus_2_off(permitted=(), missing=(), short=(), skip_entries=()):
+    """28 ish kuni (2..29-nov) + 2 tasdiqlangan dam (1 va 30-nov). Kalendar 30 kun, kelishuv 28 kun — aralashmasin."""
+    from datetime import date, timedelta
+
+    _shift("2026-11-01", status="off", start=None, end=None)
+    _shift("2026-11-30", status="off", start=None, end=None)
+    for offset in range(28):
+        day = (date(2026, 11, 2) + timedelta(days=offset)).isoformat()
+        _shift(day)
+        if day in permitted:
+            _sql("INSERT INTO attendance_reasons (employee_id, event_date, reason_status, created_at) VALUES (?, ?, "
+                 "'manager_permission_approved', 'x')", (EMP, day))
+        elif day in missing or day in skip_entries:
+            continue
+        elif day in short:
+            wt.save_entry(EMP, day, "08:30", "18:00", entered_by=1)
+        else:
+            wt.save_entry(EMP, day, "08:00", "18:00", entered_by=1)
+
+
+@pytest.fixture
+def after_november(monkeypatch):
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    import company_time
+
+    monkeypatch.setattr(company_time, "today", lambda: date(2026, 12, 2))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 12, 2, 12, 0, tzinfo=ZoneInfo("Asia/Tashkent")))
+
+
+def test_month_summary_separates_worked_off_permitted_missing_and_short(temp_db, after_november):
+    permitted = ("2026-11-04", "2026-11-11", "2026-11-18")
+    _november_28_plus_2_off(permitted=permitted, missing=("2026-11-20",), short=("2026-11-25",))
+    s = wt.month_summary(EMP, "2026-11-01", "2026-11-30")
+    assert s["days"] == 24 and s["minutes"] == 23 * 600 + 570  # 30 daqiqa kam kun - oddiy ishlangan kun
+    assert s["permitted"] == list(permitted) and s["missing"] == ["2026-11-20"]
+    assert s["day_off"] == ["2026-11-01", "2026-11-30"] and s["unknown"] == [] and s["no_arrival"] == [] and s["no_departure"] == []
+    assert s["ongoing"] == []
+
+
+def test_unknown_schedule_day_is_not_marked_absent(temp_db, after_november):
+    wt.save_entry(EMP, "2026-11-03", "08:00", "18:00", entered_by=1)
+    _shift("2026-11-03")
+    s = wt.month_summary(EMP, "2026-11-01", "2026-11-30")
+    assert s["missing"] == [] and s["permitted"] == []
+    assert len(s["unknown"]) == 29  # grafik ham, davomat ham yo'q: noma'lum (ishga kelmagan EMAS, 0 soat ham EMAS)
+
+
+def test_today_and_overnight_shifts_in_progress_are_not_flagged(temp_db, monkeypatch):
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    import company_time
+
+    monkeypatch.setattr(company_time, "today", lambda: date(2026, 11, 5))
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 11, 5, 3, 0, tzinfo=ZoneInfo("Asia/Tashkent")))
+    _shift("2026-11-04", start="22:00", end="06:00")  # tungi smena hali tugamagan
+    wt.save_entry(EMP, "2026-11-04", "21:55", None, entered_by=1)
+    _shift("2026-11-05")  # bugungi smena hali boshlanmagan, davomat yo'q
+    s = wt.month_summary(EMP, "2026-11-04", "2026-11-05")
+    assert s["no_departure"] == [] and s["missing"] == [] and s["ongoing"] == ["2026-11-04", "2026-11-05"]
+    monkeypatch.setattr(company_time, "now", lambda: datetime(2026, 11, 5, 7, 0, tzinfo=ZoneInfo("Asia/Tashkent")))
+    s = wt.month_summary(EMP, "2026-11-04", "2026-11-05")
+    assert s["no_departure"] == ["2026-11-04"]  # smena tugagach ketish yo'qligi endi aniq muammo
+
+
+def test_missing_arrival_is_separate_from_missing_departure(temp_db, after_november):
+    _shift("2026-11-03")
+    _shift("2026-11-04")
+    wt.save_entry(EMP, "2026-11-03", None, "18:00", entered_by=1)
+    wt.save_entry(EMP, "2026-11-04", "08:00", None, entered_by=1)
+    s = wt.month_summary(EMP, "2026-11-03", "2026-11-04")
+    assert s["no_arrival"] == ["2026-11-03"] and s["no_departure"] == ["2026-11-04"]
+
+
+def _profile(hire_date="2026-01-01"):
+    _sql("INSERT INTO employees (user_id, familiya, ism, branch, status, hire_date) VALUES (?, 'Karimov', 'Vali', 'SATURN A', 'approved', ?)",
+         (EMP, hire_date))
+
+
+def _agreement_28x10():
+    from config import FOUNDER_ID
+    from services import salary_agreement as sa
+
+    sa.save_agreement(EMP, 2_800_000, 28, 600, "2026-01-01", FOUNDER_ID, "wt-m", tariff=1)
+
+
+def test_unrecorded_day_makes_final_month_preliminary_and_names_the_gap(temp_db, after_november):
+    import payroll_bot
+    from services import payroll_view as pv
+
+    _profile()
+    _agreement_28x10()
+    permitted = ("2026-11-04", "2026-11-11", "2026-11-18")
+    _november_28_plus_2_off(permitted=permitted, missing=("2026-11-20",), short=("2026-11-25",))
+    view = pv.month_view(EMP, "2026-11")
+    assert view["final"] is True and view["complete"] is False  # kalendar oy tugadi, lekin ma'lumot to'liq emas
+    text = " ".join(view["limitations"])
+    assert "2026-11-20" in text or "20.11" in text  # yozilmagan kun nomlangan
+    assert "ruxsatli" in text.lower()  # ruxsatli kelmaslik: to'lov qoidasi tasdiqlanmagan, taxmin yo'q
+    assert view["worked_minutes"] == 23 * 600 + 570  # yozilmagan kun uchun 0 soat yozilmagan; 30 daq kam kun oddiy
+    shown = payroll_bot.salary_text({"user_id": EMP, "ism": "Vali", "familiya": "Karimov"}, "2026-11")
+    assert "dastlabki" in shown.lower() and "yakuniy" not in shown.lower().replace("yakuniy emas", "")
+    assert "2026-11-20" in shown or "20.11" in shown
+
+
+def test_complete_month_has_no_false_gap_warning(temp_db, after_november):
+    from services import payroll_view as pv
+
+    _profile()
+    _agreement_28x10()
+    _november_28_plus_2_off()
+    view = pv.month_view(EMP, "2026-11")
+    assert view["limitations"] == []  # 28 ish kuni vs 30 kalendar kun, tasdiqlangan dam: ogohlantirish yo'q
+
+
+def test_new_employee_is_not_flagged_for_days_before_hire(temp_db, after_november):
+    from services import payroll_view as pv
+
+    _profile(hire_date="2026-11-20")
+    _agreement_28x10()
+    for day in ("2026-11-20", "2026-11-21"):
+        _shift(day)
+        wt.save_entry(EMP, day, "08:00", "18:00", entered_by=1)
+    view = pv.month_view(EMP, "2026-11")
+    unknown = [t for t in view["limitations"] if "noma'lum" in t]
+    assert len(unknown) == 1 and unknown[0].startswith("9 kunda")  # faqat ishga kirgandan keyingi 22..30-nov; 1..19-nov hisobga olinmaydi
+    assert not any("davomat kiritilmagan" in t for t in view["limitations"])

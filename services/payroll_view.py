@@ -82,6 +82,31 @@ def _worked(employee_id: int, start: date, last: date, conn) -> dict:
     return {"minutes": minutes, "days": days, "incomplete": incomplete}
 
 
+def _dates(days: list[str]) -> str:
+    shown = ", ".join(f"{d[8:10]}.{d[5:7]}" for d in days[:5])
+    return shown + (f" va yana {len(days) - 5} ta" if len(days) > 5 else "")
+
+
+def _day_gaps(summary: dict) -> list[str]:
+    """Hisobni to'liq emas qiladigan kunlar. Noma'lum/yozilmagan kun ishga kelmagan yoki 0 soat deb olinmaydi;
+    ruxsatli kelmaslik haq to'lanadigan yoki to'lanmaydigan deb hisoblanmaydi (qoida tasdiqlanmagan)."""
+    notes = []
+    if summary["missing"]:
+        notes.append(f"{len(summary['missing'])} kunda davomat kiritilmagan ({_dates(summary['missing'])}) — o'sha kunlar hisoblanmadi")
+    if summary["no_arrival"]:
+        notes.append(f"{len(summary['no_arrival'])} kunda kelish vaqti yo'q ({_dates(summary['no_arrival'])}) — o'sha kunlar hisoblanmadi")
+    if summary["no_departure"]:
+        notes.append(f"{len(summary['no_departure'])} kunda ketish vaqti yo'q ({_dates(summary['no_departure'])}) — o'sha kunlar hisoblanmadi")
+    if summary["permitted"]:
+        notes.append(f"{len(summary['permitted'])} kun ruxsatli kelmaslik ({_dates(summary['permitted'])}) — ishlangan vaqtga kirmaydi, "
+                     "haq to'lanishi qoidasi tasdiqlanmagan")
+    if summary["no_schedule"]:
+        notes.append(f"{len(summary['no_schedule'])} kunda grafik yo'q — o'sha kunlar hisoblanmadi")
+    if summary["unknown"] and (summary["days"] or summary["day_off"] or summary["permitted"] or summary["missing"]):
+        notes.append(f"{len(summary['unknown'])} kunda grafik ham, davomat ham yozilmagan — noma'lum (ishga kelmagan deb belgilanmadi)")
+    return notes
+
+
 def _star_bonus(employee_id: int, year_month: str) -> int:
     """Founder tasdiqlagan oylik yulduz bonusi (``bonus_history``). Tasdiqlanmagan oy — 0."""
     from db import get_connection
@@ -138,11 +163,12 @@ def month_view(employee_id: int, year_month: str) -> dict:
     try:
         if start.isoformat() >= work_time.ENTRIES_START:
             # 2026-11 dan: aniq kelish/ketish, har kun grafik oynasiga kesilgan (yagona manba — aralashma yo'q).
-            summary = work_time.month_summary(employee_id, start.isoformat(), last.isoformat(), conn=conn)
-            worked = {"minutes": summary["minutes"], "days": summary["days"], "incomplete": len(summary["no_departure"]),
-                      "exact": True}
-            if summary["no_schedule"]:
-                limitations.append(f"{len(summary['no_schedule'])} kunda grafik yo'q — o'sha kunlar hisoblanmadi")
+            profile = employees.get_profile(employee_id, conn=conn, include_contacts=False)
+            hire = (profile or {}).get("hire_date")
+            first = max(start.isoformat(), hire) if hire and hire[:10] <= last.isoformat() else start.isoformat()
+            summary = work_time.month_summary(employee_id, first, last.isoformat(), conn=conn)
+            worked = {"minutes": summary["minutes"], "days": summary["days"], "incomplete": 0, "exact": True}
+            limitations += _day_gaps(summary)
         else:
             worked = _worked(employee_id, start, last, conn)
         sources = view_repo.month_sources(employee_id, start.isoformat(), (last + timedelta(days=1)).isoformat(), conn=conn)

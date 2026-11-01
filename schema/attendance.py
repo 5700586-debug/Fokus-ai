@@ -172,4 +172,34 @@ CREATE TABLE IF NOT EXISTS branch_visit_events (
     raw_reference TEXT,
     created_at TEXT NOT NULL
 );
+
+-- Aniq kelish/ketish vaqti (Muhammadiy qarori, 2026-11-01): bitta xodim/ish kuni uchun YAGONA haqiqat.
+-- Nazoratchi Face ID ilovasidan ko'chirib kiritadi; tuzatish = ustidan yozish, eski qiymat revisions'da qoladi.
+-- ``work_date`` — 06:00 ish kuni (smena boshlangan kun); vaqtlar "HH:MM" (kompaniya vaqti).
+-- 2026-11-01 dan ishlangan vaqt va vaqt bonusi FAQAT shu jadvaldan hisoblanadi (``services/work_time``).
+CREATE TABLE IF NOT EXISTS work_time_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    arrival TEXT,
+    departure TEXT,
+    entered_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(employee_id, work_date)
+);
+
+CREATE TABLE IF NOT EXISTS work_time_entry_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    old_arrival TEXT,
+    old_departure TEXT,
+    new_arrival TEXT,
+    new_departure TEXT,
+    changed_by INTEGER NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_time_entries_date ON work_time_entries (work_date);
 """

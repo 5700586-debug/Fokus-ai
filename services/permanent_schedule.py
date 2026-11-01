@@ -33,21 +33,42 @@ def resolved_shift(conn, employee_id: int, day: str) -> dict | None:
 
 
 def resolved_range(conn, employee_id: int, first: str, last: str) -> dict[str, dict]:
-    """Inclusive; only reads, no materialized future rows."""
+    """Inclusive, 2 bulk reads rather than one/two SQL queries per calendar day."""
     start, end = date.fromisoformat(first), date.fromisoformat(last)
+    if end < start:
+        return {}
     if (end - start).days > 93:
         raise ValueError("Grafik davri juda uzun")
     from datetime import timedelta
-    result = {}
-    day = start
+    versions = [
+        dict(row) for row in conn.execute(
+            "SELECT * FROM employee_schedule_defaults WHERE employee_id = ? AND effective_from <= ? "
+            "ORDER BY effective_from, id", (employee_id, last),
+        ).fetchall()
+    ]
+    overrides = {
+        row["shift_date"]: dict(row) for row in conn.execute(
+            "SELECT * FROM employee_scheduled_shifts WHERE employee_id = ? "
+            "AND shift_date >= ? AND shift_date <= ?", (employee_id, first, last),
+        ).fetchall()
+    }
+    result: dict[str, dict] = {}
+    day, idx, current = start, 0, None
     while day <= end:
         key = day.isoformat()
-        value = resolved_shift(conn, employee_id, key)
-        if value:
-            result[key] = value
+        while idx < len(versions) and versions[idx]["effective_from"] <= key:
+            current = versions[idx]
+            idx += 1
+        if key in overrides:
+            result[key] = overrides[key]
+        elif current is not None:
+            result[key] = {
+                "employee_id": employee_id, "shift_date": key, "status": "work",
+                "planned_start": current["planned_start"], "planned_end": current["planned_end"],
+                "source": "permanent_default", "default_id": current["id"],
+            }
         day += timedelta(days=1)
     return result
-
 
 def latest_version(conn, employee_id: int) -> int:
     row = conn.execute(

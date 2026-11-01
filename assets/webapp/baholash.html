@@ -50,6 +50,20 @@
   .note.err { color: var(--g-bajarilmagan); }
   .closed { background: var(--bg); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; color: var(--hint);
             font-size: 13px; }
+  .tm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--bg2); }
+  .tm .sh { font-size: 13px; color: var(--hint); }
+  .tm .sh.warn { color: var(--g-chala); }
+  .tin { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 6px; align-items: end; }
+  .tin label { font-size: 12px; color: var(--hint); display: block; }
+  .tin input { width: 100%; font: inherit; padding: 7px 6px; border: 1.5px solid var(--bg2); border-radius: 10px;
+               background: var(--bg); color: var(--text); }
+  .ts { border: 0; border-radius: 10px; padding: 9px 12px; background: var(--accent); color: var(--accent-text);
+        font-weight: 600; font-size: 13px; }
+  .ts:disabled { opacity: .45; }
+  .card.dirty { box-shadow: 0 0 0 2px var(--g-chala) inset; }
+  .tres { font-size: 13px; margin-top: 6px; }
+  .unsaved { font-size: 12px; color: var(--g-chala); margin-top: 4px; display: none; }
+  .card.dirty .unsaved { display: block; }
 </style>
 </head>
 <body>
@@ -64,7 +78,8 @@
   var tg = window.Telegram && window.Telegram.WebApp;
   var initData = tg ? tg.initData : "";
   var STATUS = { evaluated: "✅ baholandi", pending: "🔵 baholanmagan", off: "🔴 damda", no_schedule: "⚠️ grafik yo'q" };
-  var state = { data: null, branch: null, busy: {} };
+  // drafts: {id: {arrival, departure}} — saqlanmagan vaqtlar; ekran yangilansa ham yo'qolmaydi.
+  var state = { data: null, branch: null, busy: {}, tbusy: {}, drafts: {} };
   var $ = function (id) { return document.getElementById(id); };
 
   function esc(s) {
@@ -104,6 +119,53 @@
     return null;
   }
 
+  function fmtMin(m) { var h = Math.floor(m / 60), r = m % 60; return h + " s" + (r ? " " + r + " d" : ""); }
+
+  // Faqat server hisobini ko'rsatamiz — brauzer o'zi hisoblamaydi.
+  function timeResult(t) {
+    if (t.day_off) return "Dam kuni — hisoblanmaydi.";
+    if (!t.shift) return "⚠️ Grafik yo'q — vaqt hisoblanmaydi.";
+    var r = t.result;
+    if (!r) return "Vaqt hali kiritilmagan.";
+    var bonus = "⏰ Vaqt bonusi: " + (r.time_bonus ? "✅ bor" : "— yo'q");
+    if (r.status === "ok") return bonus + " · Ishladi: " + fmtMin(r.minutes);
+    if (r.status === "no_departure") return bonus + " · Ketish kiritilmagan — ish vaqti hisoblanmadi.";
+    if (r.status === "no_arrival") return "Kelish kiritilmagan — hisoblanmadi.";
+    return "Hisoblanmadi.";
+  }
+
+  function isDirty(e) {
+    var d = state.drafts[e.id];
+    if (!d || !e.time) return false;
+    return (d.arrival !== undefined && d.arrival !== (e.time.arrival || "")) ||
+      (d.departure !== undefined && d.departure !== (e.time.departure || ""));
+  }
+
+  function timeBlock(e, closed) {
+    var t = e.time;
+    if (!t) return "";
+    var d = state.drafts[e.id] || {};
+    var arr = d.arrival !== undefined ? d.arrival : (t.arrival || "");
+    var dep = d.departure !== undefined ? d.departure : (t.departure || "");
+    var dis = closed || state.tbusy[e.id] ? " disabled" : "";
+    var sh = t.shift ? '<div class="sh">🕒 Grafik: ' + esc(t.shift) + "</div>"
+      : '<div class="sh warn">' + (t.day_off ? "🔴 Dam kuni" : "⚠️ Grafik yo'q") + "</div>";
+    return '<div class="tm">' + sh +
+      '<div class="tin"><div><label>Keldi</label><input type="time" data-t="arrival" data-e="' + e.id + '" value="' +
+      esc(arr) + '"' + dis + "></div>" +
+      '<div><label>Ketdi</label><input type="time" data-t="departure" data-e="' + e.id + '" value="' + esc(dep) + '"' +
+      dis + "></div>" +
+      '<button class="ts" data-e="' + e.id + '"' + dis + ">Saqlash</button></div>" +
+      '<div class="unsaved">● saqlanmagan</div>' +
+      '<div class="tres">' + esc(timeResult(t)) + "</div>" +
+      (e.timeNote ? '<div class="note' + (e.timeNoteErr ? " err" : "") + '">' + esc(e.timeNote) + "</div>" : "") +
+      "</div>";
+  }
+
+  function dirtyInBranch(b) {
+    return b ? b.employees.some(function (e) { return isDirty(e); }) : false;
+  }
+
   function renderList() {
     var b = currentBranch();
     if (!b) { $("list").innerHTML = '<div class="msg">Baholanadigan xodim yo\'q.</div>'; return; }
@@ -112,13 +174,15 @@
     html += b.employees.map(function (e) {
       var st = e.grade ? "✅ baholandi" : (STATUS[e.status] || "");
       var dis = b.closed || state.busy[e.id] ? " disabled" : "";
-      return '<div class="card" id="e' + e.id + '"><div class="row1"><div class="name">' + esc(e.name) + "</div>" +
+      return '<div class="card' + (isDirty(e) ? " dirty" : "") + '" id="e' + e.id + '"><div class="row1"><div class="name">' +
+        esc(e.name) + "</div>" +
         '<div class="st' + (e.grade ? " done" : "") + '">' + st + "</div></div>" +
         '<div class="btns">' + grades.map(function (g) {
           return '<button class="g' + (e.grade === g.key ? " sel" : "") + '" data-e="' + e.id + '" data-k="' + g.key + '"' +
             dis + ">" + esc(g.label) + "</button>";
         }).join("") + "</div>" +
-        (e.note ? '<div class="note' + (e.noteErr ? " err" : "") + '">' + esc(e.note) + "</div>" : "") + "</div>";
+        (e.note ? '<div class="note' + (e.noteErr ? " err" : "") + '">' + esc(e.note) + "</div>" : "") +
+        timeBlock(e, b.closed) + "</div>";
     }).join("");
     $("list").innerHTML = html;
   }
@@ -145,9 +209,14 @@
       if (!j.ok) { $("sub").textContent = ""; $("list").innerHTML = '<div class="msg">' + esc(j.error || "Xato") + "</div>"; return; }
       if (keepNotes && state.data) {
         var notes = {};
-        state.data.branches.forEach(function (b) { b.employees.forEach(function (e) { if (e.note) notes[e.id] = e; }); });
+        state.data.branches.forEach(function (b) { b.employees.forEach(function (e) {
+          if (e.note || e.timeNote) notes[e.id] = e;
+        }); });
         j.branches.forEach(function (b) { b.employees.forEach(function (e) {
-          if (notes[e.id]) { e.note = notes[e.id].note; e.noteErr = notes[e.id].noteErr; }
+          if (notes[e.id]) {
+            e.note = notes[e.id].note; e.noteErr = notes[e.id].noteErr;
+            e.timeNote = notes[e.id].timeNote; e.timeNoteErr = notes[e.id].timeNoteErr;
+          }
           if (check && e.id === check.id) {
             // Server holati — haqiqat: eski "aloqa uzildi" yozuvi qolmaydi.
             if (e.grade === check.key) { e.note = "✅ Tekshirildi: baho saqlangan."; e.noteErr = false; }
@@ -209,14 +278,72 @@
     });
   }
 
+  // Kelish/ketish: bo'sh maydon — o'zgarmaydi (server eski qiymatni saqlaydi). Natija faqat serverdan.
+  function sendTime(id) {
+    var e = findEmp(id);
+    if (!e || !e.time || state.tbusy[id]) return;
+    var d = state.drafts[id] || {};
+    var arr = d.arrival !== undefined ? d.arrival : (e.time.arrival || "");
+    var dep = d.departure !== undefined ? d.departure : (e.time.departure || "");
+    if (!arr && !dep) { e.timeNote = "Kelish yoki ketish vaqtini kiriting."; e.timeNoteErr = true; renderList(); return; }
+    state.tbusy[id] = true;
+    e.timeNote = "Saqlanmoqda…"; e.timeNoteErr = false;
+    renderList();
+    api("/api/baholash/time", { employee_id: id, arrival: arr || null, departure: dep || null,
+                                expected_version: e.time.version }).then(function (j) {
+      state.tbusy[id] = false;
+      if (j.ok) {
+        e.time = j.time;
+        delete state.drafts[id];
+        e.timeNote = "✅ Vaqt saqlandi."; e.timeNoteErr = false;
+        haptic("success");
+        renderList();
+      } else {
+        e.timeNote = j.error || "Saqlanmadi."; e.timeNoteErr = true;
+        haptic("error");
+        if (j._status === 409) delete state.drafts[id];  // eskirgan ekran — yangi holatni ko'rib qayta kiritadi
+        load(true);  // har qanday xatoda haqiqiy holatni serverdan olamiz; boshqa xodimlar qoralamasi qoladi
+      }
+    }).catch(function () {
+      state.tbusy[id] = false;
+      e.timeNote = "Aloqa uzildi — holat tekshirilmoqda. Vaqtni qayta tekshiring."; e.timeNoteErr = true;
+      load(true);
+    });
+  }
+
+  function switchBranch(name) {
+    state.branch = name;
+    renderTabs(); renderList();
+    window.scrollTo(0, 0);
+  }
+
   $("tabs").addEventListener("click", function (ev) {
     var t = ev.target.closest(".tab");
     if (!t) return;
-    state.branch = state.data.branches[+t.getAttribute("data-i")].name;
-    renderTabs(); renderList();
-    window.scrollTo(0, 0);
+    var name = state.data.branches[+t.getAttribute("data-i")].name;
+    if (name === state.branch) return;
+    if (dirtyInBranch(currentBranch())) {
+      var text = "Bu filialda saqlanmagan vaqtlar bor. Baribir o'tasizmi? (qoralama yo'qolmaydi)";
+      try { tg.showConfirm(text, function (ok) { if (ok) switchBranch(name); }); }
+      catch (e) { if (window.confirm(text)) switchBranch(name); }
+      return;
+    }
+    switchBranch(name);
+  });
+  $("list").addEventListener("input", function (ev) {
+    var inp = ev.target.closest("input[data-t]");
+    if (!inp) return;
+    var id = +inp.getAttribute("data-e");
+    var e = findEmp(id);
+    if (!e) return;
+    var d = state.drafts[id] || (state.drafts[id] = {});
+    d[inp.getAttribute("data-t")] = inp.value;
+    var card = $("e" + id);
+    if (card) card.classList.toggle("dirty", isDirty(e));  // qayta chizmaymiz — klaviatura yopilmasin
   });
   $("list").addEventListener("click", function (ev) {
+    var s = ev.target.closest(".ts");
+    if (s) { if (!s.disabled) sendTime(+s.getAttribute("data-e")); return; }
     var b = ev.target.closest(".g");
     if (!b || b.disabled) return;
     sendGrade(+b.getAttribute("data-e"), b.getAttribute("data-k"));

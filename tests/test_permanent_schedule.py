@@ -1,5 +1,5 @@
 """Doimiy grafik va istisno kunlar: maoshga tegadigan xavflar uchun targeted regressiyalar."""
-from datetime import datetime
+from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import pytest
 from config import FOUNDER_ID, RECRUITING_BRANCH_NAMES
@@ -24,6 +24,7 @@ def sql(query, params=()):
 def clock(monkeypatch):
     monkeypatch.setattr(company_time, "now",
                         lambda: datetime(2026, 11, 3, 12, 0, tzinfo=ZoneInfo("Asia/Tashkent")))
+    monkeypatch.setattr(company_time, "today", lambda: date(2026, 11, 3))
 
 
 def seed():

@@ -2571,6 +2571,26 @@ def register(dp: Dispatcher, openai_client) -> None:
 
         await _render_schedule_requests(callback)
 
+    @dp.message(Command("grafikekran"))
+    async def schedule_screen_open(message: Message) -> None:
+        """🗓 Grafik ekrani (Mini App): nazoratchi — hamma filial, filial rahbari — o'z filiali, boshlanmagan smenalar."""
+        if not await permissions.ensure_permission(message, permissions.ACTION_EDIT_BRANCH_SCHEDULE):
+            return
+        import webapp_server
+        from aiogram.types import WebAppInfo
+
+        url = webapp_server.page_url(webapp_server.GRAFIK_PATH)
+        if not url:
+            await message.answer("Grafik ekrani hozircha sozlanmagan.")
+            return
+        await message.answer(
+            "🗓 Haftalik grafik: katakni bosing → vaqt yoki «dam» → «Saqlash».\n"
+            "O'zgargan kunlar haqida xodimga xabar boradi.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🗓 Grafik ekranini ochish", web_app=WebAppInfo(url=url))]
+            ]),
+        )
+
     @dp.message(Command("grafiksorov"))
     async def schedule_requests_start(message: Message) -> None:
         if not await permissions.ensure_permission(message, permissions.ACTION_MANAGE_DAILY_SCHEDULE):

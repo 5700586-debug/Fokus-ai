@@ -84,7 +84,7 @@ def dashboard_records(employee_id: int, start_date: str, end_date: str, recent_d
     return {
         "events": [{"event_time": r["day"], "event_type": r["event_type"]} for r in rows if r["kind"] == "event"],
         "shifts": [{"shift_date": r["shift_date"], "planned_start": r["planned_start"], "planned_end": r["planned_end"],
-                    "status": r["status"]} for r in shifts,
+                    "status": r["status"]} for r in shifts],
         "reasons": {r["day"]: {"reason_status": r["status"], "note": r["note"]}
                     for r in rows if r["kind"] == "reason"},
     }

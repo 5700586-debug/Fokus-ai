@@ -295,6 +295,8 @@ def permanent_info(user_id: int) -> dict:
                               "version": permanent_schedule.latest_version(conn, emp)})
             branches.append({"name": branch, "employees": items})
         return {"ok": True, "branches": branches}
+    finally:
+        conn.close()
 
 
 def save_permanent(user_id: int, employee_id, effective_from, start, end, expected_version, reason=None) -> dict:

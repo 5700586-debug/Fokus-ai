@@ -110,3 +110,35 @@ def test_today_and_past_cannot_be_used_as_permanent_effective_date():
         ps.set_default(903, "2026-11-03", "14:00", "22:00", 902, 0)
     with pytest.raises(ps.ScheduleConflict):
         ps.set_default(903, "2026-11-02", "08:00", "18:00", 902, 0)
+
+
+def test_dashboard_and_permanent_info_read_inherited_default():
+    seed()
+    ps.set_default(903, "2026-11-04", "08:00", "18:00", 902, 0)
+    from repositories import attendance as attendance_repo
+    conn = get_connection()
+    try:
+        data = attendance_repo.dashboard_records(903, "2026-11-03", "2026-11-07", [], conn)
+    finally:
+        conn.close()
+    assert [s["shift_date"] for s in data["shifts"]] == ["2026-11-04", "2026-11-05", "2026-11-06"]
+    assert all(s["planned_start"] == "08:00" for s in data["shifts"])
+    branch = sw.permanent_info(902)["branches"][0]
+    assert next(e for e in branch["employees"] if e["id"] == 903)["default"]["start"] == "08:00"
+
+
+def test_legacy_paths_respect_founder_toggle_and_star_lock():
+    seed()
+    from services import attendance
+    sw.save_edit_settings(FOUNDER_ID, False)
+    with pytest.raises(PermissionError):
+        attendance.set_scheduled_work_shift(903, "2026-11-01", "08:00", "18:00", "test", created_by=901, reason="x")
+    with pytest.raises(PermissionError):
+        attendance.set_scheduled_day_off(903, "2026-11-01", "test", created_by=901, reason="x")
+    attendance.set_scheduled_work_shift(903, "2026-11-05", "08:00", "18:00", "test", created_by=901)  # kelajak: ruxsat
+    sw.save_edit_settings(FOUNDER_ID, True)
+    sql("INSERT INTO star_history(user_id, year_month, previous_stars, new_stars, change, reason, created_at) VALUES(903,'2026-11',0,1,1,'x','x')")
+    with pytest.raises(PermissionError):
+        attendance.set_scheduled_work_shift(903, "2026-11-05", "09:00", "19:00", "test", created_by=901)
+    assert sql("SELECT planned_start FROM employee_scheduled_shifts WHERE employee_id=903 AND shift_date='2026-11-05'") == [
+        {"planned_start": "08:00"}]

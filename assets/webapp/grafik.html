@@ -334,7 +334,7 @@
         '<div><label>Xodim</label><select id="dp-employee" style="width:100%;padding:10px">' +
         b.employees.map(function (e) { return '<option value="' + e.id + '">' + esc(e.name) + '</option>'; }).join('') +
         '</select></div><div id="dp-current" class="sub"></div>' +
-        '<div><label>Qachondan</label><input type="date" id="dp-date" value="' + state.data.today + '" style="width:100%;padding:10px"></div>' +
+        '<div><label>Qachondan</label><input type="date" id="dp-date" value="' + (function () { var d = new Date(state.data.today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0,10); })() + '" style="width:100%;padding:10px"></div>' +
         '<div class="tin"><div><label>Boshlanish</label><input type="time" id="dp-start" value="08:00"></div>' +
         '<div><label>Tugash</label><input type="time" id="dp-end" value="18:00"></div></div>' +
         '<div><label>Sabab (ixtiyoriy)</label><input id="dp-reason" maxlength="300"></div>' +

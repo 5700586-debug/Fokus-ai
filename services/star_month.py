@@ -112,12 +112,13 @@ def evaluate(year_month: str) -> list[Decision]:
         exact = start >= work_time.ENTRIES_START  # 2026-11 dan: aniq kelish/ketish yagona manba
         complete_days: dict[int, set] = {}
         if exact:
-            shifts = {(row["employee_id"], row["shift_date"]): row for row in _rows(
-                conn, "SELECT * FROM employee_scheduled_shifts WHERE shift_date >= ? AND shift_date <= ?", (start, end))}
+            from services.permanent_schedule import resolved_shift
+            shifts = {}
+            # Only actual time entries require a schedule; resolve exact date rather than inventing days.
             for row in _rows(conn, "SELECT employee_id, work_date, arrival, departure FROM work_time_entries "
                                    "WHERE work_date >= ? AND work_date <= ?", (start, end)):
                 arrivals.setdefault(row["employee_id"], set()).add(row["work_date"])
-                result = work_time.compute_day(row["work_date"], shifts.get((row["employee_id"], row["work_date"])),
+                result = work_time.compute_day(row["work_date"], resolved_shift(conn, row["employee_id"], row["work_date"]),
                                                row["arrival"], row["departure"])
                 if result.status == work_time.STATUS_OK:
                     complete_days.setdefault(row["employee_id"], set()).add(row["work_date"])

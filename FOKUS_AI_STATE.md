@@ -1,12 +1,17 @@
 # FOKUS AI — joriy holat
 
-Tekshirilgan: 2026-11-01, manba: main HEAD `d118277` (+ PR3 branch feat/grafik-ui)
+Tekshirilgan: 2026-11-01, manba: main HEAD `d7c3404` (+ PR4 branch feat/leader-bonus)
 
 Bu fayl faqat tekshirilgan faktlarni saqlaydi. Qarorlar, g'oyalar va qoidalar — `FOKUS_AI_XOTIRA.md` da. Ziddiyat bo'lsa real Git/GitHub/Render holati ustun.
 
 ## Holat yangilanishi (2026-11-01, Sodiq tekshirgan)
 - LIVE (main'da, Render'da, Traceback yo'q): PR #87 oylik yulduz (f9a71a0), PR #88 vaqt bonusi/fiks chegarasi/qo'shimcha ish yulduzi (701e782), PR #89 3-tarif mukofoti + yulduz bonusi Jamiga + "💰 Xodim maoshi" + filial rahbari faqat o'z filialiga (1b6d9fd), PR #90 "Umumiy (filialsiz)" bo'lim (696f535), PR #91 📱 Baholash ekrani (a0a2ffb). Quyidagi "Draft" belgili maosh/yulduz/hisobot bo'limlari — merge qilingan.
 - Test asosi: sqlite 0 FAIL; postgres 4 eski FAIL (test_handler_metrics ×2, test_mystars_roundtrips ×2 — SQLite'ga xos instrumentatsiya).
+
+## 👔 Filial rahbari kunlik jamoa bonusi — PR4 (2026-11-01)
+- PR #97 🗓 Grafik ekrani LIVE (d7c3404), Render Traceback yo'q.
+- `services/leader_bonus.py`: savdo_boshligi kunlik ⭐ = VAQT (rejadagi hamma o'z vaqtida → 2, ≥80% → 1, aks holda 0) + ISH (jamoa o'rtacha bahosi, bir kasr). Maks 5. Asos grafik — ish kunidan bir kun oldin 00:00 holati, keyingi o'zgarish faqat nazoratchi/Founder qilgan bo'lsa. Kelish kiritilmagan / grafik yo'q / baholanmagan bo'lsa o'sha qism 0 va sababi.
+- Filial nazorati yopilgach `leader_daily_results`da muhrlanadi (tick har 5 daqiqa, `leader_daily_results` job), rahbarga bitta xabar. payroll_view: rahbar ish/vaqt bonusi — jamoa natijasidan (o'z bahosi to'lanmaydi). 2026-11-01 dan.
 
 ## Aniq ish vaqti, Keldi/Ketdi, Grafik ekrani (2026-11-01)
 - LIVE: PR #95 aniq ish vaqti yadrosi (874c0f7), PR #96 Baholash ekranida Keldi/Ketdi (d118277). Render LIVE, Traceback yo'q. Testlar: sqlite 0 FAIL; postgres faqat 4 eski FAIL.

@@ -98,7 +98,7 @@ Robot (Claude Code) ishga tushirish usuli
 
 ✅ Aniq ish vaqti (Muhammadiy, 2026-11-01): vaqt minut aniqligida kiritiladi; vaqt bonusi faqat grafik boshlanishidan OLDIN kelganda (07:59 → ha, 08:00 → yo'q) — erta kelish madaniyati uchun, erta ketsa ham qoladi; ishlangan vaqt = [max(kelish, boshlanish), min(ketish, tugash)] (18:20 → 18:00 gacha, 17:50 → 17:50); ortiqcha ish faqat qo'shimcha ish yulduzi orqali; Keldi/Ketdi'ni nazoratchi baholashda kiritadi, bonus va daqiqani bot grafikdan chiqaradi.
 ✅ Grafik tahriri — c varianti (Muhammadiy, 2026-11-01): filial rahbari o'z filialini, nazoratchi hammasini tahrirlaydi; o'zgarish tarixi saqlanadi.
-💡 Filial rahbari bonusi xodimlari vaqt bonusiga bog'liq (Muhammadiy, 2026-11-01, NEW): tavsiya — oylik ulush (sababli kunlarsiz, rahbar kechiktirgan smenalarsiz), pog'onali (masalan ≥95% to'liq, 90–94% yarim). Chegara Muhammadiy qarorini kutmoqda.
+✅ Filial rahbari bonusi (Muhammadiy, 2026-11-01): bonus hozirgi holat uchun emas, kerakli darajaga yetkazish uchun; shu oydan; har kuni ⭐ — jamoa o'z vaqtida kelishi (hammasi 2, ≥80% 1) + jamoa o'rtacha ish bahosi; kun yopilgach xabar. Rahbarning kechki grafik o'zgarishi foyda bermaydi; to'liq bo'lmagan ma'lumot — 0 (taxmin yo'q).
 
 ## 5. Kelajak g'oyalari (tasdiqlanmagan yoki qisman)
 💡 Bot + Mini App bo'linishi (3-qism). Bot: xabar beradi, eslatadi, savol beradi, tasdiqlaydi. Mini App: ko'rsatadi, boshqaradi, taqqoslaydi. Hozir Mini App ga tegilmaydi.

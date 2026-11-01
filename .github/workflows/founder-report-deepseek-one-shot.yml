@@ -35,13 +35,13 @@ jobs:
           from urllib import request
 
           REPO = "5700586-debug/Fokus-ai"
-          MARKER = "ci(deepseek): retry founder report static audit with safe stage"
+          MARKER = "ci(deepseek): fix trailing newline snippet ranges"
           SECTIONS = (
               ("services/period_report.py", ((146, 153), (285, 289), (297, 304),
-                                              (339, 352), (470, 476), (482, 503))),
+                                              (339, 352), (470, 476), (482, 502))),
               ("discipline_bot.py", ((1023, 1037),)),
               ("main.py", ((103, 109),)),
-              ("tests/test_period_report.py", ((95, 106), (120, 127))),
+              ("tests/test_period_report.py", ((95, 106), (120, 126))),
           )
           EVIDENCE = (
               "Render production main=d7c3404. Founder report 2026-11-01 19:50 UTC: "
